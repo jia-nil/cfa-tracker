@@ -2,65 +2,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const SB_AUTH = {
-  async signInGoogle() {
-    window.location.href = `${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;
-  },
-  async signInEmail(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method:"POST", headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
-      body: JSON.stringify({email, password})
-    });
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error_description||d.message||"Login failed");
-    return d;
-  },
-  async signUp(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
-      method:"POST", headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
-      body: JSON.stringify({email, password})
-    });
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error_description||d.message||"Sign up failed");
-    return d;
-  },
-  async signOut(token) {
-    await fetch(`${SB_URL}/auth/v1/logout`, {
-      method:"POST", headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}
-    });
-    localStorage.removeItem("slothr_auth");
-  },
-  async getUser(token) {
-    const r = await fetch(`${SB_URL}/auth/v1/user`, {
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}
-    });
-    return r.ok ? r.json() : null;
-  },
-  async saveData(table, data, token) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method:"POST",
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=representation"},
-      body: JSON.stringify(data)
-    });
-    return r.ok ? r.json() : null;
-  },
-  async loadData(table, userId, token) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*&order=created_at.asc`, {
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}
-    });
-    return r.ok ? r.json() : [];
-  },
-};
-
-
 
 function parseMath(raw) {
+  
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-   
+    
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -93,10 +43,10 @@ function parseMath(raw) {
         out.push({ t: 'sqrt', inner });
         i = i2; continue;
       }
-     
+      // trig inverses: \tan^{-1}
       if ((cmd === 'tan' || cmd === 'sin' || cmd === 'cos') && raw.slice(i, i+4) === '^{-1') {
         out.push({ t: 'txt', v: cmd + '\u207b\u00b9' }); // ⁻¹
-        i += 5; continue; 
+        i += 5; continue; // skip ^{-1}
       }
       const SYMS = {
         alpha:'α',beta:'β',gamma:'γ',delta:'δ',Delta:'Δ',theta:'θ',phi:'φ',
@@ -115,7 +65,7 @@ function parseMath(raw) {
       continue;
     }
 
-    
+    // superscript  ^{...} or ^digit
     if (ch === '^') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -125,6 +75,7 @@ function parseMath(raw) {
       if (/\d/.test(raw[i+1])) { out.push({ t: 'sup', v: raw[i+1] }); i+=2; continue; }
     }
 
+    // subscript  _{...} or _digit
     if (ch === '_') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -227,12 +178,23 @@ function renderMath(text) {
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NTA SIMULATION — Practice Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLOTHR — NTA JEE MAINS SIMULATION
+// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
+// Students add their own questions via the admin panel (slothr-admin.jsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
-const today= ()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
 
-
+// ── Select component ──────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
@@ -245,7 +207,7 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-
+// ── Theme ─────────────────────────────────────────────────────────────────────
 const THEME = {
   dark:{
     bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
@@ -263,7 +225,95 @@ const THEME = {
   },
 };
 
+// ── Ad config — replace with real values when AdSense is approved ─────────────
+const ADSENSE_PUB   = "ca-pub-XXXXXXXXXXXXXXXX";
+const ADSENSE_READY = false; // flip to true once AdSense approves you
+const AD_SLOTS      = { rewarded:"1234567890", interstitial:"0987654321" };
+const INTERSTITIAL_EVERY = 3;
+
 // ── Rewarded Ad Modal ─────────────────────────────────────────────────────────
+function MockRewardedAd({onComplete,onSkip,d}){
+  const [secs,setSecs]=useState(15);
+  const [done,setDone]=useState(false);
+  useEffect(()=>{
+    const t=setInterval(()=>setSecs(s=>{if(s<=1){clearInterval(t);setDone(true);return 0;}return s-1;}),1000);
+    return()=>clearInterval(t);
+  },[]);
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,.88)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(8px)"}}>
+      <div style={{width:360,background:d.card,borderRadius:16,overflow:"hidden",border:`1px solid ${d.b}`}}>
+        <div style={{height:200,background:d.hover,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,borderBottom:`1px solid ${d.b}`}}>
+          {ADSENSE_READY?(
+            <ins className="adsbygoogle" style={{display:"block",width:"100%",height:"200px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.rewarded} data-ad-format="fluid"/>
+          ):(
+            <><div style={{fontSize:36}}>📺</div><div style={{fontSize:13,color:d.t3,fontWeight:500}}>ad placeholder</div><div style={{fontSize:11,color:d.t4}}>swap with real AdSense rewarded unit</div></>
+          )}
+        </div>
+        <div style={{padding:"18px 20px"}}>
+          <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:4}}>watch this to unlock AI</div>
+          <div style={{fontSize:11.5,color:d.t3,marginBottom:16}}>one short ad = one AI use. fair trade.</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {done?(
+              <button onClick={onComplete} style={{flex:1,padding:"11px",borderRadius:3,background:"#5eaa8a",color:"#fff",border:"none",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ claim AI use →</button>
+            ):(
+              <button disabled style={{flex:1,padding:"11px",borderRadius:3,background:d.hover,color:d.t3,border:`1px solid ${d.b}`,fontFamily:"inherit",fontSize:13,cursor:"not-allowed"}}>unlocks in {secs}s…</button>
+            )}
+            <button onClick={onSkip} style={{padding:"11px 14px",borderRadius:3,background:"none",color:d.t4,border:`1px solid ${d.b}`,fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>skip</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Interstitial Ad ───────────────────────────────────────────────────────────
+function InterstitialAd({onClose,d}){
+  const [secs,setSecs]=useState(5);
+  useEffect(()=>{
+    const t=setInterval(()=>setSecs(s=>{if(s<=1){clearInterval(t);return 0;}return s-1;}),1000);
+    return()=>clearInterval(t);
+  },[]);
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:190,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(6px)"}}>
+      <div style={{width:420,background:d.card,borderRadius:16,overflow:"hidden",border:`1px solid ${d.b}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:`1px solid ${d.b}`}}>
+          <span style={{fontSize:10,color:d.t4,letterSpacing:".06em",textTransform:"uppercase"}}>advertisement</span>
+          <button onClick={secs===0?onClose:undefined} disabled={secs>0}
+            style={{padding:"5px 13px",borderRadius:6,background:secs===0?"#5eaa8a":d.hover,color:secs===0?"#fff":d.t4,border:"none",fontFamily:"inherit",fontSize:11,cursor:secs===0?"pointer":"not-allowed",transition:"all .2s",fontWeight:secs===0?600:400}}>
+            {secs>0?`close in ${secs}s`:"close ✕"}
+          </button>
+        </div>
+        <div style={{height:250,background:d.hover,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+          {ADSENSE_READY?(
+            <ins className="adsbygoogle" style={{display:"block",width:"100%",height:"250px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.interstitial} data-ad-format="fluid"/>
+          ):(
+            <><div style={{fontSize:36}}>🎯</div><div style={{fontSize:13,color:d.t3,fontWeight:500}}>ad placeholder</div><div style={{fontSize:11,color:d.t4}}>swap with AdSense interstitial unit</div></>
+          )}
+        </div>
+        <div style={{padding:"10px 16px",borderTop:`1px solid ${d.b}`}}>
+          <span style={{fontSize:11,color:d.t4}}>slothr — study less. rank more. nap often.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sticky Banner Ad ──────────────────────────────────────────────────────────
+function BannerAd({d}){
+  return(
+    <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:d.sb,borderTop:`1px solid ${d.b}`,padding:"6px 16px",display:"flex",alignItems:"center",gap:10,minHeight:52}}>
+      <span style={{fontSize:9,color:d.t4,letterSpacing:".06em",textTransform:"uppercase",flexShrink:0}}>ad</span>
+      {ADSENSE_READY?(
+        <ins className="adsbygoogle" style={{display:"inline-block",flex:1,height:"36px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.interstitial}/>
+      ):(
+        <div style={{flex:1,height:36,background:d.hover,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",border:`1px dashed ${d.b}`}}>
+          <span style={{fontSize:11,color:d.t4}}>banner ad — awaiting AdSense approval 🦥</span>
+        </div>
+      )}
+      <span style={{fontSize:9,color:d.t4,flexShrink:0}}>slothr.in</span>
+    </div>
+  );
+}
 
 // ── Placeholder papers — replace questions with real ones from your DB ────────
 const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
@@ -295,16 +345,6 @@ const CLASSES = [
   {id:"dropper", label:"Dropper", icon:"↻"},
 ];
 
-const TABS = [
-  {id:"overview",  label:"Overview",      icon:"⌂"},
-  {id:"coach",     label:"Analytics",     icon:"👁"},
-  {id:"goals",     label:"today's goals", icon:"◎"},
-  {id:"pyq",       label:"Practice",      icon:"◈"},
-  {id:"sessions",  label:"Sessions",      icon:"◷"},
-  {id:"streaks",   label:"Streaks",       icon:"🔥"},
-  {id:"syllabus",  label:"Syllabus",      icon:"📋"},
-];
-
 const STREAK_MILESTONES = [
   {days:1,  icon:"🌱", label:"First Day"},
   {days:5,  icon:"🔥", label:"5 Day Streak"},
@@ -315,6 +355,16 @@ const STREAK_MILESTONES = [
   {days:30, icon:"👑", label:"30 Days"},
   {days:50, icon:"💎", label:"50 Days"},
   {days:100,icon:"🦥", label:"100 Days"},
+];
+
+const TABS=[
+  {id:"overview",label:"Overview",icon:"⌂"},
+  {id:"coach",label:"Analytics",icon:"👁"},
+  {id:"goals",label:"today's goals",icon:"◎"},
+  {id:"pyq",label:"Practice",icon:"◈"},
+  {id:"sessions",label:"Sessions",icon:"◷"},
+  {id:"streaks",label:"Streaks",icon:"🔥"},
+  {id:"syllabus",label:"Syllabus",icon:"📋"},
 ];
 
 const PAPERS = [
@@ -331,7 +381,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
     duration:180, status:"available",
   },
- 
+  // ── 2023 ─────────────────────────────────────────────────────────────────
   {
     id:"adv-2023-p1",
     year:"2023", exam:"JEE Advanced", session:"Paper 1",
@@ -344,7 +394,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
     duration:180, status:"available",
   },
-
+  // ── 2022 ─────────────────────────────────────────────────────────────────
   {
     id:"adv-2022-p1",
     year:"2022", exam:"JEE Advanced", session:"Paper 1",
@@ -731,7 +781,7 @@ function ExamInterface({paper,user,questions,onSubmit,onExit,nta}){
   const timerRef=useRef(null);
   const [section,setSection]=useState("Physics");
   const [qIndex,setQIndex]=useState(0);
-  const [showPalette,setShowPalette]=useState(true);
+  const [showPalette,setShowPalette]=useState(()=>typeof window!=="undefined"&&window.innerWidth>600);
   const [showSubmitModal,setShowSubmitModal]=useState(false);
   const [showExitModal,setShowExitModal]=useState(false);
   const [numericalInput,setNumericalInput]=useState("");
@@ -833,10 +883,10 @@ function ExamInterface({paper,user,questions,onSubmit,onExit,nta}){
       </div>
 
       {/* Main 2-col layout */}
-      <div style={{display:"flex",flex:1,overflow:"hidden",minHeight:0,height:0}}>
+      <div style={{display:"flex",flex:1,overflow:"hidden",minHeight:0}}>
 
         {/* ── Question area ── */}
-        <div style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"14px 18px",minHeight:0}}>
+        <div style={{flex:1,overflow:"auto",padding:"14px 18px"}}>
           {currentQ&&(
             <>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -844,11 +894,7 @@ function ExamInterface({paper,user,questions,onSubmit,onExit,nta}){
                   Question {currentQ.qno}
                   <span style={{marginLeft:8,fontSize:10.5,fontWeight:400,color:nta.text3,
                     padding:"2px 7px",background:nta.hover,borderRadius:3,border:`1px solid ${nta.border}`}}>
-                    {
-                    currentQ.type==="mcq"?"Single Correct · +3/−1":
-                    currentQ.type==="msq"?"Multiple Correct · +4/−2":
-                    "Integer · +4/0"
-                  }
+                    {currentQ.type==="mcq"?"MCQ · +4 / −1":"Integer · +4 / 0"}
                   </span>
                 </div>
                 <span style={{fontSize:11,color:SEC_COLOR[section],fontWeight:600}}>{section}</span>
@@ -1254,110 +1300,57 @@ function ResultScreen({paper,questions,qState,user,onRetry,onBack,nta,dark}){
         {activeTab==="key"&&(
           <div>
             {/* Section + filter bar */}
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20,flexWrap:"wrap"}}>
-              <div style={{display:"flex",gap:4}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                 {SECTIONS.map(sec=>(
                   <button key={sec} onClick={()=>setKeySection(sec)}
-                    style={{padding:"7px 16px",borderRadius:3,border:`1px solid ${keySection===sec?SEC_COLOR[sec]:nta.border}`,
+                    style={{padding:"6px 14px",borderRadius:3,border:`1px solid ${keySection===sec?SEC_COLOR[sec]:nta.border}`,
                       background:keySection===sec?`${SEC_COLOR[sec]}15`:"transparent",
                       color:keySection===sec?SEC_COLOR[sec]:nta.text3,
-                      fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      fontFamily:"Arial",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                     {sec}
                   </button>
                 ))}
               </div>
-              <div style={{display:"flex",gap:4,marginLeft:"auto"}}>
-                {[["all","All"],["wrong","✗ Wrong"],["unattempted","— Skipped"]].map(([v,l])=>(
+              <div style={{display:"flex",gap:4,marginLeft:"auto",flexWrap:"wrap"}}>
+                {[["all","All"],["wrong","Wrong Only"],["unattempted","Skipped"]].map(([v,l])=>(
                   <button key={v} onClick={()=>setKeyFilter(v)}
-                    style={{padding:"6px 12px",borderRadius:3,border:`1px solid ${keyFilter===v?nta.header:nta.border}`,
+                    style={{padding:"5px 12px",borderRadius:3,border:`1px solid ${keyFilter===v?nta.header:nta.border}`,
                       background:keyFilter===v?`${nta.header}15`:"transparent",
                       color:keyFilter===v?nta.header:nta.text3,
-                      fontFamily:"Arial",fontSize:11,fontWeight:600,cursor:"pointer"}}>
+                      fontFamily:"Arial",fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
                     {l}
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* Summary strip */}
-            {(()=>{
-              const allSec = questions.filter(q=>q.section===keySection);
-              const correct = allSec.filter(q=>qState[q.id]?.answer===q.correct).length;
-              const wrong = allSec.filter(q=>qState[q.id]?.answer&&qState[q.id].answer!==q.correct).length;
-              const skipped = allSec.filter(q=>!qState[q.id]?.answer).length;
-              return(
-                <div style={{display:"flex",gap:8,marginBottom:20}}>
-                  {[
-                    {l:"Correct",v:correct,c:nta.answered},
-                    {l:"Wrong",v:wrong,c:nta.notAnswered},
-                    {l:"Skipped",v:skipped,c:nta.text3},
-                  ].map(s=>(
-                    <div key={s.l} onClick={()=>setKeyFilter(s.l==="Correct"?"all":s.l==="Wrong"?"wrong":"unattempted")}
-                      style={{flex:1,padding:"12px 16px",borderRadius:4,border:`1.5px solid ${s.c}22`,
-                        background:`${s.c}0e`,cursor:"pointer",textAlign:"center"}}>
-                      <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}</div>
-                      <div style={{fontSize:10,color:nta.text3,marginTop:2,fontWeight:600,letterSpacing:".06em",textTransform:"uppercase"}}>{s.l}</div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-
             {keyQs.length===0&&(
-              <div style={{textAlign:"center",padding:"48px",color:nta.text3}}>
-                <div style={{fontSize:28,marginBottom:8}}>✓</div>
-                <div style={{fontSize:14,fontWeight:600,color:nta.text}}>okay you're actually good.</div>
-                <div style={{fontSize:12,marginTop:4}}>nothing to fix here.</div>
+              <div style={{textAlign:"center",padding:"32px",color:nta.text3,fontStyle:"italic"}}>
+                okay you're actually good. don't let it go to your head. nothing to fix.
               </div>
             )}
-
-            {keyQs.map((q,idx)=>{
+            {keyQs.map(q=>{
               const userAns=qState[q.id]?.answer;
               const isCorrect=userAns===q.correct;
               const attempted=userAns!=null;
               const statusC=!attempted?nta.text3:isCorrect?nta.answered:nta.notAnswered;
-              const statusIcon=!attempted?"—":isCorrect?"✓":"✗";
+              const statusLabel=!attempted?"skipped":isCorrect?"✓ correct":"✗ wrong";
               const marksLabel=!attempted?"±0":isCorrect?"+4":q.type==="mcq"?"−1":"±0";
               return(
-                <div key={q.id} onClick={()=>setFullscreenQ(q.id)}
-                  style={{marginBottom:8,border:`1px solid ${nta.border}`,
-                    borderLeft:`4px solid ${statusC}`,borderRadius:4,
-                    background:nta.card,cursor:"pointer",overflow:"hidden"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px"}}>
-                    {/* Status icon */}
-                    <div style={{width:32,height:32,borderRadius:3,background:`${statusC}18`,
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:16,fontWeight:700,color:statusC,flexShrink:0}}>
-                      {statusIcon}
-                    </div>
-                    {/* Question info */}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
-                        <span style={{fontSize:11,fontWeight:700,color:nta.text3}}>Q{q.qno}</span>
-                        {q.type&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,
-                          background:q.type==="msq"?`${nta.header}20`:q.type==="numerical"?`${nta.answered}20`:`${nta.text3}15`,
-                          color:q.type==="msq"?nta.header:q.type==="numerical"?nta.answered:nta.text3,
-                          fontWeight:700}}>{q.type==="mcq"||q.type==="scq"?"SCQ":q.type==="msq"?"MSQ":"NUM"}</span>}
-                        {q.topic&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,
-                          background:`${SEC_COLOR[q.section]}15`,color:SEC_COLOR[q.section],fontWeight:700}}>
-                          {q.topic}
-                        </span>}
-                      </div>
-                      <div style={{fontSize:12.5,color:nta.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%"}}>
-                        {q.text?.slice(0,90)}{q.text?.length>90?"…":""}
-                      </div>
-                    </div>
-                    {/* Right side */}
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-                      <span style={{fontSize:12,fontWeight:700,color:statusC}}>{marksLabel}</span>
-                      {attempted&&!isCorrect&&(
-                        <span style={{fontSize:10,color:nta.text3}}>
-                          you: <strong style={{color:nta.notAnswered}}>{userAns}</strong>
-                          {" · "}ans: <strong style={{color:nta.answered}}>{q.correct}</strong>
-                        </span>
-                      )}
-                      {!attempted&&<span style={{fontSize:10,color:nta.answered}}>ans: {q.correct}</span>}
-                      <span style={{fontSize:10,color:nta.text3,opacity:.5}}>tap to review →</span>
+                <div key={q.id}
+                  onClick={()=>setFullscreenQ(q.id)}
+                  style={{marginBottom:6,border:`1px solid ${nta.border}`,borderLeft:`4px solid ${statusC}`,
+                    borderRadius:3,background:nta.card,cursor:"pointer",transition:"all .12s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=dark?"rgba(255,255,255,.03)":"rgba(0,0,0,.015)";e.currentTarget.style.borderColor=statusC+"66";}}
+                  onMouseLeave={e=>{e.currentTarget.style.background=nta.card;e.currentTarget.style.borderColor=nta.border;}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:nta.text3,flexShrink:0,width:26,textAlign:"right"}}>Q{q.qno}</span>
+                    <span style={{flex:1,fontSize:12.5,color:nta.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{q.text}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                      {q.topic&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:`${SEC_COLOR[q.section]}18`,color:SEC_COLOR[q.section],fontWeight:700,whiteSpace:"nowrap"}}>{q.topic}</span>}
+                      <span style={{fontSize:10,fontWeight:700,color:"#fff",background:statusC,padding:"2px 8px",borderRadius:3,whiteSpace:"nowrap"}}>{marksLabel}</span>
+                      <span style={{fontSize:10.5,color:statusC,fontWeight:600,whiteSpace:"nowrap",minWidth:64,textAlign:"right"}}>{statusLabel}</span>
+                      <span style={{fontSize:11,color:nta.text3,opacity:.4}}>↗</span>
                     </div>
                   </div>
                 </div>
@@ -1633,7 +1626,7 @@ function NTAMode({user,dark,onExit,onTestComplete,completedTests,onStoreTest}){
   function handleRetry(){setFinalQState(null);setScreen("instructions");}
   function handleBack(){setSelectedPaper(null);setFinalQState(null);setScreen("list");}
 
-  if(screen==="list")         return <PaperList onStart={handleStart} onExit={onExit} nta={nta} completedTests={completedTests} onReview={(paper,result)=>{setSelectedPaper(paper);setFinalQState(result.qState);if(result.questions?.length) setQuestions(result.questions);setScreen("result");}}/>;
+  if(screen==="list")         return <PaperList onStart={handleStart} onExit={onExit} nta={nta} completedTests={completedTests} onReview={(paper,result)=>{setSelectedPaper(paper);setFinalQState(result.qState);if(result.questions?.length)setQuestions(result.questions);setScreen("result");}}/>;
   if(screen==="instructions"){
     if(qLoading) return(
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:nta.bg}}>
@@ -1660,10 +1653,9 @@ function NTAMode({user,dark,onExit,onTestComplete,completedTests,onStoreTest}){
 
 
 
-
 // ── Auth Screen ───────────────────────────────────────────────────────────────
 function AuthScreen({onAuth}) {
-  const [mode, setMode] = useState("login"); // login | signup
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1671,96 +1663,82 @@ function AuthScreen({onAuth}) {
 
   async function handleSubmit() {
     if(!email||!password){setError("fill in both fields.");return;}
+    if(password.length<6){setError("password must be at least 6 characters.");return;}
     setLoading(true); setError("");
     try {
-      let session;
-      if(mode==="login") session = await SB_AUTH.signInEmail(email, password);
-      else session = await SB_AUTH.signUp(email, password);
       if(mode==="signup") {
-        setError("account created! you can now log in.");
+        await SB_AUTH.signUp(email, password);
+        setError("account created! log in now.");
         setMode("login"); setLoading(false); return;
       }
-      localStorage.setItem("slothr_auth", JSON.stringify({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-        expires_at: Date.now() + session.expires_in * 1000,
-        user: session.user,
-      }));
-      onAuth(session);
+      const session = await SB_AUTH.signInEmail(email, password);
+      const stored = {
+        access_token:session.access_token, refresh_token:session.refresh_token,
+        expires_at:Date.now()+(session.expires_in||3600)*1000, user:session.user,
+      };
+      localStorage.setItem("slothr_auth", JSON.stringify(stored));
+      onAuth(stored);
     } catch(e) { setError(e.message); }
     setLoading(false);
   }
 
-  function handleGoogle() { SB_AUTH.signInGoogle(); }
-
-  const inputStyle = {
+  const inp = {
     width:"100%", padding:"11px 14px", border:"1px solid rgba(255,255,255,.12)",
-    borderRadius:6, background:"rgba(255,255,255,.06)", color:"#f5f0e8",
-    fontSize:14, fontFamily:"'DM Sans',sans-serif", outline:"none", boxSizing:"border-box",
+    borderRadius:8, background:"rgba(255,255,255,.06)", color:"#f5f0e8",
+    fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box",
+    WebkitAppearance:"none",
   };
 
   return (
     <div style={{
-      minHeight:"100vh", width:"100vw",
-      background:"#0e0d0b",
-      display:"flex", alignItems:"center", justifyContent:"center",
-      padding:20, boxSizing:"border-box",
-      fontFamily:"'DM Sans',sans-serif",
-      position:"fixed", inset:0, zIndex:9999,
+      position:"fixed", top:0, left:0, right:0, bottom:0, zIndex:9999,
+      background:"#0e0d0b", display:"flex", alignItems:"center",
+      justifyContent:"center", padding:16, boxSizing:"border-box",
+      fontFamily:"'DM Sans',sans-serif", overflowY:"auto",
     }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@400;500;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:#0e0d0b;}
-      `}</style>
-      <div style={{width:"100%",maxWidth:400}}>
-        {/* Logo */}
-        <div style={{textAlign:"center",marginBottom:40}}>
-          <div style={{fontSize:42,marginBottom:8}}>🦥</div>
-          <div style={{fontSize:28,fontWeight:900,letterSpacing:"-.06em",color:"#f5f0e8",fontFamily:"'DM Serif Display',serif"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{width:"100%", maxWidth:380, margin:"auto"}}>
+        <div style={{textAlign:"center", marginBottom:32}}>
+          <div style={{fontSize:40, marginBottom:8}}>🦥</div>
+          <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
             sloth<span style={{color:"#e8723c"}}>r</span>
           </div>
-          <div style={{fontSize:12,color:"#8a8070",marginTop:4}}>your smartest situationship.</div>
+          <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your smartest situationship.</div>
         </div>
-
-        {/* Google button */}
-        <button onClick={handleGoogle}
-          style={{width:"100%",padding:"12px",borderRadius:6,background:"#fff",color:"#1a1510",
-            border:"none",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:16,
-            display:"flex",alignItems:"center",justifyContent:"center",gap:10,fontFamily:"'DM Sans',sans-serif"}}>
+        <button onClick={()=>window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`}
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#1a1510",
+            border:"none", fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:14,
+            display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+            fontFamily:"inherit", boxSizing:"border-box"}}>
           <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.31z"/></svg>
           continue with Google
         </button>
-
-        {/* Divider */}
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
-          <div style={{flex:1,height:1,background:"rgba(255,255,255,.08)"}}/>
-          <span style={{fontSize:11,color:"#4a4540"}}>or</span>
-          <div style={{flex:1,height:1,background:"rgba(255,255,255,.08)"}}/>
+        <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14}}>
+          <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
+          <span style={{fontSize:11, color:"#4a4540"}}>or</span>
+          <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
         </div>
-
-        {/* Email/password */}
         <div style={{marginBottom:10}}>
-          <input style={inputStyle} type="email" placeholder="email" value={email}
+          <input style={inp} type="email" placeholder="email" value={email}
             onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
         </div>
-        <div style={{marginBottom:16}}>
-          <input style={inputStyle} type="password" placeholder="password (min 6 chars)" value={password}
+        <div style={{marginBottom:14}}>
+          <input style={inp} type="password" placeholder="password (min 6 chars)" value={password}
             onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
         </div>
-
-        {error&&<div style={{fontSize:12,color:"#d4604a",marginBottom:12,textAlign:"center"}}>{error}</div>}
-
+        {error&&<div style={{fontSize:12, color:error.includes("created")?"#4d9e78":"#d4604a",
+          marginBottom:12, textAlign:"center", lineHeight:1.5}}>{error}</div>}
         <button onClick={handleSubmit} disabled={loading}
-          style={{width:"100%",padding:"12px",borderRadius:6,background:"#e8723c",color:"#fff",
-            border:"none",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",
-            opacity:loading?.6:1,fontFamily:"'DM Sans',sans-serif"}}>
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#e8723c",
+            color:"#fff", border:"none", fontSize:14, fontWeight:700,
+            cursor:loading?"not-allowed":"pointer", opacity:loading?.6:1,
+            fontFamily:"inherit", boxSizing:"border-box"}}>
           {loading?"...":(mode==="login"?"log in":"sign up")}
         </button>
-
-        <div style={{textAlign:"center",marginTop:16,fontSize:12,color:"#8a8070"}}>
-          {mode==="login"?"don't have an account? ":"already have one? "}
-          <span style={{color:"#e8723c",cursor:"pointer"}} onClick={()=>{setMode(m=>m==="login"?"signup":"login");setError("");}}>
+        <div style={{textAlign:"center", marginTop:14, fontSize:12, color:"#8a8070"}}>
+          {mode==="login"?"no account? ":"have one? "}
+          <span style={{color:"#e8723c", cursor:"pointer"}}
+            onClick={()=>{setMode(m=>m==="login"?"signup":"login");setError("");}}>
             {mode==="login"?"sign up":"log in"}
           </span>
         </div>
@@ -1769,238 +1747,133 @@ function AuthScreen({onAuth}) {
   );
 }
 
+
 export default function App(){
   // ── Ad state ────────────────────────────────────────────────────────────────
+  const [showRewarded,setShowRewarded]=useState(false);
+  const [rewardedCallback,setRewardedCallback]=useState(null); // fn to call after ad
+  const [aiUses,setAiUses]=useState({count:0,date:new Date().toDateString()});
+  const [tabSwitches,setTabSwitches]=useState(0);
+  const [showInterstitial,setShowInterstitial]=useState(false);
+  const [pendingTab,setPendingTab]=useState(null);
 
   // Function to request an AI use — shows rewarded ad if out of free uses
-  function requestAiUse(onGranted){ onGranted(); }
+  function requestAiUse(onGranted){
+    // Give 2 free uses per day without ad
+    if(aiUses.count<2){
+      setAiUses(p=>({...p,count:p.count+1}));
+      onGranted();
+      return;
+    }
+    // Otherwise show rewarded ad
+    setRewardedCallback(()=>()=>{
+      setAiUses(p=>({...p,count:p.count+1}));
+      setShowRewarded(false);
+      onGranted();
+    });
+    setShowRewarded(true);
+  }
 
   // Tab switch with interstitial gate
-  function switchTab(newTab){ setTab(newTab); }
-
-  // ── Auth state ─────────────────────────────────────────────────────────────
-  const [authSession, setAuthSession] = useState(()=>{
-    try {
-      const s = localStorage.getItem("slothr_auth");
-      if(!s) return null;
-      const parsed = JSON.parse(s);
-      if(parsed.expires_at && parsed.expires_at < Date.now()) {
-        localStorage.removeItem("slothr_auth");
-        return null;
-      }
-      return parsed;
-    } catch(e) { return null; }
-  });
-
-  const user = authSession ? {
-    name: authSession.user?.user_metadata?.full_name || authSession.user?.email?.split("@")[0] || "Student",
-    email: authSession.user?.email || "",
-    avatar: authSession.user?.user_metadata?.avatar_url || null,
-    id: authSession.user?.id,
-  } : null;
-
-  function handleSignOut() {
-    if(authSession?.access_token) SB_AUTH.signOut(authSession.access_token);
-    else localStorage.removeItem("slothr_auth");
-    setAuthSession(null);
-    setSessions([]); setMocks([]); setGoals([]); setPyqHistory([]); setCompletedTests({});
-    try {
-      localStorage.removeItem("slothr_class");
-      localStorage.removeItem("slothr_pyq");
-      localStorage.removeItem("slothr_completed");
-      localStorage.removeItem("slothr_sessions");
-      localStorage.removeItem("slothr_syllabus");
-      localStorage.removeItem("slothr_mocks");
-      localStorage.removeItem("slothr_goals");
-    } catch(e){}
+  function switchTab(newTab){
+    if(newTab===tab) return;
+    const newCount=tabSwitches+1;
+    setTabSwitches(newCount);
+    if(newCount%INTERSTITIAL_EVERY===0){
+      setPendingTab(newTab);
+      setShowInterstitial(true);
+    } else {
+      setTab(newTab);
+    }
   }
 
-  function handleAuthSuccess(session) {
-    const stored = {
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      expires_at: Date.now() + (session.expires_in||3600) * 1000,
-      user: session.user,
-    };
-    // If different user is logging in, clear previous user's data
-    const prevAuth = (() => { try { return JSON.parse(localStorage.getItem("slothr_auth")); } catch(e){ return null; } })();
-    if(prevAuth?.user?.id && prevAuth.user.id !== session.user?.id) {
-      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_class"].forEach(k=>{
-        try { localStorage.removeItem(k); } catch(e){}
-      });
-      setSessions([]); setMocks([]); setGoals([]); setPyqHistory([]); setCompletedTests({});
-      try { setJeClass(null); } catch(e){}
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [authSession,setAuthSession]=useState(()=>{
+    try{
+      const s=localStorage.getItem("slothr_auth");
+      if(!s)return null;
+      const p=JSON.parse(s);
+      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("slothr_auth");return null;}
+      return p;
+    }catch(e){return null;}
+  });
+  const user=authSession?{
+    name:authSession.user?.user_metadata?.full_name||authSession.user?.email?.split("@")[0]||"Student",
+    email:authSession.user?.email||"",
+    avatar:authSession.user?.user_metadata?.avatar_url||null,
+    id:authSession.user?.id,
+  }:{name:"Student",email:"",avatar:null,id:null};
+  function handleAuthSuccess(stored){
+    const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
+    const p=prev();
+    if(p?.user?.id&&p.user.id!==stored?.user?.id){
+      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
-    localStorage.setItem("slothr_auth", JSON.stringify(stored));
+    localStorage.setItem("slothr_auth",JSON.stringify(stored));
     setAuthSession(stored);
   }
-
-  // Refresh token before it expires
+  function handleSignOut(){
+    if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
+    setAuthSession(null);
+    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
+    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+  }
+  // OAuth redirect handler
   useEffect(()=>{
-    if(!authSession?.refresh_token) return;
-    const timeUntilExpiry = (authSession.expires_at||0) - Date.now();
-    const refreshIn = Math.max(0, timeUntilExpiry - 5*60*1000); // refresh 5 mins before expiry
-    const t = setTimeout(async()=>{
-      try {
-        const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{
-          method:"POST",
-          headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
-          body:JSON.stringify({refresh_token:authSession.refresh_token})
-        });
-        if(r.ok) {
-          const data = await r.json();
-          handleAuthSuccess(data);
-        }
-      } catch(e){}
-    }, refreshIn);
-    return ()=>clearTimeout(t);
-  },[authSession?.refresh_token]);
-
-  // Handle OAuth redirect (Google)
-  useEffect(()=>{
-    const hash = window.location.hash;
-    if(hash.includes("access_token")) {
-      const params = new URLSearchParams(hash.replace("#","?"));
-      const token = params.get("access_token");
-      const refresh = params.get("refresh_token");
-      const expires = parseInt(params.get("expires_in")||"3600");
-      if(token) {
+    const hash=window.location.hash;
+    if(hash.includes("access_token")){
+      const p=new URLSearchParams(hash.replace("#","?"));
+      const token=p.get("access_token");
+      if(token){
         SB_AUTH.getUser(token).then(u=>{
-          if(u) {
-            const stored = {access_token:token,refresh_token:refresh,expires_at:Date.now()+expires*1000,user:u};
-            localStorage.setItem("slothr_auth", JSON.stringify(stored));
-            setAuthSession(stored);
+          if(u){
+            const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
+            handleAuthSuccess(stored);
             window.history.replaceState(null,"",window.location.pathname);
           }
         });
       }
     }
   },[]);
-
-  // Load persisted data from Supabase after auth
+  // Token refresh
   useEffect(()=>{
-    if(!authSession?.access_token || !user?.id) return;
-    const token = authSession.access_token;
-    const uid = user.id;
-    // Load sessions
-    const cachedSessions = (()=>{try{return localStorage.getItem("slothr_sessions");}catch(e){return null;}})();
-    if(!cachedSessions) {
-      SB_AUTH.loadData("user_sessions", uid, token).then(data=>{
-        if(data?.length) setSessions(data.map(r=>r.data||r));
-      });
-    }
-    // Load goals
-    const cachedGoals = (()=>{try{return localStorage.getItem("slothr_goals");}catch(e){return null;}})();
-    if(!cachedGoals) {
-      SB_AUTH.loadData("user_goals", uid, token).then(data=>{
-        if(data?.length) setGoals(data.map(r=>r.data||r));
-      });
-    }
-    // Load mocks
-    const cachedMocks = (()=>{try{return localStorage.getItem("slothr_mocks");}catch(e){return null;}})();
-    if(!cachedMocks) {
-      SB_AUTH.loadData("user_mocks", uid, token).then(data=>{
-        if(data?.length) setMocks(data.map(r=>r.data||r));
-      });
-    }
-    // Load pyqHistory — all time for accuracy calculation
-    SB_AUTH.loadData("user_pyq", uid, token).then(data=>{
-      if(data?.length) setPyqHistory(data.map(r=>r.data||r));
-    });
-    // Load completedTests — only last 2, only if localStorage is empty
-    const cachedCompleted = (() => { try { return localStorage.getItem("slothr_completed"); } catch(e){ return null; } })();
-    if(!cachedCompleted) {
-      SB_AUTH.loadData("user_completed", uid, token).then(data=>{
-        if(data?.length) {
-          const last2 = data.slice(-2);
-          const map = {};
-          last2.forEach(r=>{ if(r.paper_id) map[r.paper_id]=r.data; });
-          setCompletedTests(map);
-          try { localStorage.setItem("slothr_completed", JSON.stringify(map)); } catch(e){}
-        }
-      });
-    }
-    // Load jeClass
-    fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`, {
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}
-    }).then(r=>r.json()).then(data=>{
-      if(data?.[0]?.je_class) setJeClass(data[0].je_class);
-    }).catch(()=>{});
-  },[authSession?.access_token]);
-
-  // Show auth screen if not logged in
-
+    if(!authSession?.refresh_token)return;
+    const ms=Math.max(0,(authSession.expires_at||0)-Date.now()-5*60*1000);
+    const t=setTimeout(async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"apikey":SB_ANON,"Content-Type":"application/json"},body:JSON.stringify({refresh_token:authSession.refresh_token})});
+        if(r.ok){const d=await r.json();handleAuthSuccess({access_token:d.access_token,refresh_token:d.refresh_token,expires_at:Date.now()+(d.expires_in||3600)*1000,user:d.user});}
+      }catch(e){}
+    },ms);
+    return()=>clearTimeout(t);
+  },[authSession?.refresh_token]);
   const [dark,setDark]=useState(true);
   const [sideOpen,setSideOpen]=useState(true);
   const [tab,setTab]=useState("overview");
-  const [jeClass,setJeClass]=useState(()=>{
-    try { return localStorage.getItem("slothr_class")||null; } catch(e){return null;}
-  });
-  const [sessions,setSessions]=useState(()=>{
-    try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}
-  });
-  const [mocks,setMocks]=useState(()=>{
-    try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}
-  });
-  const [completedTests,setCompletedTests]=useState(()=>{
-    try {
-      const cached = localStorage.getItem("slothr_completed");
-      if(!cached) return {};
-      const all = JSON.parse(cached);
-      // Keep only last 2
-      const entries = Object.entries(all);
-      return Object.fromEntries(entries.slice(-2));
-    } catch(e){ return {}; }
-  }); // paper.id → {qState,questions,date}
+  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
+  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [completedTests,setCompletedTests]=useState(()=>{try{const c=localStorage.getItem("slothr_completed");if(!c)return {};const a=JSON.parse(c);return Object.fromEntries(Object.entries(a).slice(-2));}catch(e){return {};}});
 
   // ── Receive completed practice test result ────────────────────────────────
-  function handleStoreTest(paperId, result){
+  function handleStoreTest(paperId,result){
     setCompletedTests(prev=>{
-      const entries = Object.entries({...prev,[paperId]:result});
-      const last2 = Object.fromEntries(entries.slice(-2));
-      try { localStorage.setItem("slothr_completed", JSON.stringify(last2)); } catch(e){}
+      const entries=Object.entries({...prev,[paperId]:result});
+      const last2=Object.fromEntries(entries.slice(-2));
+      try{localStorage.setItem("slothr_completed",JSON.stringify(last2));}catch(e){}
       return last2;
     });
-    if(authSession?.access_token && user?.id) {
-      // Delete old entries for this paper first, then insert new
-      const token = authSession.access_token;
-      const uid = user.id;
-      fetch(`${SB_URL}/rest/v1/user_completed?user_id=eq.${uid}&paper_id=eq.${encodeURIComponent(paperId)}`,{
-        method:"DELETE",
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}
-      }).then(()=>{
-        fetch(`${SB_URL}/rest/v1/user_completed`,{method:"POST",
-          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`,"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:uid,paper_id:paperId,data:result})
-        }).catch(()=>{});
-      }).catch(()=>{});
-    }
+    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_completed`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,paper_id:paperId,data:result})}).catch(()=>{});
   }
   function handleTestComplete({mockEntry, pyqEntries}){
+    // Add to mocks (for coach analysis)
     setMocks(prev=>[...prev, mockEntry]);
+    // Add all answered questions to pyqHistory
     setPyqHistory(prev=>[...prev, ...pyqEntries]);
-    if(authSession?.access_token && user?.id) {
-      const token = authSession.access_token;
-      const uid = user.id;
-      // Save mock
-      fetch(`${SB_URL}/rest/v1/user_mocks`,{method:"POST",
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({user_id:uid,data:mockEntry})
-      }).catch(()=>{});
-      // Save each pyq entry for accuracy tracking
-      pyqEntries.forEach(entry=>{
-        fetch(`${SB_URL}/rest/v1/user_pyq`,{method:"POST",
-          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`,"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:uid,data:entry})
-        }).catch(()=>{});
-      });
-    }
   }
 
   // Goals
-  const [goals,setGoals]=useState(()=>{
-    try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}
-  });
+  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [goalInput,setGoalInput]=useState("");
   const [goalSub,setGoalSub]=useState("Physics");
   const [goalTopic,setGoalTopic]=useState("");
@@ -2015,25 +1888,13 @@ export default function App(){
   const [currentPyq,setCurrentPyq]=useState(null);
   const [revealed,setRevealed]=useState(false);
   const [pyqResult,setPyqResult]=useState(null);
-  const [pyqHistory,setPyqHistory]=useState(()=>{
-    try {
-      const cached = localStorage.getItem("slothr_pyq");
-      return cached ? JSON.parse(cached) : [];
-    } catch(e){ return []; }
-  });
+  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [selectedOpt,setSelectedOpt]=useState(null);
 
   // Coach
+  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
   const [coachCards,setCoachCards]=useState(null);
-  const [syllabusStatus,setSyllabusStatus]=useState(()=>{
-    try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}
-  });
-  useEffect(()=>{
-    try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}
-  },[syllabusStatus]);
-  function setSyllabusChapter(sub,topic,status){
-    setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));
-  }
+  function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
   const [coachLoading,setCoachLoading]=useState(false);
 
   // Timer
@@ -2052,14 +1913,8 @@ export default function App(){
   const wakeLockRef=useRef(null);
   const timerSecRef=useRef(0); // always-current mirror of timerSec for stopTimer
 
-
-  const [toast, setToast] = useState(null);
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(()=>setToast(null), 3000);
-  }
-
-
+  const [toast,setToast]=useState(null);
+  function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
   const d=dark?THEME.dark:THEME.light;
   const classTopics=sub=>TOPICS[sub][jeClass]||TOPICS[sub].dropper;
   const subColor=SUBJECT_COLORS[timerSub]||d.a1;
@@ -2100,16 +1955,7 @@ export default function App(){
               clearInterval(timerRef.current);
               setTimerOn(false);
               setTimerDone(true);
-              {
-      const entry={id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"};
-      setSessions(p=>[...p,entry]);
-      if(authSession?.access_token && user?.id) {
-        fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",
-          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:user.id,data:entry})
-        }).catch(()=>{});
-      }
-    }
+              setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
               return 0;
             }
             return s-1;
@@ -2131,18 +1977,24 @@ export default function App(){
   const streak=calcStreak(sessions);
   const todayGoals=goals.filter(g=>g.date===today());
   const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
+  // Sync all data to localStorage
+  useEffect(()=>{try{localStorage.setItem("slothr_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
+  useEffect(()=>{try{localStorage.setItem("slothr_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
+  useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
+  useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
+  useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  // Load from Supabase on login (only if localStorage empty)
   useEffect(()=>{
-    try { localStorage.setItem("slothr_pyq", JSON.stringify(pyqHistory)); } catch(e){}
-  },[pyqHistory]);
-  useEffect(()=>{
-    try { localStorage.setItem("slothr_sessions", JSON.stringify(sessions)); } catch(e){}
-  },[sessions]);
-  useEffect(()=>{
-    try { localStorage.setItem("slothr_mocks", JSON.stringify(mocks)); } catch(e){}
-  },[mocks]);
-  useEffect(()=>{
-    try { localStorage.setItem("slothr_goals", JSON.stringify(goals)); } catch(e){}
-  },[goals]);
+    if(!authSession?.access_token||!user?.id)return;
+    const token=authSession.access_token, uid=user.id;
+    if(!localStorage.getItem("slothr_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
+  },[authSession?.access_token]);
+  // Auth gate — after ALL hooks
+  if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
   const barMax=Math.max(...Object.values(totBySub),1);
   const currentMilestone=[...STREAK_MILESTONES].reverse().find(b=>streak>=b.days);
   const nextMilestone=STREAK_MILESTONES.find(b=>b.days>streak);
@@ -2164,9 +2016,6 @@ export default function App(){
     }));
   },[sessions,pyqHistory]);
 
-  if(!authSession) return <AuthScreen onAuth={handleAuthSuccess}/>;
-
-
   function addGoal(){
     if(!goalTopic&&!goalInput.trim()) return;
     setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Solve PYQs for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="pyq"?10:60)),achieved:false,aiGenerated:false}]);
@@ -2177,15 +2026,10 @@ export default function App(){
     const rawSec=timerSecRef.current;
     const m=Math.max(1,Math.round(rawSec/60));
     // Only save if at least 30 seconds elapsed — prevents 0-minute ghost sessions
-    if(rawSec>=30) {
+    if(rawSec>=30){
       const entry={id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:m,date:today(),notes:timerNotes||"Timer session"};
       setSessions(p=>[...p,entry]);
-      if(authSession?.access_token && user?.id) {
-        fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",
-          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:user.id,data:entry})
-        }).catch(()=>{});
-      }
+      if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
     }
     setTimerSec(0);
     timerSecRef.current=0;
@@ -2194,18 +2038,20 @@ export default function App(){
   function applyCustom(){const m=parseInt(customMins);if(m>0&&m<=600){setCountdownSet(m);setCountdownSec(m*60);setCustomMins("");};}
 
   async function callAI(sys,usr,json=false){
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:sys,messages:[{role:"user",content:usr}]})});
+    const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://slothr.in","X-Title":"Slothr"},
+      body:JSON.stringify({model:"anthropic/claude-sonnet-4-5",max_tokens:1500,messages:[{role:"system",content:sys},{role:"user",content:usr}]})
+    });
+    if(!r.ok){const e=await r.text();throw new Error("AI unavailable: "+e);}
     const data=await r.json();
-    const txt=data.content?.map(b=>b.text||"").join("")||"";
+    const txt=data.choices?.[0]?.message?.content||"";
     if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
     return txt;
   }
   async function runCoach(){
-    const uniqueDays = new Set(sessions.map(s=>s.date)).size;
-    if(uniqueDays < 3) {
-      setCoachCards({locked:true, msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});
-      return;
-    }
+    const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+    if(uniqueDays<3){setCoachCards({locked:true,msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});return;}
     setCoachLoading(true);setCoachCards(null);
     try{
       const ss=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(",");
@@ -2221,11 +2067,8 @@ export default function App(){
     setCoachLoading(false);
   }
   async function aiSuggestGoals(){
-    const uniqueDays = new Set(sessions.map(s=>s.date)).size;
-    if(uniqueDays < 3) {
-      showToast("log 3 days of study first. then i'll plan your day. 😏");
-      return;
-    }
+    const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+    if(uniqueDays<3){showToast("log 3 days of study first. then i'll plan your day. 😏");return;}
     setGoalLoading(true);
     try{
       // ── Study totals ──────────────────────────────────────────────────────
@@ -2389,69 +2232,53 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     const correct=opt===currentPyq.correct;
     setPyqResult(correct?"correct":"incorrect");
     setRevealed(true);
-    {
-      const entry={qid:currentPyq.id,subject:currentPyq.subject,topic:currentPyq.topic,correct,date:today(),difficulty:currentPyq.difficulty};
-      setPyqHistory(p=>[...p,entry]);
-      if(authSession?.access_token && user?.id) {
-        fetch(`${SB_URL}/rest/v1/user_pyq`,{method:"POST",
-          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},
-          body:JSON.stringify({user_id:user.id,data:entry})
-        }).catch(()=>{});
-      }
-    }
+    setPyqHistory(p=>[...p,{qid:currentPyq.id,subject:currentPyq.subject,topic:currentPyq.topic,correct,date:today(),difficulty:currentPyq.difficulty,year:currentPyq.year}]);
   }
 
   // ── CSS ───────────────────────────────────────────────────────────────────
   const SW=sideOpen?220:56;
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
+    html,body{overflow-x:hidden;max-width:100%;}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     body{background:${d.bg};font-family:'DM Sans',sans-serif;color:${d.t};-webkit-font-smoothing:antialiased;}
     *{transition:background-color .18s,border-color .18s,color .12s;}
     ::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:${d.b};border-radius:1px;}
 
     /* ── LAYOUT ── */
-    .layout{display:flex;min-height:100vh;overflow-x:hidden;max-width:100vw;}
+    .layout{display:flex;min-height:100vh;overflow-x:hidden;width:100%;max-width:100%;}
     .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:20;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
-    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .28s cubic-bezier(.16,1,.3,1);min-width:0;overflow-x:hidden;width:calc(100vw - ${SW}px);}
-    .inner{max-width:1060px;padding:40px 52px;width:100%;margin:0 auto;}
+    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;min-width:0;overflow-x:hidden;width:calc(100% - ${SW}px);box-sizing:border-box;};min-height:100vh;transition:margin-left .28s cubic-bezier(.16,1,.3,1);min-width:0;overflow-x:hidden;max-width:100vw;}
+    .inner{max-width:1060px;padding:28px 24px;width:100%;margin:0 auto;box-sizing:border-box;}
     /* ── RESPONSIVE ── */
-    @media(min-width:1600px){
-      .inner{padding:28px 60px;}
-    }
-    @media(max-width:1100px){
-      .inner{padding:32px 32px;}
-    }
+    @media(min-width:1400px){.inner{padding:32px 48px;}.topbar{padding:0 48px;}}
+    @media(max-width:1100px){.inner{padding:24px 20px;}.topbar{padding:0 20px;}}
     @media(max-width:900px){
-      .sidebar{width:${sideOpen?"200px":"0px"} !important;}
-      .content{margin-left:${sideOpen?"200px":"0px"} !important;}
-      .inner{padding:24px 20px;}
-      .topbar{padding:0 20px !important;}
-      .g2{grid-template-columns:1fr !important;}
-      .g3{grid-template-columns:1fr 1fr !important;}
-      .g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}
-      .stat-num{font-size:34px !important;}
+      .sidebar{width:${sideOpen?"220px":"0px"} !important;z-index:50;box-shadow:${sideOpen?"2px 0 20px rgba(0,0,0,.4)":"none"};}
+      .content{margin-left:0 !important;width:100% !important;}
+      .inner{padding:18px 16px;}.topbar{padding:0 16px !important;}
+      .g3{grid-template-columns:1fr 1fr !important;}.g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr !important;}.stat-num{font-size:30px !important;}
     }
     @media(max-width:600px){
-      .sidebar{width:0px !important;transform:translateX(-100%);}
-      .content{margin-left:0px !important;}
-      .inner{padding:16px 12px;}
-      .topbar{padding:0 12px !important;min-height:52px;}
+      .sidebar{width:0 !important;transform:translateX(-110%) !important;box-shadow:none !important;}
+      .content{margin-left:0 !important;width:100% !important;padding-bottom:64px;}
+      .inner{padding:14px 12px !important;}.topbar{padding:0 12px !important;min-height:50px;}
+      .g2{grid-template-columns:1fr 1fr !important;}.g3,.g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr !important;}.stat-num{font-size:22px !important;}
+      .ptitle{font-size:14px !important;}.psub{display:none !important;}
+      .section-head{font-size:16px !important;}.snotes{display:none;}
+    }
+    @media(max-width:380px){
       .g2,.g3,.g4{grid-template-columns:1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}
-      .stat-num{font-size:26px !important;}
-      .section-head{font-size:18px !important;}
-      .ptitle{font-size:15px !important;}
-      .psub{display:none;}
-      .srow{flex-wrap:wrap;gap:4px;}
-      .snotes{display:none;}
+      .inner{padding:12px 10px !important;}.stat-num{font-size:18px !important;}
     }
-    @media(max-width:400px){
-      .inner{padding:12px 10px;}
-      .topbar{padding:0 10px !important;}
-      .stat-num{font-size:22px !important;}
-    }
+    .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:45;cursor:pointer;}
+    @media(max-width:900px){.sb-overlay{display:${sideOpen?"block":"none"};}}
+    .mob-btn{display:none;width:32px;height:32px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:16px;flex-shrink:0;}
+    @media(max-width:900px){.mob-btn{display:flex;}}
+    .mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:30;background:${d.sb};border-top:1px solid ${d.b};align-items:stretch;padding-bottom:env(safe-area-inset-bottom,0px);}
+    @media(max-width:600px){.mob-tabs{display:flex;}}
 
     /* ── SIDEBAR ── */
     .s-logo{padding:18px 16px 14px;border-bottom:1px solid ${d.b};display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}
@@ -2471,7 +2298,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
 
     /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
     .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
     .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
     .tbr{display:flex;align-items:center;gap:7px;}
@@ -2699,39 +2526,25 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
 
   if(!jeClass) return(
-    <div style={{
-      minHeight:"100vh", width:"100vw",
-      background:d.bg, display:"flex",
-      alignItems:"center", justifyContent:"center",
-      padding:20, boxSizing:"border-box",
-      fontFamily:"'DM Sans',sans-serif",
-      position:"fixed", inset:0, zIndex:9999,
-    }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}`}</style>
-      <div style={{width:"100%",maxWidth:400}}>
-        <div style={{fontSize:28,fontWeight:900,color:d.t,marginBottom:28,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:16,boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
+        <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
           <span style={{fontSize:32,marginRight:6}}>🦥</span>sloth<span style={{color:d.a1}}>r</span>
         </div>
-        <div style={{fontSize:22,fontWeight:600,letterSpacing:"-.03em",color:d.t,marginBottom:4}}>who are you.</div>
-        <div style={{fontSize:13,color:d.t3,marginBottom:24,lineHeight:1.5}}>study less. rank more. nap often.</div>
+        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>who are you.</div>
+        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study less. rank more. nap often.</div>
         {CLASSES.map(c=>(
           <div key={c.id}
-            style={{display:"flex",alignItems:"center",gap:13,padding:"13px 15px",
-              border:`1.5px solid ${d.b}`,borderRadius:11,cursor:"pointer",
-              marginBottom:8,background:d.card,transition:"border-color .15s"}}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:`1.5px solid ${d.b}`,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"}}
             onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
             onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
             onClick={()=>{
                   setJeClass(c.id);
-                  try { localStorage.setItem("slothr_class", c.id); } catch(e){}
-                  if(authSession?.access_token && user?.id) {
-                    fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",
-                      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=representation"},
-                      body:JSON.stringify({user_id:user.id,je_class:c.id})
-                    }).catch(()=>{});
-                  }
+                  try{localStorage.setItem("slothr_class",c.id);}catch(e){}
+                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
                 }}>
-            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{c.icon}</div>
+            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{c.icon}</div>
             <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
           </div>
         ))}
@@ -2888,11 +2701,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   return(
     <>
       {/* ── Ad Modals ── */}
+      {showRewarded&&<MockRewardedAd d={d} onComplete={rewardedCallback} onSkip={()=>setShowRewarded(false)}/>}
+      {showInterstitial&&<InterstitialAd d={d} onClose={()=>{setShowInterstitial(false);if(pendingTab){setTab(pendingTab);setPendingTab(null);}}}/>}
 
       {fullscreen&&renderFS()}
-      <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}><style>{css}</style>
+      <div className="layout" style={{visibility:fullscreen?"hidden":"visible",paddingBottom:52}}><style>{css}</style>
       {/* ── Sticky Banner Ad ── */}
+      <BannerAd d={d}/>
 
+        <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
         <aside className="sidebar">
           <div className="s-logo">
             <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>{sideOpen?"‹":"›"}</button>
@@ -2942,14 +2759,20 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               )}
             </div>
             {/* AI uses counter */}
-
+            {sideOpen&&(
+              <div style={{marginTop:8,padding:"6px 8px",background:d.hover,borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:10,color:d.t3}}>AI uses today</span>
+                <span style={{fontSize:10,fontWeight:600,color:aiUses.count<2?d.a2:d.gold}}>{aiUses.count<2?`${2-aiUses.count} free left`:"watch an ad to unlock"}</span>
+              </div>
+            )}
           </div>
         </aside>
 
         <div className="content">
           {tab!=="pyq"&&<div className="topbar">
             {/* Always-visible Slothr logo */}
-            <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
               <div>
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
@@ -2982,7 +2805,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 {/* ── Hero stats — editorial wide layout ── */}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
                   {[
-                    {lbl:"This Week",    val:fmt(weekTime),  hint:sessions.filter(s=>s.date>=weekStart).length===0?"no sessions this week. i noticed.":sessions.filter(s=>s.date>=weekStart).length===1?"1 session. keep going.":sessions.filter(s=>s.date>=weekStart).length+" sessions this week.",     color:d.a1},
+                    {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
                     {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
                     {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
                     {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
@@ -3086,7 +2909,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:6,lineHeight:1.2}}>okay. let's talk about your data.</div>
                     <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>let me tell you exactly where you're leaking marks.</div>
                   </div>
-                  <button className="btn btn-d" onClick={runCoach} disabled={coachLoading}>{coachLoading?"looking...":"analyse"}</button>
+                  <button className="btn btn-d" onClick={()=>requestAiUse(runCoach)} disabled={coachLoading}>{coachLoading?"looking...":"analyse"}</button>
                 </div>
                 <div className="g3 mb16">
                   {Object.entries(SUBJECT_COLORS).map(([sub,color])=>{
@@ -3111,7 +2934,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card cp" style={{textAlign:"center",padding:"32px 24px"}}>
                     <div style={{fontSize:28,marginBottom:12}}>🔒</div>
                     <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:8}}>not enough data yet.</div>
-                    <div style={{fontSize:12,color:d.t3,lineHeight:1.6}}>{coachCards.msg}</div>
+                    <div style={{fontSize:12,color:d.t3,lineHeight:1.7}}>{coachCards.msg}</div>
                   </div>
                 )}
                 {!coachCards?.locked&&coachLoading&&<div className="card cp">{[100,85,92,78,88,70].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}</div>}
@@ -3152,7 +2975,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card cp">
                     <div className="rowb mb12">
                       <div><div style={{fontSize:13,fontWeight:500}}>let me plan your day 😏</div><div style={{fontSize:11,color:d.t3,marginTop:2}}>i know your weak spots. i'll be gentle.</div></div>
-                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={aiSuggestGoals} disabled={goalLoading}>{goalLoading?"looking...":"suggest goals"}</button>
+                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={()=>requestAiUse(aiSuggestGoals)} disabled={goalLoading}>{goalLoading?"looking...":"suggest goals"}</button>
                     </div>
                     {goalLoading&&[80,90,75,85].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}
                     {/* Signal breakdown — two bucket framing */}
@@ -3264,196 +3087,97 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             )}
 
             {/* ── STREAKS ── */}
-
             {tab==="syllabus"&&(()=>{
-              const SUBS = ["Physics","Chemistry","Mathematics"];
-              const STATUS_OPTS = [
-                {v:"not_started",  l:"Not Started",     icon:"—",  c:d.t4,   bg:"transparent"},
-                {v:"in_progress",  l:"In Progress",     icon:"▶",  c:d.a3,   bg:d.a3+"15"},
-                {v:"done",         l:"Done",            icon:"✓",  c:d.a2,   bg:d.a2+"15"},
-                {v:"need_revision",l:"Needs Revision",  icon:"↺",  c:d.a1,   bg:d.a1+"15"},
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              const STATUS_OPTS=[
+                {v:"not_started",l:"Not Started",icon:"—",c:d.t4,bg:"transparent"},
+                {v:"in_progress",l:"In Progress",icon:"▶",c:d.a3,bg:d.a3+"15"},
+                {v:"done",l:"Done",icon:"✓",c:d.a2,bg:d.a2+"15"},
+                {v:"need_revision",l:"Needs Revision",icon:"↺",c:d.a1,bg:d.a1+"15"},
               ];
-              const WT_ORDER = {"H":0,"M":1,"L":2};
-              const allChapters = sub => {
-                const seen = new Set();
-                return [
-                  ...(TOPICS[sub]["11th"]||[]),
-                  ...(TOPICS[sub]["12th"]||[]),
-                  ...(TOPICS[sub].dropper||[]),
-                ].filter(t=>{ if(seen.has(t))return false; seen.add(t); return true; });
-              };
-              const sortedChapters = sub =>
-                [...allChapters(sub)].sort((a,b)=>
-                  (WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1) -
-                  (WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1)
-                );
-              const chapterHours = (sub,topic) =>
-                sessions.filter(s=>s.subject===sub&&s.topic===topic)
-                  .reduce((a,s)=>a+(s.duration||0),0);
-              const chapterPyqAcc = (sub,topic) => {
-                const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===topic);
-                return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;
-              };
-              const totalChapters = SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
-              const doneCount   = Object.values(syllabusStatus).filter(v=>v==="done").length;
-              const progCount   = Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
-              const revCount    = Object.values(syllabusStatus).filter(v=>v==="need_revision").length;
-              const pct = totalChapters>0?Math.round((doneCount/totalChapters)*100):0;
-
+              const WT_ORDER={"H":0,"M":1,"L":2};
+              const allChapters=sub=>{const s=new Set();return[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t=>{if(s.has(t))return false;s.add(t);return true;});};
+              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
+              const chHrs=(sub,t)=>sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
+              const chAcc=(sub,t)=>{const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
+              const total=SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
+              const done=Object.values(syllabusStatus).filter(v=>v==="done").length;
+              const prog=Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
+              const rev=Object.values(syllabusStatus).filter(v=>v==="need_revision").length;
+              const pct=total>0?Math.round((done/total)*100):0;
               return(
                 <div>
-                  {/* ── Hero stat bar ── */}
-                  <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:4,padding:"20px 24px",marginBottom:20}}>
-                    <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
-                      {/* Big % */}
-                      <div style={{textAlign:"center",minWidth:80}}>
-                        <div style={{fontSize:52,fontWeight:700,fontFamily:"'DM Serif Display',serif",
-                          color:pct>=80?d.a2:pct>=50?d.gold:d.danger,
-                          letterSpacing:"-.04em",lineHeight:1}}>{pct}%</div>
-                        <div style={{fontSize:10,color:d.t3,marginTop:4,letterSpacing:".06em",textTransform:"uppercase"}}>covered</div>
+                  <div className="card cp mb16">
+                    <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+                      <div style={{textAlign:"center",minWidth:70}}>
+                        <div style={{fontSize:48,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:pct>=80?d.a2:pct>=50?d.gold:d.danger,letterSpacing:"-.04em",lineHeight:1}}>{pct}%</div>
+                        <div style={{fontSize:10,color:d.t3,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>covered</div>
                       </div>
-                      {/* Progress bar + breakdown */}
-                      <div style={{flex:1,minWidth:200}}>
-                        <div style={{height:8,background:d.b,borderRadius:4,overflow:"hidden",marginBottom:12,display:"flex"}}>
-                          <div style={{width:`${Math.round((doneCount/totalChapters)*100)}%`,background:d.a2,transition:"width .5s"}}/>
-                          <div style={{width:`${Math.round((progCount/totalChapters)*100)}%`,background:d.a3,transition:"width .5s"}}/>
-                          <div style={{width:`${Math.round((revCount/totalChapters)*100)}%`,background:d.a1,transition:"width .5s"}}/>
+                      <div style={{flex:1,minWidth:160}}>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden",marginBottom:10,display:"flex"}}>
+                          <div style={{width:`${Math.round((done/total)*100)}%`,background:d.a2,transition:"width .5s"}}/>
+                          <div style={{width:`${Math.round((prog/total)*100)}%`,background:d.a3}}/>
+                          <div style={{width:`${Math.round((rev/total)*100)}%`,background:d.a1}}/>
                         </div>
-                        <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-                          {[
-                            {l:"Done",         v:doneCount,   c:d.a2},
-                            {l:"In Progress",  v:progCount,   c:d.a3},
-                            {l:"Needs Revision",v:revCount,   c:d.a1},
-                            {l:"Not Started",  v:totalChapters-doneCount-progCount-revCount, c:d.t4},
-                          ].map(s=>(
-                            <div key={s.l} style={{display:"flex",alignItems:"center",gap:5}}>
-                              <div style={{width:7,height:7,borderRadius:2,background:s.c,flexShrink:0}}/>
-                              <span style={{fontSize:11,color:d.t3}}>{s.l}</span>
-                              <span style={{fontSize:12,fontWeight:700,color:s.c,marginLeft:2}}>{s.v}</span>
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                          {[{l:"Done",v:done,c:d.a2},{l:"In Progress",v:prog,c:d.a3},{l:"Revision",v:rev,c:d.a1},{l:"Not Started",v:total-done-prog-rev,c:d.t4}].map(s=>(
+                            <div key={s.l} style={{display:"flex",alignItems:"center",gap:4}}>
+                              <div style={{width:6,height:6,borderRadius:2,background:s.c}}/>
+                              <span style={{fontSize:10,color:d.t3}}>{s.l}</span>
+                              <span style={{fontSize:11,fontWeight:700,color:s.c}}>{s.v}</span>
                             </div>
                           ))}
                         </div>
                       </div>
-                      {/* JEE date countdown */}
                       <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:11,color:d.t3,marginBottom:2}}>JEE Advanced 2026</div>
-                        <div style={{fontSize:18,fontWeight:700,color:d.t,letterSpacing:"-.02em"}}>
-                          {Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left
-                        </div>
+                        <div style={{fontSize:10,color:d.t3}}>JEE Advanced 2026</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left</div>
                       </div>
                     </div>
                   </div>
-
-                  {/* ── Subject sections ── */}
                   {SUBS.map(sub=>{
-                    const chapters = sortedChapters(sub);
-                    const subDone = chapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length;
-                    const subPct  = Math.round((subDone/chapters.length)*100);
-                    const subColor = SUBJECT_COLORS[sub];
-
+                    const chapters=sorted(sub);
+                    const subDone=chapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length;
+                    const subPct=Math.round((subDone/chapters.length)*100);
+                    const subColor=SUBJECT_COLORS[sub];
                     return(
-                      <div key={sub} style={{marginBottom:16}}>
-                        {/* Subject header */}
-                        <div style={{
-                          display:"flex",alignItems:"center",gap:12,
-                          padding:"12px 16px",
-                          background:d.card,
-                          border:`1px solid ${d.b}`,
-                          borderLeft:`3px solid ${subColor}`,
-                          borderRadius:4,marginBottom:2,
-                        }}>
-                          <div style={{fontSize:13,fontWeight:700,color:subColor,flex:1}}>{sub}</div>
-                          <div style={{fontSize:11,color:d.t3}}>{subDone}/{chapters.length}</div>
-                          <div style={{width:80,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
-                            <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2,transition:"width .4s"}}/>
+                      <div key={sub} style={{marginBottom:14}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2}}>
+                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1}}>{sub}</div>
+                          <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length}</div>
+                          <div style={{width:60,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2}}/>
                           </div>
-                          <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:32,textAlign:"right"}}>{subPct}%</div>
+                          <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
                         </div>
-
-                        {/* Chapters — grouped by weightage */}
                         {["H","M","L"].map(wt=>{
-                          const wtChapters = chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
-                          if(!wtChapters.length) return null;
-                          const wtLabel = wt==="H"?"High Priority":wt==="M"?"Medium Priority":"Low Priority";
-                          const wtColor = wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          const wtCh=chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
+                          if(!wtCh.length)return null;
+                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
                           return(
-                            <div key={wt} style={{marginBottom:4}}>
-                              {/* Weightage sub-header */}
-                              <div style={{
-                                display:"flex",alignItems:"center",gap:8,
-                                padding:"5px 16px",
-                                background:wt==="H"?`${d.danger}08`:wt==="M"?`${d.gold}08`:`${d.t4}08`,
-                                borderLeft:`3px solid ${wtColor}40`,
-                                borderBottom:`1px solid ${d.b}`,
-                              }}>
-                                <div style={{
-                                  fontSize:9,fontWeight:700,letterSpacing:".1em",
-                                  textTransform:"uppercase",color:wtColor
-                                }}>{wtLabel}</div>
-                                <div style={{fontSize:9,color:d.t4}}>
-                                  {wtChapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length}/{wtChapters.length} done
-                                </div>
+                            <div key={wt}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 14px",background:wt==="H"?`${d.danger}06`:wt==="M"?`${d.gold}06`:`${d.t4}06`,borderLeft:`3px solid ${wtColor}30`,borderBottom:`1px solid ${d.b}`}}>
+                                <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:wtColor}}>{wt==="H"?"High Priority":wt==="M"?"Medium":"Low"}</div>
+                                <div style={{fontSize:9,color:d.t4}}>{wtCh.filter(t=>syllabusStatus[sub+"|"+t]==="done").length}/{wtCh.length} done</div>
                               </div>
-
-                              {/* Chapter rows */}
-                              {wtChapters.map((topic,idx)=>{
-                                const status = syllabusStatus[sub+"|"+topic]||"not_started";
-                                const hrs    = chapterHours(sub,topic);
-                                const acc    = chapterPyqAcc(sub,topic);
-                                const sOpt   = STATUS_OPTS.find(s=>s.v===status)||STATUS_OPTS[0];
-                                const isLast = idx===wtChapters.length-1;
+                              {wtCh.map((topic,idx)=>{
+                                const status=syllabusStatus[sub+"|"+topic]||"not_started";
+                                const hrs=chHrs(sub,topic);
+                                const acc=chAcc(sub,topic);
+                                const sOpt=STATUS_OPTS.find(s=>s.v===status)||STATUS_OPTS[0];
                                 return(
-                                  <div key={topic} style={{
-                                    display:"flex",alignItems:"center",gap:10,
-                                    padding:"9px 16px",
-                                    background:status==="done"?`${d.a2}06`:status==="in_progress"?`${d.a3}06`:status==="need_revision"?`${d.a1}06`:"transparent",
-                                    borderBottom:isLast?`1px solid ${d.b}`:`1px solid ${d.b}44`,
-                                    transition:"background .15s",
-                                  }}>
-                                    {/* Chapter name */}
+                                  <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s"}}>
                                     <div style={{flex:1,minWidth:0}}>
-                                      <div style={{
-                                        fontSize:12.5,fontWeight:500,
-                                        color:status==="done"?d.t3:d.t,
-                                        textDecoration:status==="done"?"line-through":"none",
-                                        textDecorationColor:d.t4,
-                                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
-                                      }}>{topic}</div>
+                                      <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
+                                      <div style={{display:"flex",gap:6,marginTop:2}}>
+                                        {hrs>0&&<span style={{fontSize:9,color:d.t3,background:d.hover,padding:"1px 5px",borderRadius:2}}>{fmt(hrs)}</span>}
+                                        {acc!==null&&<span style={{fontSize:9,fontWeight:600,color:acc>=70?d.a2:acc>=40?d.gold:d.danger,background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc}%</span>}
+                                      </div>
                                     </div>
-
-                                    {/* Data chips */}
-                                    <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
-                                      {hrs>0&&(
-                                        <span style={{fontSize:10,color:d.t3,background:d.hover,
-                                          padding:"2px 7px",borderRadius:3,whiteSpace:"nowrap"}}>
-                                          {fmt(hrs)}
-                                        </span>
-                                      )}
-                                      {acc!==null&&(
-                                        <span style={{fontSize:10,fontWeight:600,
-                                          color:acc>=70?d.a2:acc>=40?d.gold:d.danger,
-                                          background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,
-                                          padding:"2px 7px",borderRadius:3,whiteSpace:"nowrap"}}>
-                                          {acc}%
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    {/* Status buttons */}
-                                    <div style={{display:"flex",gap:3,flexShrink:0}}>
+                                    <div style={{display:"flex",gap:2,flexShrink:0}}>
                                       {STATUS_OPTS.map(opt=>(
-                                        <button key={opt.v}
-                                          onClick={()=>setSyllabusChapter(sub,topic,opt.v)}
-                                          title={opt.l}
-                                          style={{
-                                            width:26,height:26,borderRadius:3,fontSize:11,
-                                            fontWeight:700,cursor:"pointer",
-                                            background:status===opt.v?opt.bg:d.hover,
-                                            border:`1px solid ${status===opt.v?opt.c:d.b}`,
-                                            color:status===opt.v?opt.c:d.t4,
-                                            transition:"all .1s",
-                                            display:"flex",alignItems:"center",justifyContent:"center",
-                                          }}>
+                                        <button key={opt.v} onClick={()=>setSyllabusChapter(sub,topic,opt.v)} title={opt.l}
+                                          style={{width:24,height:24,borderRadius:3,fontSize:10,fontWeight:700,cursor:"pointer",background:status===opt.v?opt.bg:d.hover,border:`1px solid ${status===opt.v?opt.c:d.b}`,color:status===opt.v?opt.c:d.t4,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .1s"}}>
                                           {opt.icon}
                                         </button>
                                       ))}
@@ -3470,7 +3194,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 </div>
               );
             })()}
-
 
             {tab==="streaks"&&(
               <div className="pin">
@@ -3542,6 +3265,20 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
           </div>
         </div>
+      </div>
+      {/* Mobile bottom tabs */}
+      <div className="mob-tabs">
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>switchTab(t.id)}
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+              gap:1,background:"none",border:"none",cursor:"pointer",padding:"8px 2px",
+              color:tab===t.id?d.a1:d.t3,minWidth:0,boxSizing:"border-box"}}>
+            <span style={{fontSize:16,lineHeight:1}}>{t.icon}</span>
+            <span style={{fontSize:8,fontWeight:tab===t.id?700:400,whiteSpace:"nowrap",overflow:"hidden",maxWidth:"100%",textOverflow:"ellipsis"}}>
+              {t.label.slice(0,5)}
+            </span>
+          </button>
+        ))}
       </div>
     </>
   );
