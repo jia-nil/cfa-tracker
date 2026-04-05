@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ── Supabase config — replace with your project values ───────────────────────
-const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg"; // ← paste your anon key here before committing
-
-// ── Supabase Auth helpers ─────────────────────────────────────────────────────
+const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
+const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const SB_AUTH = {
   async signInGoogle() {
     window.location.href = `${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;
@@ -55,20 +52,15 @@ const SB_AUTH = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
-// Parses a LaTeX-subset string into tokens, renders as React elements.
-// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
 
 function parseMath(raw) {
-  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-    // reads {content} starting at from, returns [content, endIndex]
+   
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -101,10 +93,10 @@ function parseMath(raw) {
         out.push({ t: 'sqrt', inner });
         i = i2; continue;
       }
-      // trig inverses: \tan^{-1}
+     
       if ((cmd === 'tan' || cmd === 'sin' || cmd === 'cos') && raw.slice(i, i+4) === '^{-1') {
         out.push({ t: 'txt', v: cmd + '\u207b\u00b9' }); // ⁻¹
-        i += 5; continue; // skip ^{-1}
+        i += 5; continue; 
       }
       const SYMS = {
         alpha:'α',beta:'β',gamma:'γ',delta:'δ',Delta:'Δ',theta:'θ',phi:'φ',
@@ -123,7 +115,7 @@ function parseMath(raw) {
       continue;
     }
 
-    // superscript  ^{...} or ^digit
+    
     if (ch === '^') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -133,7 +125,6 @@ function parseMath(raw) {
       if (/\d/.test(raw[i+1])) { out.push({ t: 'sup', v: raw[i+1] }); i+=2; continue; }
     }
 
-    // subscript  _{...} or _digit
     if (ch === '_') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -236,23 +227,12 @@ function renderMath(text) {
 
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NTA SIMULATION — Practice Tab
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SLOTHR — NTA JEE MAINS SIMULATION
-// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
-// Students add their own questions via the admin panel (slothr-admin.jsx)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
 const today= ()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
 
-// ── Select component ──────────────────────────────────────────────────────────
+
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
@@ -265,7 +245,7 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+
 const THEME = {
   dark:{
     bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
@@ -351,7 +331,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
     duration:180, status:"available",
   },
-  // ── 2023 ─────────────────────────────────────────────────────────────────
+ 
   {
     id:"adv-2023-p1",
     year:"2023", exam:"JEE Advanced", session:"Paper 1",
@@ -364,7 +344,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
     duration:180, status:"available",
   },
-  // ── 2022 ─────────────────────────────────────────────────────────────────
+
   {
     id:"adv-2022-p1",
     year:"2022", exam:"JEE Advanced", session:"Paper 1",
