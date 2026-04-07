@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
 function parseMath(raw) {
   
   const out = [];
@@ -10,7 +9,7 @@ function parseMath(raw) {
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-    
+    // reads {content} starting at from, returns [content, endIndex]
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -25,6 +24,7 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
+    // backslash command
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
@@ -1818,6 +1818,7 @@ export default function App(){
     try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
   // OAuth redirect handler
+  const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
   useEffect(()=>{
     const hash=window.location.hash;
     if(hash.includes("access_token")){
@@ -1830,7 +1831,10 @@ export default function App(){
             handleAuthSuccess(stored);
             window.history.replaceState(null,"",window.location.pathname);
           }
-        });
+          setAuthLoading(false);
+        }).catch(()=>setAuthLoading(false));
+      } else {
+        setAuthLoading(false);
       }
     }
   },[]);
@@ -1914,7 +1918,7 @@ export default function App(){
 
   const [toast,setToast]=useState(null);
   function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
-  const d=dark?THEME.dark:THEME.light;
+  const d=(dark?THEME.dark:THEME.light)||THEME.dark;
   const classTopics=sub=>TOPICS[sub][jeClass]||TOPICS[sub].dropper;
   const subColor=SUBJECT_COLORS[timerSub]||d.a1;
 
@@ -1993,6 +1997,12 @@ export default function App(){
     if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
   },[authSession?.access_token]);
   // Auth gate — after ALL hooks
+  if(authLoading)return(
+    <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{fontSize:42}}>🦥</div>
+      <div style={{fontSize:13,color:"#8a8070",letterSpacing:".06em"}}>signing you in...</div>
+    </div>
+  );
   if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
   const barMax=Math.max(...Object.values(totBySub),1);
   const currentMilestone=[...STREAK_MILESTONES].reverse().find(b=>streak>=b.days);
