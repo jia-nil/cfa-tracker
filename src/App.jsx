@@ -25,7 +25,6 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
-    // backslash command
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
