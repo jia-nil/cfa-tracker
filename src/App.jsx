@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const SB_AUTH = createClient(SB_URL, SB_ANON);
 function parseMath(raw) {
   
   const out = [];
