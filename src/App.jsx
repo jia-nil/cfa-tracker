@@ -1821,25 +1821,41 @@ export default function App(){
   }
   // OAuth redirect handler
   const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
-  useEffect(()=>{
-    const hash=window.location.hash;
-    if(hash.includes("access_token")){
-      const p=new URLSearchParams(hash.replace("#","?"));
-      const token=p.get("access_token");
-      if(token){
-        SB_AUTH.auth.getUser(token).then(u=>{
-          if(u){
-            const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
-            handleAuthSuccess(stored);
-            window.history.replaceState(null,"",window.location.pathname);
-          }
-          setAuthLoading(false);
-        }).catch(()=>setAuthLoading(false));
-      } else {
+  useEffect(() => {
+  const hash = window.location.hash;
+
+  if (hash.includes("access_token")) {
+    const p = new URLSearchParams(hash.replace("#", "?"));
+
+    const access_token = p.get("access_token");
+    const refresh_token = p.get("refresh_token");
+
+    if (access_token && refresh_token) {
+      SB_AUTH.auth.setSession({
+        access_token,
+        refresh_token,
+      }).then(({ data, error }) => {
+        if (!error && data?.user) {
+          const stored = {
+            access_token,
+            refresh_token,
+            expires_at:
+              Date.now() +
+              parseInt(p.get("expires_in") || "3600") * 1000,
+            user: data.user,
+          };
+
+          handleAuthSuccess(stored);
+        }
+
+        window.history.replaceState(null, "", window.location.pathname);
         setAuthLoading(false);
-      }
+      });
+    } else {
+      setAuthLoading(false);
     }
-  },[]);
+  }
+}, []);
   // Token refresh
   useEffect(()=>{
     if(!authSession?.refresh_token)return;
