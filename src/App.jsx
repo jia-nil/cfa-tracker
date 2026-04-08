@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
-const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
 
+const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
+const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const OR_KEY  = import.meta.env.VITE_OR_KEY ; // openrouter.ai → API Keys // ← paste your anon key here before committing
 
 function parseMath(raw) {
- 
+  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
@@ -3294,3 +3295,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
