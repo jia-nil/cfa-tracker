@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
-const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const SB_AUTH = createClient(SB_URL, SB_ANON);
+const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+
 function parseMath(raw) {
-  
+ 
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
@@ -1821,41 +1821,25 @@ export default function App(){
   }
   // OAuth redirect handler
   const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
-  useEffect(() => {
-  const hash = window.location.hash;
-
-  if (hash.includes("access_token")) {
-    const p = new URLSearchParams(hash.replace("#", "?"));
-
-    const access_token = p.get("access_token");
-    const refresh_token = p.get("refresh_token");
-
-    if (access_token && refresh_token) {
-      SB_AUTH.auth.setSession({
-        access_token,
-        refresh_token,
-      }).then(({ data, error }) => {
-        if (!error && data?.user) {
-          const stored = {
-            access_token,
-            refresh_token,
-            expires_at:
-              Date.now() +
-              parseInt(p.get("expires_in") || "3600") * 1000,
-            user: data.user,
-          };
-
-          handleAuthSuccess(stored);
-        }
-
-        window.history.replaceState(null, "", window.location.pathname);
+  useEffect(()=>{
+    const hash=window.location.hash;
+    if(hash.includes("access_token")){
+      const p=new URLSearchParams(hash.replace("#","?"));
+      const token=p.get("access_token");
+      if(token){
+        SB_AUTH.getUser(token).then(u=>{
+          if(u){
+            const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
+            handleAuthSuccess(stored);
+            window.history.replaceState(null,"",window.location.pathname);
+          }
+          setAuthLoading(false);
+        }).catch(()=>setAuthLoading(false));
+      } else {
         setAuthLoading(false);
-      });
-    } else {
-      setAuthLoading(false);
+      }
     }
-  }
-}, []);
+  },[]);
   // Token refresh
   useEffect(()=>{
     if(!authSession?.refresh_token)return;
