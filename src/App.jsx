@@ -1827,7 +1827,7 @@ export default function App(){
       const p=new URLSearchParams(hash.replace("#","?"));
       const token=p.get("access_token");
       if(token){
-        SB_AUTH.getUser(token).then(u=>{
+        SB_AUTH.auth.getUser(token).then(u=>{
           if(u){
             const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
             handleAuthSuccess(stored);
