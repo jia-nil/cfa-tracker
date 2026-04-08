@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ── Supabase config — replace with your project values ───────────────────────
+const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
+const OR_KEY  = "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"; // openrouter.ai → API Keys // ← paste your anon key here before committing
+// ─────────────────────────────────────────────────────────────────────────────
 
-const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
-const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const OR_KEY  = import.meta.env.VITE_OR_KEY ; // openrouter.ai → API Keys // ← paste your anon key here before committing
+// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
+// Parses a LaTeX-subset string into tokens, renders as React elements.
+// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
 
 function parseMath(raw) {
   // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
