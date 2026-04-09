@@ -4,7 +4,53 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
 const OR_KEY  = "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"; 
+const SB_AUTH = {
+  async signUp(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
+    return d;
+  },
 
+  async signInEmail(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
+    return d;
+  },
+
+  async signOut(accessToken) {
+    await fetch(`${SB_URL}/auth/v1/logout`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+  },
+
+  async getUser(accessToken) {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, {
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  },
+
+  async loadData(table, userId, accessToken) {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
+      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
+    );
+    if (!r.ok) return [];
+    return await r.json();
+  },
+};
 function parseMath(raw) {
   // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
@@ -180,23 +226,12 @@ function renderMath(text) {
 
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NTA SIMULATION — Practice Tab
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SLOTHR — NTA JEE MAINS SIMULATION
-// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
-// Students add their own questions via the admin panel (slothr-admin.jsx)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
 
-// ── Select component ──────────────────────────────────────────────────────────
+
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
@@ -209,7 +244,7 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+
 const THEME = {
   dark:{
     bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
@@ -227,13 +262,13 @@ const THEME = {
   },
 };
 
-// ── Ad config — replace with real values when AdSense is approved ─────────────
+
 const ADSENSE_PUB   = "ca-pub-XXXXXXXXXXXXXXXX";
 const ADSENSE_READY = false; // flip to true once AdSense approves you
 const AD_SLOTS      = { rewarded:"1234567890", interstitial:"0987654321" };
 const INTERSTITIAL_EVERY = 3;
 
-// ── Rewarded Ad Modal ─────────────────────────────────────────────────────────
+
 function MockRewardedAd({onComplete,onSkip,d}){
   const [secs,setSecs]=useState(15);
   const [done,setDone]=useState(false);
