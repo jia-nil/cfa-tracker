@@ -1,14 +1,57 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ── Supabase config — replace with your project values ───────────────────────
+
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
-const OR_KEY  = "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"; // openrouter.ai → API Keys // ← paste your anon key here before committing
-// ─────────────────────────────────────────────────────────────────────────────
+const OR_KEY  = "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"; 
 
-// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
-// Parses a LaTeX-subset string into tokens, renders as React elements.
-// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
+const SB_AUTH = {
+  async signUp(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
+    return d;
+  },
+
+  async signInEmail(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
+    return d;
+  },
+
+  async signOut(accessToken) {
+    await fetch(`${SB_URL}/auth/v1/logout`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+  },
+
+  async getUser(accessToken) {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, {
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  },
+
+  async loadData(table, userId, accessToken) {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
+      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
+    );
+    if (!r.ok) return [];
+    return await r.json();
+  },
+};
 
 function parseMath(raw) {
   // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
@@ -72,7 +115,6 @@ function parseMath(raw) {
       continue;
     }
 
-    // superscript  ^{...} or ^digit
     if (ch === '^') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -82,7 +124,7 @@ function parseMath(raw) {
       if (/\d/.test(raw[i+1])) { out.push({ t: 'sup', v: raw[i+1] }); i+=2; continue; }
     }
 
-    // subscript  _{...} or _digit
+  
     if (ch === '_') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
