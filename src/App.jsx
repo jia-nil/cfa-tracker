@@ -1,4 +1,4 @@
-aimport { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
