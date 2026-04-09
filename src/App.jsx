@@ -5,54 +5,6 @@ const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
 const OR_KEY  = "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"; 
 
-const SB_AUTH = {
-  async signUp(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
-    return d;
-  },
-
-  async signInEmail(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
-    return d;
-  },
-
-  async signOut(accessToken) {
-    await fetch(`${SB_URL}/auth/v1/logout`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
-    });
-  },
-
-  async getUser(accessToken) {
-    const r = await fetch(`${SB_URL}/auth/v1/user`, {
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  },
-
-  async loadData(table, userId, accessToken) {
-    const r = await fetch(
-      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
-      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
-    );
-    if (!r.ok) return [];
-    return await r.json();
-  },
-};
-
 function parseMath(raw) {
   // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
@@ -115,6 +67,7 @@ function parseMath(raw) {
       continue;
     }
 
+    // superscript  ^{...} or ^digit
     if (ch === '^') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -124,7 +77,7 @@ function parseMath(raw) {
       if (/\d/.test(raw[i+1])) { out.push({ t: 'sup', v: raw[i+1] }); i+=2; continue; }
     }
 
-  
+    // subscript  _{...} or _digit
     if (ch === '_') {
       if (raw[i+1] === '{') {
         const [val, i2] = readBraced(i+1);
@@ -2046,6 +1999,14 @@ export default function App(){
     if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
     if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
   },[authSession?.access_token]);
+  useEffect(()=>{
+    setGoals(prev=>prev.map(g=>{
+      if(g.date!==today()) return g;
+      if(g.type==="study"){const done=sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0);return{...g,achieved:done>=(g.target||60)};}
+      if(g.type==="pyq"){const done=pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
+      return g;
+    }));
+  },[sessions,pyqHistory]);
   // Auth gate — after ALL hooks
   if(authLoading)return(
     <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
@@ -2065,15 +2026,6 @@ export default function App(){
   const isLow=timerMode==="countdown"&&countdownSec<60&&timerOn;
   const RING=85;
   const CIRC=2*Math.PI*RING;
-
-  useEffect(()=>{
-    setGoals(prev=>prev.map(g=>{
-      if(g.date!==today()) return g;
-      if(g.type==="study"){const done=sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0);return{...g,achieved:done>=(g.target||60)};}
-      if(g.type==="pyq"){const done=pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
-      return g;
-    }));
-  },[sessions,pyqHistory]);
 
   function addGoal(){
     if(!goalTopic&&!goalInput.trim()) return;
