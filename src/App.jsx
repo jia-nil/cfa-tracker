@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+aimport { useState, useEffect, useRef, useCallback } from "react";
 
 
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
@@ -263,94 +263,12 @@ const THEME = {
 };
 
 
-const ADSENSE_PUB   = "ca-pub-XXXXXXXXXXXXXXXX";
-const ADSENSE_READY = false; // flip to true once AdSense approves you
-const AD_SLOTS      = { rewarded:"1234567890", interstitial:"0987654321" };
-const INTERSTITIAL_EVERY = 3;
 
 
-function MockRewardedAd({onComplete,onSkip,d}){
-  const [secs,setSecs]=useState(15);
-  const [done,setDone]=useState(false);
-  useEffect(()=>{
-    const t=setInterval(()=>setSecs(s=>{if(s<=1){clearInterval(t);setDone(true);return 0;}return s-1;}),1000);
-    return()=>clearInterval(t);
-  },[]);
-  return(
-    <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,.88)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(8px)"}}>
-      <div style={{width:360,background:d.card,borderRadius:16,overflow:"hidden",border:`1px solid ${d.b}`}}>
-        <div style={{height:200,background:d.hover,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,borderBottom:`1px solid ${d.b}`}}>
-          {ADSENSE_READY?(
-            <ins className="adsbygoogle" style={{display:"block",width:"100%",height:"200px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.rewarded} data-ad-format="fluid"/>
-          ):(
-            <><div style={{fontSize:36}}>📺</div><div style={{fontSize:13,color:d.t3,fontWeight:500}}>ad placeholder</div><div style={{fontSize:11,color:d.t4}}>swap with real AdSense rewarded unit</div></>
-          )}
-        </div>
-        <div style={{padding:"18px 20px"}}>
-          <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:4}}>watch this to unlock AI</div>
-          <div style={{fontSize:11.5,color:d.t3,marginBottom:16}}>one short ad = one AI use. fair trade.</div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {done?(
-              <button onClick={onComplete} style={{flex:1,padding:"11px",borderRadius:3,background:"#5eaa8a",color:"#fff",border:"none",fontFamily:"inherit",fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ claim AI use →</button>
-            ):(
-              <button disabled style={{flex:1,padding:"11px",borderRadius:3,background:d.hover,color:d.t3,border:`1px solid ${d.b}`,fontFamily:"inherit",fontSize:13,cursor:"not-allowed"}}>unlocks in {secs}s…</button>
-            )}
-            <button onClick={onSkip} style={{padding:"11px 14px",borderRadius:3,background:"none",color:d.t4,border:`1px solid ${d.b}`,fontFamily:"inherit",fontSize:12,cursor:"pointer"}}>skip</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-// ── Interstitial Ad ───────────────────────────────────────────────────────────
-function InterstitialAd({onClose,d}){
-  const [secs,setSecs]=useState(5);
-  useEffect(()=>{
-    const t=setInterval(()=>setSecs(s=>{if(s<=1){clearInterval(t);return 0;}return s-1;}),1000);
-    return()=>clearInterval(t);
-  },[]);
-  return(
-    <div style={{position:"fixed",inset:0,zIndex:190,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(6px)"}}>
-      <div style={{width:420,background:d.card,borderRadius:16,overflow:"hidden",border:`1px solid ${d.b}`}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:`1px solid ${d.b}`}}>
-          <span style={{fontSize:10,color:d.t4,letterSpacing:".06em",textTransform:"uppercase"}}>advertisement</span>
-          <button onClick={secs===0?onClose:undefined} disabled={secs>0}
-            style={{padding:"5px 13px",borderRadius:6,background:secs===0?"#5eaa8a":d.hover,color:secs===0?"#fff":d.t4,border:"none",fontFamily:"inherit",fontSize:11,cursor:secs===0?"pointer":"not-allowed",transition:"all .2s",fontWeight:secs===0?600:400}}>
-            {secs>0?`close in ${secs}s`:"close ✕"}
-          </button>
-        </div>
-        <div style={{height:250,background:d.hover,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
-          {ADSENSE_READY?(
-            <ins className="adsbygoogle" style={{display:"block",width:"100%",height:"250px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.interstitial} data-ad-format="fluid"/>
-          ):(
-            <><div style={{fontSize:36}}>🎯</div><div style={{fontSize:13,color:d.t3,fontWeight:500}}>ad placeholder</div><div style={{fontSize:11,color:d.t4}}>swap with AdSense interstitial unit</div></>
-          )}
-        </div>
-        <div style={{padding:"10px 16px",borderTop:`1px solid ${d.b}`}}>
-          <span style={{fontSize:11,color:d.t4}}>slothr — study less. rank more. nap often.</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-// ── Sticky Banner Ad ──────────────────────────────────────────────────────────
-function BannerAd({d}){
-  return(
-    <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:d.sb,borderTop:`1px solid ${d.b}`,padding:"6px 16px",display:"flex",alignItems:"center",gap:10,minHeight:52}}>
-      <span style={{fontSize:9,color:d.t4,letterSpacing:".06em",textTransform:"uppercase",flexShrink:0}}>ad</span>
-      {ADSENSE_READY?(
-        <ins className="adsbygoogle" style={{display:"inline-block",flex:1,height:"36px"}} data-ad-client={ADSENSE_PUB} data-ad-slot={AD_SLOTS.interstitial}/>
-      ):(
-        <div style={{flex:1,height:36,background:d.hover,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",border:`1px dashed ${d.b}`}}>
-          <span style={{fontSize:11,color:d.t4}}>banner ad — awaiting AdSense approval 🦥</span>
-        </div>
-      )}
-      <span style={{fontSize:9,color:d.t4,flexShrink:0}}>slothr.in</span>
-    </div>
-  );
-}
+
+
 
 // ── Placeholder papers — replace questions with real ones from your DB ────────
 const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
@@ -1786,43 +1704,14 @@ function AuthScreen({onAuth}) {
 
 
 export default function App(){
-  // ── Ad state ────────────────────────────────────────────────────────────────
-  const [showRewarded,setShowRewarded]=useState(false);
-  const [rewardedCallback,setRewardedCallback]=useState(null); // fn to call after ad
-  const [aiUses,setAiUses]=useState({count:0,date:new Date().toDateString()});
-  const [tabSwitches,setTabSwitches]=useState(0);
-  const [showInterstitial,setShowInterstitial]=useState(false);
-  const [pendingTab,setPendingTab]=useState(null);
+  
+  function requestAiUse(onGranted){ onGranted(); }
 
-  // Function to request an AI use — shows rewarded ad if out of free uses
-  function requestAiUse(onGranted){
-    // Give 2 free uses per day without ad
-    if(aiUses.count<2){
-      setAiUses(p=>({...p,count:p.count+1}));
-      onGranted();
-      return;
-    }
-    // Otherwise show rewarded ad
-    setRewardedCallback(()=>()=>{
-      setAiUses(p=>({...p,count:p.count+1}));
-      setShowRewarded(false);
-      onGranted();
-    });
-    setShowRewarded(true);
-  }
-
-  // Tab switch with interstitial gate
+  
   function switchTab(newTab){
-    if(newTab===tab) return;
-    const newCount=tabSwitches+1;
-    setTabSwitches(newCount);
-    if(newCount%INTERSTITIAL_EVERY===0){
-      setPendingTab(newTab);
-      setShowInterstitial(true);
-    } else {
-      setTab(newTab);
-    }
-  }
+  if(newTab===tab) return;
+  setTab(newTab);
+}
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authSession,setAuthSession]=useState(()=>{
@@ -2743,17 +2632,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     );
   };
 
-  // ── Main render ───────────────────────────────────────────────────────────
+  
   return(
     <>
       {/* ── Ad Modals ── */}
-      {showRewarded&&<MockRewardedAd d={d} onComplete={rewardedCallback} onSkip={()=>setShowRewarded(false)}/>}
-      {showInterstitial&&<InterstitialAd d={d} onClose={()=>{setShowInterstitial(false);if(pendingTab){setTab(pendingTab);setPendingTab(null);}}}/>}
-
+     
       {fullscreen&&renderFS()}
       <div className="layout" style={{visibility:fullscreen?"hidden":"visible",paddingBottom:52}}><style>{css}</style>
-      {/* ── Sticky Banner Ad ── */}
-      <BannerAd d={d}/>
+      
+      
 
         <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
         <aside className="sidebar">
@@ -2838,14 +2725,14 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             </div>
           </div>}
 
-          {/* ── PRACTICE — full bleed, no inner wrapper ── */}
+          
           {tab==="pyq"&&(
             <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
           )}
 
           <div className="inner" style={{display:tab==="pyq"?"none":"block"}}>
 
-            {/* ── OVERVIEW ── */}
+           
             {tab==="overview"&&(
               <div className="pin">
                 {/* ── Hero stats — editorial wide layout ── */}
