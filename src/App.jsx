@@ -3,62 +3,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
-const OR_KEY  = "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"; 
-const SB_AUTH = {
-  async signUp(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
-    return d;
-  },
+const OR_KEY  = "YOUR_OPENROUTER_KEY"; 
 
-  async signInEmail(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
-    return d;
-  },
-
-  async signOut(accessToken) {
-    await fetch(`${SB_URL}/auth/v1/logout`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
-    });
-  },
-
-  async getUser(accessToken) {
-    const r = await fetch(`${SB_URL}/auth/v1/user`, {
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  },
-
-  async loadData(table, userId, accessToken) {
-    const r = await fetch(
-      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
-      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
-    );
-    if (!r.ok) return [];
-    return await r.json();
-  },
-};
 function parseMath(raw) {
-  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
+ 
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-    // reads {content} starting at from, returns [content, endIndex]
+   
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -73,7 +27,7 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
-    // backslash command
+    
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
@@ -226,12 +180,23 @@ function renderMath(text) {
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NTA SIMULATION — Practice Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLOTHR — NTA JEE MAINS SIMULATION
+// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
+// Students add their own questions via the admin panel (slothr-admin.jsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
 
-
+// ── Select component ──────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
@@ -244,7 +209,7 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-
+// ── Theme ─────────────────────────────────────────────────────────────────────
 const THEME = {
   dark:{
     bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
@@ -261,10 +226,6 @@ const THEME = {
     inp:"#f7f4ee",ring:"#d4612a",danger:"#c44a35",
   },
 };
-
-
-
-
 
 
 
@@ -378,28 +339,20 @@ const PAPERS = [
 
 ];
 
-// ── Placeholder questions — you'll populate these from Supabase ───────────────
-// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
-// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
-// Replace these with real questions fetched from Supabase.
-// IMPORTANT: every real question MUST include a `topic` field (chapter name).
-// This is how the Analytics tab and AI coach know which chapter you got wrong.
-// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 const SECTIONS = ["Physics","Chemistry","Mathematics"];
 const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
 const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
 
-// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
-// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
+
 function getNTA(dark){
   if(!dark) return {
-    // Real NTA colours
+   
     bg:"#f5f5f5",
-    header:"#1a7c3e",        // NTA green
+    header:"#1a7c3e",        
     headerText:"#ffffff",
-    subBar:"#f47920",        // NTA orange
+    subBar:"#f47920",        
     subBarText:"#ffffff",
     subBarActive:"#ffffff",
     subBarActiveBg:"rgba(255,255,255,.18)",
@@ -411,7 +364,7 @@ function getNTA(dark){
     text3:"#666666",
     text4:"#999999",
     hover:"#f0f0f0",
-    // Palette (NTA official)
+    // Palette 
     notVisited:"#9e9e9e",
     notAnswered:"#e53935",
     answered:"#43a047",
@@ -477,8 +430,8 @@ function fmtTime(secs) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
-// ── Question Status ───────────────────────────────────────────────────────────
-// notVisited | notAnswered | answered | markedReview | answeredMarked
+// ── Question Status 
+
 function getStatus(state) {
   if (!state.visited) return "notVisited";
   if (state.markedReview && state.answer !== null) return "answeredMarked";
@@ -497,9 +450,7 @@ function statusColor(status, nta) {
   }[status] || nta.notVisited;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PAPER LIST — card view
-// ─────────────────────────────────────────────────────────────────────────────
+
 function PaperList({onStart,onExit,nta,completedTests,onReview}){
   const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
   return(
@@ -1648,7 +1599,7 @@ function AuthScreen({onAuth}) {
     <div style={{
       position:"fixed", top:0, left:0, right:0, bottom:0, zIndex:9999,
       background:"#0e0d0b", display:"flex", alignItems:"center",
-      justifyContent:"center", padding:16, boxSizing:"border-box",
+      justifyContent:"center", padding:"20px 16px", boxSizing:"border-box",
       fontFamily:"'DM Sans',sans-serif", overflowY:"auto",
     }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
@@ -1704,14 +1655,11 @@ function AuthScreen({onAuth}) {
 
 
 export default function App(){
-  
-  function requestAiUse(onGranted){ onGranted(); }
-
-  
+  // Tab switch
   function switchTab(newTab){
-  if(newTab===tab) return;
-  setTab(newTab);
-}
+    if(newTab===tab) return;
+    setTab(newTab);
+  }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authSession,setAuthSession]=useState(()=>{
@@ -2174,7 +2122,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   const SW=sideOpen?220:56;
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
-    html,body{overflow-x:hidden;max-width:100%;}
+    html,body{overflow-x:hidden;width:100%;}
+    body{margin:0;padding:0;}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     body{background:${d.bg};font-family:'DM Sans',sans-serif;color:${d.t};-webkit-font-smoothing:antialiased;}
     *{transition:background-color .18s,border-color .18s,color .12s;}
@@ -2183,35 +2132,53 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     /* ── LAYOUT ── */
     .layout{display:flex;min-height:100vh;overflow-x:hidden;width:100%;max-width:100%;}
     .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:20;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
-    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;min-width:0;overflow-x:hidden;width:calc(100% - ${SW}px);box-sizing:border-box;};min-height:100vh;transition:margin-left .28s cubic-bezier(.16,1,.3,1);min-width:0;overflow-x:hidden;max-width:100vw;}
-    .inner{max-width:1060px;padding:28px 24px;width:100%;margin:0 auto;box-sizing:border-box;}
+    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;min-width:0;overflow-x:hidden;width:calc(100% - ${SW}px);box-sizing:border-box;}
+    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
     /* ── RESPONSIVE ── */
-    @media(min-width:1400px){.inner{padding:32px 48px;}.topbar{padding:0 48px;}}
-    @media(max-width:1100px){.inner{padding:24px 20px;}.topbar{padding:0 20px;}}
+    @media(min-width:1400px){
+      .inner{padding:36px 56px;}
+      .topbar{padding:0 56px;}
+    }
+    @media(max-width:1100px){
+      .inner{padding:28px 28px;}
+      .topbar{padding:0 28px;}
+    }
     @media(max-width:900px){
-      .sidebar{width:${sideOpen?"220px":"0px"} !important;z-index:50;box-shadow:${sideOpen?"2px 0 20px rgba(0,0,0,.4)":"none"};}
+      .sidebar{width:${sideOpen?"220px":"0px"} !important;z-index:50;box-shadow:${sideOpen?"2px 0 24px rgba(0,0,0,.5)":"none"};}
       .content{margin-left:0 !important;width:100% !important;}
-      .inner{padding:18px 16px;}.topbar{padding:0 16px !important;}
-      .g3{grid-template-columns:1fr 1fr !important;}.g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}.stat-num{font-size:30px !important;}
+      .inner{padding:20px 18px;}
+      .topbar{padding:0 18px !important;}
+      .g3{grid-template-columns:1fr 1fr !important;}
+      .g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr !important;}
+      .stat-num{font-size:30px !important;}
     }
     @media(max-width:600px){
       .sidebar{width:0 !important;transform:translateX(-110%) !important;box-shadow:none !important;}
-      .content{margin-left:0 !important;width:100% !important;padding-bottom:64px;}
-      .inner{padding:14px 12px !important;}.topbar{padding:0 12px !important;min-height:50px;}
-      .g2{grid-template-columns:1fr 1fr !important;}.g3,.g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}.stat-num{font-size:22px !important;}
-      .ptitle{font-size:14px !important;}.psub{display:none !important;}
-      .section-head{font-size:16px !important;}.snotes{display:none;}
+      .content{margin-left:0 !important;width:100% !important;padding-bottom:68px;}
+      .inner{padding:14px 12px !important;}
+      .topbar{padding:0 12px !important;min-height:50px;}
+      .g2{grid-template-columns:1fr 1fr !important;}
+      .g3,.g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr !important;}
+      .stat-num{font-size:20px !important;}
+      .ptitle{font-size:14px !important;}
+      .psub{display:none !important;}
+      .section-head{font-size:16px !important;}
+      .snotes{display:none;}
     }
-    @media(max-width:380px){
+    @media(max-width:400px){
       .g2,.g3,.g4{grid-template-columns:1fr !important;}
-      .inner{padding:12px 10px !important;}.stat-num{font-size:18px !important;}
+      .inner{padding:12px 10px !important;}
+      .stat-num{font-size:18px !important;}
     }
+    /* sidebar overlay on tablet */
     .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:45;cursor:pointer;}
     @media(max-width:900px){.sb-overlay{display:${sideOpen?"block":"none"};}}
-    .mob-btn{display:none;width:32px;height:32px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:16px;flex-shrink:0;}
+    /* hamburger for tablet */
+    .mob-btn{display:none;width:34px;height:34px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;}
     @media(max-width:900px){.mob-btn{display:flex;}}
+    /* mobile bottom tab bar */
     .mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:30;background:${d.sb};border-top:1px solid ${d.b};align-items:stretch;padding-bottom:env(safe-area-inset-bottom,0px);}
     @media(max-width:600px){.mob-tabs{display:flex;}}
 
@@ -2233,7 +2200,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
 
     /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
     .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
     .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
     .tbr{display:flex;align-items:center;gap:7px;}
@@ -2461,7 +2428,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
 
   if(!jeClass) return(
-    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:16,boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
         <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
@@ -2632,44 +2599,35 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     );
   };
 
-  
-return (
+  // ── Main render ───────────────────────────────────────────────────────────
+  return(
     <>
-      {fullscreen && renderFS()}
+      {/* ── Ad Modals ── */}
 
-      <div className="layout" style={{visibility: fullscreen ? "hidden" : "visible"}}>
-        <style>{css}</style>
+      {fullscreen&&renderFS()}
+      <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}><style>{css}</style>
+      {/* ── Sticky Banner Ad ── */}
 
-        {/* Sidebar overlay (mobile) */}
-        <div className="sb-overlay" onClick={() => setSideOpen(false)}/>
-
-        {/* ── SIDEBAR ── */}
+        <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
         <aside className="sidebar">
           <div className="s-logo">
-            <button className="s-toggle" onClick={() => setSideOpen(p => !p)}>{sideOpen ? "‹" : "›"}</button>
+            <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>{sideOpen?"‹":"›"}</button>
             <div className="s-brand">
-              <span style={{fontSize:14,marginRight:4}}>🦥</span>
-              <span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>sloth</span>
-              <span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>r</span>
+              <span style={{fontSize:14,marginRight:4}}>🦥</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>sloth</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>r</span>
             </div>
           </div>
-
           <nav className="s-nav">
             <div className="s-sec" style={{marginTop:6}}>navigation</div>
-            {TABS.map(t => (
-              <div key={t.id} className={`s-item${tab === t.id ? " active" : ""}`}
-                onClick={() => switchTab(t.id)} title={!sideOpen ? t.label : ""}>
+            {TABS.map(t=>(
+              <div key={t.id} className={`s-item${tab===t.id?" active":""}`} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
                 <span className="s-icon">{t.icon}</span>
                 <span className="s-label">{t.label}</span>
               </div>
             ))}
-
-            {sideOpen && (
-              <div style={{margin:"10px 4px 0",padding:"10px 11px",background:d.inp,borderRadius:3,border:`1px solid ${d.b}`}}>
+            {sideOpen&&(
+              <div style={{margin:"10px 4px 0",padding:"10px 11px",background:d.sa,borderRadius:3,border:`1px solid ${d.sab}`}}>
                 <div style={{fontSize:9,color:d.t4,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>today</div>
-                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>
-                  {todayTime > 0 ? `${fmt(todayTime)} today` : "zero. the exam doesn't care."}
-                </div>
+                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>{todayTime>0?`${fmt(todayTime)} today`:"zero. the exam doesn't care."}</div>
                 <div className="btrack" style={{height:3}}>
                   <div className="bfill" style={{width:`${Math.min((todayTime/360)*100,100)}%`,background:`linear-gradient(90deg,${d.a1},${d.a3})`}}/>
                 </div>
@@ -2680,90 +2638,71 @@ return (
               </div>
             )}
           </nav>
-
           <div className="s-footer">
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {user?.avatar ? (
+              {user?.avatar?(
                 <img src={user.avatar} style={{width:27,height:27,borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="avatar"/>
-              ) : (
-                <div className="s-av">{(user?.name || "S")[0].toUpperCase()}</div>
+              ):(
+                <div className="s-av">{(user?.name||"S")[0].toUpperCase()}</div>
               )}
               <div className="s-uinfo">
-                <div style={{fontSize:12,fontWeight:500,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:130}}>{user?.name || "Student"}</div>
+                <div style={{fontSize:12,fontWeight:500,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:130}}>{user?.name||"Student"}</div>
                 <div style={{fontSize:10,color:d.a1}}>{classLabel} · 🦥</div>
               </div>
-              {sideOpen && (
+              {sideOpen&&(
                 <button onClick={handleSignOut} title="sign out"
                   style={{marginLeft:"auto",background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:14,padding:"2px 4px",flexShrink:0}}
-                  onMouseOver={e => e.target.style.color = d.danger}
-                  onMouseOut={e => e.target.style.color = d.t4}>
+                  onMouseOver={e=>e.target.style.color=d.danger} onMouseOut={e=>e.target.style.color=d.t4}>
                   ⏻
                 </button>
               )}
             </div>
-            {sideOpen && (
-              <div style={{marginTop:8,padding:"6px 8px",background:d.inp,borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:10,color:d.t3}}>AI uses today</span>
-                <span style={{fontSize:10,fontWeight:600,color:aiUses.count<2?d.a2:d.a1}}>
-                  {aiUses.count < 2 ? `${2 - aiUses.count} free left` : "used up"}
-                </span>
-              </div>
-            )}
+
           </div>
         </aside>
 
-        {/* ── MAIN CONTENT ── */}
         <div className="content">
-
-          {/* Topbar — hidden on NTA mode */}
-          {tab !== "pyq" && (
-            <div className="topbar">
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <button className="mob-btn" onClick={() => setSideOpen(p => !p)} aria-label="menu">☰</button>
-                <div>
-                  <div className="ptitle">{TABS.find(t => t.id === tab)?.label}</div>
-                  <div className="psub">
-                    {tab === "overview" && `${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. tick tock.`}
-                    {tab === "coach" && "your smartest situationship. i know things about you."}
-                    {tab === "goals" && (todayGoals.length === 0 ? "no goals. bold strategy." : todayGoals.filter(g=>g.achieved).length === todayGoals.length ? `all ${todayGoals.length} done.` : `${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
-                    {tab === "sessions" && `${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
-                    {tab === "streaks" && `${streak} day streak${currentMilestone ? " · " + currentMilestone.icon + " " + currentMilestone.label : ""}`}
-                    {tab === "syllabus" && "track every chapter. i know which ones you're avoiding."}
-                  </div>
+          {tab!=="pyq"&&<div className="topbar">
+            {/* Always-visible Slothr logo */}
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
+              <div>
+                <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
+                <div className="psub">
+                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. days left. tick tock.`}
+                  {tab==="coach"&&"your smartest situationship. i know things about you."}
+                  {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
+                  {tab==="pyq"&&"3 hours. 54 questions. no one to save you."}
+                  {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
+                  {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
+                  {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
                 </div>
               </div>
-              <div className="tbr">
-                <button className="icon-btn" onClick={() => setDark(p => !p)}>{dark ? "☀" : "◑"}</button>
-                <button className="ghost-sm" onClick={() => setJeClass(null)}>switch class</button>
-              </div>
             </div>
+            <div className="tbr">
+              <button className="icon-btn" onClick={()=>setDark(p=>!p)}>{dark?"☀":"◑"}</button>
+              <button className="ghost-sm" onClick={()=>setJeClass(null)}>switch class</button>
+            </div>
+          </div>}
+
+          {/* ── PRACTICE — full bleed, no inner wrapper ── */}
+          {tab==="pyq"&&(
+            <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
           )}
 
-          {/* ── NTA / PRACTICE TAB ── */}
-          {tab === "pyq" && (
-            <NTAMode
-              user={user} dark={dark}
-              onExit={() => switchTab("overview")}
-              onTestComplete={handleTestComplete}
-              completedTests={completedTests}
-              onStoreTest={handleStoreTest}
-            />
-          )}
+          <div className="inner" style={{display:tab==="pyq"?"none":"block"}}>
 
-          {/* ── ALL OTHER TABS ── */}
-          <div className="inner" style={{display: tab === "pyq" ? "none" : "block"}}>
-
-            {/* ══ OVERVIEW ══ */}
-            {tab === "overview" && (
+            {/* ── OVERVIEW ── */}
+            {tab==="overview"&&(
               <div className="pin">
-                {/* Hero stats */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
+                {/* ── Hero stats — editorial wide layout ── */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
                   {[
-                    {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions logged.`,                                                                   color:d.a1},
-                    {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good.":fmt(todayTime)+" logged.",                       color:todayTime>=360?d.a2:d.t},
-                    {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. 😏":"goals set. bold of you.", color:d.a2},
-                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good.":"yeah we're fixing this.", color:d.a3},
-                  ].map(s => (
+                    {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
+                    {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
+                    {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
+                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
+                  ].map(s=>(
                     <div key={s.lbl} style={{background:d.card,padding:"28px 26px"}}>
                       <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:14}}>{s.lbl}</div>
                       <div style={{fontFamily:"'DM Serif Display',serif",fontSize:46,fontWeight:400,lineHeight:1,letterSpacing:"-.02em",color:s.color,marginBottom:10}}>{s.val}</div>
@@ -2771,12 +2710,10 @@ return (
                     </div>
                   ))}
                 </div>
-
                 <div className="g2" style={{gap:14,marginBottom:32}}>
-                  {/* Subject time bars */}
                   <div className="card cp" style={{padding:"24px 26px"}}>
                     <div className="cl" style={{marginBottom:18,letterSpacing:".14em"}}>Subject Time</div>
-                    {Object.entries(SUBJECT_COLORS).map(([sub, color]) => (
+                    {Object.entries(SUBJECT_COLORS).map(([sub,color])=>(
                       <div key={sub} style={{marginBottom:13}}>
                         <div className="rowb" style={{marginBottom:5}}>
                           <div className="row" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12.5,fontWeight:500}}>{sub}</span></div>
@@ -2786,37 +2723,27 @@ return (
                       </div>
                     ))}
                   </div>
-
-                  {/* Today's goals preview */}
                   <div className="card cp">
                     <div className="cl mb12">Today's Goals</div>
-                    {todayGoals.length === 0 ? (
-                      <div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>
-                    ) : todayGoals.slice(0, 5).map(g => (
-                      <div key={g.id} className={`goal-item${g.achieved ? " achieved" : ""}`} style={{padding:"9px 11px"}}>
-                        <div className={`goal-check${g.achieved ? " done" : ""}`}
-                          onClick={() => setGoals(p => p.map(x => x.id === g.id ? {...x, achieved: !x.achieved} : x))}>
-                          {g.achieved ? "✓" : ""}
-                        </div>
+                    {todayGoals.length===0?(<div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>)
+                    :todayGoals.slice(0,5).map(g=>(
+                      <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`} style={{padding:"9px 11px"}}>
+                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div style={{flex:1}}>
-                          <div className={`goal-text${g.achieved ? " done" : ""}`} style={{fontSize:12.5}}>{g.text}</div>
-                          <div className="goal-meta">{g.subject}{g.topic ? ` · ${g.topic}` : ""}</div>
+                          <div className={`goal-text${g.achieved?" done":""}`} style={{fontSize:12.5}}>{g.text}</div>
+                          <div className="goal-meta">{g.subject}{g.topic?` · ${g.topic}`:""}</div>
                         </div>
-                        {g.aiGenerated && <div className="goal-ai-badge">AI</div>}
+                        {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
                       </div>
                     ))}
                   </div>
                 </div>
-
-                <div className="g2" style={{gap:14}}>
-                  {/* Recent sessions */}
+                <div className="g2" style={{gap:14,marginBottom:0}}>
+                  {/* Recent Study Sessions */}
                   <div className="card" style={{padding:"22px 24px"}}>
-                    <div className="rowb" style={{marginBottom:16}}>
-                      <div className="cl" style={{letterSpacing:".14em"}}>recent sessions</div>
-                      <button className="ghost-sm" onClick={() => setTab("sessions")}>see all →</button>
-                    </div>
-                    {sessions.length === 0 && <div className="empty" style={{padding:"14px 0"}}><div className="et">nothing yet.</div><div className="es">i'm watching. go.</div></div>}
-                    {[...sessions].reverse().slice(0, 5).map(s => (
+                    <div className="rowb" style={{marginBottom:16}}><div className="cl" style={{letterSpacing:".14em"}}>recent sessions</div><button className="ghost-sm" onClick={()=>setTab("sessions")}>see all →</button></div>
+                    {sessions.length===0&&<div className="empty" style={{padding:"14px 0"}}><div className="et">nothing yet.</div><div className="es">i'm watching. go.</div></div>}
+                    {[...sessions].reverse().slice(0,5).map(s=>(
                       <div key={s.id} className="srow">
                         <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
                         <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
@@ -2826,25 +2753,25 @@ return (
                       </div>
                     ))}
                   </div>
-
-                  {/* Recent practice tests */}
+                  {/* recent practice tests — auto-populated from NTA simulation */}
                   <div className="card" style={{padding:"22px 24px"}}>
                     <div className="rowb" style={{marginBottom:16}}>
                       <div className="cl" style={{letterSpacing:".14em"}}>recent practice tests</div>
-                      {mocks.length > 0 && <button className="ghost-sm" onClick={() => switchTab("pyq")}>take a test →</button>}
+                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>switchTab("pyq")}>take a test →</button>}
                     </div>
-                    {mocks.length === 0 ? (
+                    {mocks.length===0?(
                       <div className="empty" style={{padding:"14px 0"}}>
-                        <div className="et">zero attempts. bold.</div>
+                        <div className="et">zero attempts. bold. i like the confidence.</div>
                         <div className="es">uncharted territory. take the test.</div>
-                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={() => switchTab("pyq")}>→ go to practice</button>
+                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>switchTab("pyq")}>→ go to practice</button>
                       </div>
-                    ) : [...mocks].reverse().slice(0, 4).map(m => {
-                      const total = m.physics + m.chemistry + m.math;
-                      const pct2 = Math.round((total / 180) * 100);
-                      const scoreC = pct2 >= 60 ? d.a2 : pct2 >= 40 ? d.a1 : d.danger;
-                      return (
-                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${d.b}`}}>
+                    ):[...mocks].reverse().slice(0,4).map(m=>{
+                      const total=m.physics+m.chemistry+m.math;
+                      const outOf=180;
+                      const pct=Math.round((total/outOf)*100);
+                      const scoreC=pct>=60?d.a2:pct>=40?d.gold:d.danger;
+                      return(
+                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${d.div}`}}>
                           <div style={{width:38,height:38,borderRadius:2,background:`${scoreC}14`,border:`1px solid ${scoreC}30`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                             <span style={{fontFamily:"'DM Serif Display',serif",fontSize:15,fontWeight:400,color:scoreC}}>{total}</span>
                           </div>
@@ -2867,88 +2794,53 @@ return (
               </div>
             )}
 
-            {/* ══ COACH / ANALYTICS ══ */}
-            {tab === "coach" && (
+            {/* ── JEE COACH ── */}
+            {tab==="coach"&&(
               <div className="pin">
                 <div className="rowb" style={{marginBottom:32,alignItems:"flex-end"}}>
                   <div>
                     <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:6,lineHeight:1.2}}>okay. let's talk about your data.</div>
                     <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>let me tell you exactly where you're leaking marks.</div>
                   </div>
-                  <button className="btn btn-d" onClick={() => requestAiUse(runCoach)} disabled={coachLoading}>
-                    {coachLoading ? "looking..." : "analyse"}
-                  </button>
+                  <button className="btn btn-d" onClick={runCoach} disabled={coachLoading}>{coachLoading?"looking...":"analyse"}</button>
                 </div>
-
                 <div className="g3 mb16">
-                  {Object.entries(SUBJECT_COLORS).map(([sub, color]) => {
-                    const sm = mocks.map(m => ({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
-                    const avg = sm.length ? Math.round(sm.reduce((a,b) => a+b, 0) / sm.length) : null;
-                    const hrs = (totBySub[sub] / 60).toFixed(1);
-                    const eff = avg && parseFloat(hrs) > 0 ? Math.round(avg / parseFloat(hrs)) : null;
-                    return (
+                  {Object.entries(SUBJECT_COLORS).map(([sub,color])=>{
+                    const sm=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
+                    const avg=sm.length?Math.round(sm.reduce((a,b)=>a+b,0)/sm.length):null;
+                    const hrs=(totBySub[sub]/60).toFixed(1);
+                    const eff=avg&&parseFloat(hrs)>0?Math.round(avg/parseFloat(hrs)):null;
+                    return(
                       <div key={sub} className="card cp">
                         <div className="row mb12" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12,fontWeight:600,color}}>{sub}</span></div>
                         <div className="g2" style={{gap:7}}>
-                          <div style={{textAlign:"center",padding:"8px",background:d.inp,borderRadius:3}}>
-                            <div style={{fontSize:20,fontWeight:600,color,letterSpacing:"-.02em"}}>{hrs}h</div>
-                            <div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Time</div>
-                          </div>
-                          <div style={{textAlign:"center",padding:"8px",background:d.inp,borderRadius:3}}>
-                            <div style={{fontSize:20,fontWeight:600,color:avg?(avg>=67?d.a2:avg>=50?d.a1:d.danger):d.t4,letterSpacing:"-.02em"}}>{avg || "—"}</div>
-                            <div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Avg score</div>
-                          </div>
+                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color,letterSpacing:"-.02em"}}>{hrs}h</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Time</div></div>
+                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color:avg?sc(avg):d.t4,letterSpacing:"-.02em"}}>{avg||"—"}</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Avg score</div></div>
                         </div>
-                        {eff && (
-                          <div style={{marginTop:8,fontSize:11,textAlign:"center",padding:"5px",background:eff>8?`${d.a2}10`:`${d.danger}10`,borderRadius:3,color:eff>8?d.a2:d.danger}}>
-                            {eff > 8 ? "✓ Efficient" : "⚠ Low efficiency"} · {eff} pts/hr
-                          </div>
-                        )}
+                        {eff&&<div style={{marginTop:8,fontSize:11,textAlign:"center",padding:"5px",background:eff>8?`${d.a2}10`:`${d.danger}10`,borderRadius:6,color:eff>8?d.a2:d.danger}}>{eff>8?"✓ Efficient":"⚠ Low efficiency"} · {eff} pts/hr</div>}
                       </div>
                     );
                   })}
                 </div>
-
-                {!coachCards && !coachLoading && (
-                  <div className="card empty">
-                    <div style={{fontSize:26,marginBottom:10}}>👀</div>
-                    <div className="et">nothing yet.</div>
-                    <div className="es">i know your weak spots. hit analyse.</div>
-                  </div>
-                )}
-                {coachLoading && (
-                  <div className="card cp">{[100,85,92,78,88,70].map((w,i) => <div key={i} className="shim" style={{width:`${w}%`}}/>)}</div>
-                )}
-                {coachCards?.locked && (
+                {!coachCards&&!coachLoading&&(<div className="card empty"><div style={{fontSize:26,marginBottom:10}}>👀</div><div className="et">nothing yet.</div><div className="es">i know your weak spots. i'll be gentle.ng. we fix it today.</div></div>)}
+                {coachCards?.locked&&(
                   <div className="card cp" style={{textAlign:"center",padding:"32px 24px"}}>
                     <div style={{fontSize:28,marginBottom:12}}>🔒</div>
                     <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:8}}>not enough data yet.</div>
                     <div style={{fontSize:12,color:d.t3,lineHeight:1.7}}>{coachCards.msg}</div>
                   </div>
                 )}
-                {coachCards && !coachCards.locked && (
+                {!coachCards?.locked&&coachLoading&&<div className="card cp">{[100,85,92,78,88,70].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}</div>}
+                {coachCards&&(
                   <div className="coach-grid">
-                    {coachCards.map((card, i) => (
+                    {coachCards.map((card,i)=>(
                       <div key={i} className={`coach-card ${card.color}`}>
                         <div className="cc-icon">{card.icon}</div>
                         <div className="cc-title">{card.title}</div>
                         <div className="cc-insight">{card.insight}</div>
-                        {card.topics?.length > 0 && (
-                          <div className="cc-topics">
-                            {card.topics.map(t => (
-                              <span key={t} className="cc-topic"
-                                style={{background:`${({danger:d.danger,success:d.a2,warning:d.a1,info:d.a3,primary:d.a1}[card.color]||d.a1)}14`,color:({danger:d.danger,success:d.a2,warning:d.a1,info:d.a3,primary:d.a1}[card.color]||d.a1)}}>
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {card.plan && card.plan.map((p, pi) => (
-                          <div key={pi} style={{fontSize:11,color:d.t3,padding:"3px 0",borderBottom:`1px solid ${d.b}`}}>{p}</div>
-                        ))}
-                        {(card.recommendation || card.action) && (
-                          <div className="cc-action">{card.recommendation || card.action}</div>
-                        )}
+                        {card.topics?.length>0&&<div className="cc-topics">{card.topics.map(t=><span key={t} className="cc-topic" style={{background:`${coachCardColor(card.color)}14`,color:coachCardColor(card.color)}}>{t}</span>)}</div>}
+                        {card.plan&&card.plan.map((p,pi)=><div key={pi} style={{fontSize:11,color:d.t3,padding:"3px 0",borderBottom:`1px solid ${d.div}`}}>{p}</div>)}
+                        {(card.recommendation||card.action)&&<div className="cc-action">{card.recommendation||card.action}</div>}
                       </div>
                     ))}
                   </div>
@@ -2956,115 +2848,84 @@ return (
               </div>
             )}
 
-            {/* ══ GOALS ══ */}
-            {tab === "goals" && (
+            {/* ── GOALS ── */}
+            {tab==="goals"&&(
               <div className="pin">
                 <div style={{marginBottom:28}}>
                   <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>today's goals.</div>
-                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>
-                    {todayGoals.length === 0 ? "no goals. add one." : `${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`}
-                  </div>
+                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>no goals yet. add one.</div>
                 </div>
-
                 <div className="g2" style={{gap:14,marginBottom:28}}>
-                  {/* Add goal form */}
                   <div className="card cp">
                     <div className="cl mb12">Add Goal</div>
-                    <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v => { setGoalSub(v); setGoalTopic(""); }} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
-                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"}, ...classTopics(goalSub).map(t => ({value:t,label:t}))]} d={d}/></div>
+                    <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v=>{setGoalSub(v);setGoalTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
+                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...classTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
                     <div className="field"><label className="fl">Type</label><Select value={goalType} onChange={setGoalType} options={[{value:"study",label:"Study (time)"},{value:"pyq",label:"Solve PYQs (count)"},{value:"revision",label:"Revision"}]} d={d}/></div>
-                    <div className="field">
-                      <label className="fl">{goalType === "pyq" ? "Questions target" : "Minutes target"}</label>
-                      <input className="inp" type="number" placeholder={goalType === "pyq" ? "e.g. 15" : "e.g. 90"} min="1" max={goalType === "pyq" ? "50" : "480"} value={goalTarget} onChange={e => setGoalTarget(e.target.value)}/>
-                    </div>
-                    <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e => setGoalInput(e.target.value)}/></div>
+                    <div className="field"><label className="fl">{goalType==="pyq"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="pyq"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="pyq"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
+                    <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/></div>
                     <button className="btn btn-d btn-full" onClick={addGoal}>+ Add Goal</button>
                   </div>
-
-                  {/* AI suggest */}
                   <div className="card cp">
                     <div className="rowb mb12">
-                      <div>
-                        <div style={{fontSize:13,fontWeight:500}}>let me plan your day 😏</div>
-                        <div style={{fontSize:11,color:d.t3,marginTop:2}}>i know your weak spots. i'll be gentle.</div>
-                      </div>
-                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={() => requestAiUse(aiSuggestGoals)} disabled={goalLoading}>
-                        {goalLoading ? "looking..." : "suggest goals"}
-                      </button>
+                      <div><div style={{fontSize:13,fontWeight:500}}>let me plan your day 😏</div><div style={{fontSize:11,color:d.t3,marginTop:2}}>i know your weak spots. i'll be gentle.</div></div>
+                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={aiSuggestGoals} disabled={goalLoading}>{goalLoading?"looking...":"suggest goals"}</button>
                     </div>
-                    {goalLoading && [80,90,75,85].map((w,i) => <div key={i} className="shim" style={{width:`${w}%`}}/>)}
+                    {goalLoading&&[80,90,75,85].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}
+                    {/* Signal breakdown — two bucket framing */}
                     <div style={{display:"flex",flexDirection:"column",gap:5}}>
                       <div style={{fontSize:10,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:d.t4,marginBottom:2}}>what it looks at</div>
                       {(()=>{
-                        const hGaps = Object.keys(TOPICS).flatMap(sub => classTopics(sub).filter(t => !sessions.some(s => s.subject===sub&&s.topic===t) && (JEE_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
-                        const sigs = [
-                          {icon:"📥", label:"not started", detail:`${hGaps} high-weight chapters soon started`, active:hGaps>0, color:d.a1},
-                          {icon:"🔁", label:"needs work",  detail:mocks.length?"mock scores + PYQ accuracy":"take a test first", active:mocks.length>0||pyqHistory.length>0, color:d.a3},
-                          {icon:"⏱", label:"today",       detail:`${fmt(todayTime)||"0m"} studied`, active:true, color:d.a2},
-                          {icon:"📊", label:"mock scores", detail:mocks.length?Object.keys(SUBJECT_COLORS).map(s=>{const sc2=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[s]));return s.slice(0,4)+" "+Math.round(sc2.reduce((a,b)=>a+b,0)/sc2.length)+"/100";}).join(" · "):"take a test first", active:mocks.length>0, color:d.a1},
+                        const hGaps=Object.keys(TOPICS).flatMap(sub=>classTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
+                        const weakPyqs=pyqHistory.length;
+                        const hasMocks=mocks.length>0;
+                        const sigs=[
+                          {icon:"📥", label:"not started", bucket:"A", detail:`${hGaps} high-weight chapter${hGaps!==1?"s":""} soon started`, active:hGaps>0, color:d.a1},
+                          {icon:"🔁", label:"needs work", bucket:"B", detail:hasMocks?`Practice test scores + ${weakPyqs>0?weakPyqs+" PYQ attempts":"no PYQ data yet"}`:"take a test first", active:hasMocks||weakPyqs>0, color:d.a3},
+                          {icon:"⏱", label:"today", bucket:"", detail:`${fmt(todayTime)||"0m"} studied · adjusts goal intensity`, active:true, color:d.a2},
+                          {icon:"📊", label:"mock scores", bucket:"", detail:mocks.length?Object.keys(SUBJECT_COLORS).map(s=>{const sc2=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[s]));return s.slice(0,4)+" "+Math.round(sc2.reduce((a,b)=>a+b,0)/sc2.length)+"/100";}).join(" · "):"take a test first", active:mocks.length>0, color:d.gold},
                         ];
-                        return sigs.map(sig => (
-                          <div key={sig.label} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 11px",borderRadius:3,background:sig.active?`${sig.color}08`:d.inp,border:`1px solid ${sig.active?sig.color+"22":d.b}`}}>
+                        return sigs.map(sig=>(
+                          <div key={sig.label} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 11px",borderRadius:3,background:sig.active?sig.color+"08":d.hover,border:"1px solid "+(sig.active?sig.color+"22":d.b)}}>
                             <span style={{fontSize:13,flexShrink:0}}>{sig.icon}</span>
                             <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:11.5,fontWeight:500,color:sig.active?d.t:d.t3}}>{sig.label}</div>
+                              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                <span style={{fontSize:11.5,fontWeight:500,color:sig.active?d.t:d.t3}}>{sig.label}</span>
+                                {sig.bucket&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:`${sig.color}18`,color:sig.color}}>Bucket {sig.bucket}</span>}
+                              </div>
                               <div style={{fontSize:10.5,color:d.t4,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sig.detail}</div>
                             </div>
                             <div style={{width:6,height:6,borderRadius:"50%",background:sig.active?sig.color:d.t4,flexShrink:0,opacity:sig.active?1:.4}}/>
                           </div>
                         ));
                       })()}
+                      <div style={{fontSize:10.5,color:d.t4,padding:"6px 8px",lineHeight:1.6}}>
+                        i know your weak spots. let me plan your day.
+                      </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Goals list */}
                 <div className="card cp">
                   <div className="rowb mb12">
                     <div className="cl">{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</div>
                     <div style={{fontSize:11,color:d.t3}}>{todayGoals.filter(g=>g.achieved).length}/{todayGoals.length} done</div>
                   </div>
-                  {todayGoals.length > 0 && (
-                    <div style={{marginBottom:12}}>
-                      <div className="btrack" style={{height:4}}>
-                        <div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/>
-                      </div>
-                    </div>
-                  )}
-                  {todayGoals.length === 0 && (
-                    <div className="empty" style={{padding:"22px 0"}}>
-                      <div className="et">no goals yet.</div>
-                      <div className="es">let me plan your day. 😏</div>
-                    </div>
-                  )}
-                  {todayGoals.map(g => {
-                    const prog = g.type==="study"
-                      ? sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0)
-                      : g.type==="pyq"
-                      ? pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length
-                      : g.achieved ? g.target : 0;
-                    const progPct = Math.min((prog/g.target)*100, 100);
-                    return (
+                  {todayGoals.length>0&&<div style={{marginBottom:12}}><div className="btrack" style={{height:4}}><div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/></div></div>}
+                  {todayGoals.length===0&&<div className="empty" style={{padding:"22px 0"}}><div className="et">no goals yet.</div><div className="es">let me plan your day. i know exactly what you need. 😏</div></div>}
+                  {todayGoals.map(g=>{
+                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
+                    const pct=Math.min((prog/g.target)*100,100);
+                    return(
                       <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`}>
-                        <div className={`goal-check${g.achieved?" done":""}`}
-                          onClick={() => setGoals(p => p.map(x => x.id===g.id ? {...x,achieved:!x.achieved} : x))}>
-                          {g.achieved ? "✓" : ""}
-                        </div>
+                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div className="f1">
                           <div className="rowb">
                             <div className={`goal-text${g.achieved?" done":""}`}>{g.text}</div>
-                            {g.aiGenerated && <div className="goal-ai-badge">AI</div>}
+                            {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
                           </div>
-                          <div className="goal-meta">
-                            <span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>
-                            {g.topic && <span> · {g.topic}</span>}
-                            <span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>
-                            {g.reasoning && <span style={{color:d.t4}}> — {g.reasoning}</span>}
-                          </div>
-                          <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${progPct}%`}}/></div>
+                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
+                          <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${pct}%`}}/></div>
                         </div>
-                        <button onClick={() => setGoals(p => p.filter(x => x.id !== g.id))}
-                          style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
+                        <button onClick={()=>setGoals(p=>p.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
                       </div>
                     );
                   })}
@@ -3072,52 +2933,44 @@ return (
               </div>
             )}
 
-            {/* ══ SESSIONS ══ */}
-            {tab === "sessions" && (
+            {/* ── SESSIONS ── */}
+            {tab==="sessions"&&(
               <div className="pin">
                 <div style={{marginBottom:28}}>
                   <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>sessions.</div>
-                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>
-                    {sessions.length === 0 ? "nothing yet." : `${sessions.length} session${sessions.length!==1?"s":""} · ${fmt(totalTime)} total.`}
-                  </div>
+                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>{sessions.length===0?"nothing yet.":`${sessions.length} session${sessions.length!==1?"s":""} · ${fmt(totalTime)} total. not bad.`}</div>
                 </div>
-
                 <div className="g2" style={{gap:14,marginBottom:28}}>
                   {renderTimer()}
                   <div className="card cp">
                     <div className="cl mb12">today's sessions</div>
-                    {sessions.filter(s => s.date === today()).length === 0 ? (
+                    {sessions.filter(s=>s.date===today()).length===0?(
                       <div className="empty" style={{padding:"18px 0"}}><div className="et">nothing yet.</div><div className="es">timer is right there.</div></div>
-                    ) : sessions.filter(s => s.date === today()).map(s => (
+                    ):sessions.filter(s=>s.date===today()).map(s=>(
                       <div key={s.id} className="srow">
                         <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
                         <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
                         <div className="stopic">{s.topic}</div>
-                        <div className="snotes">{s.notes || ""}</div>
+                        <div className="snotes">{s.notes||""}</div>
                         <div className="sdur">{fmt(s.duration)}</div>
                       </div>
                     ))}
-                    {sessions.filter(s => s.date === today()).length > 0 && (
-                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${d.b}`,display:"flex",justifyContent:"space-between",fontSize:12}}>
+                    {sessions.filter(s=>s.date===today()).length>0&&(
+                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${d.div}`,display:"flex",justifyContent:"space-between",fontSize:12}}>
                         <span style={{color:d.t3}}>total today</span>
-                        <span style={{fontWeight:600,color:d.a2}}>{fmt(todayTime)}</span>
+                        <span style={{fontWeight:600,color:d.a2}}>{fmt(todayTime)} today</span>
                       </div>
                     )}
                   </div>
                 </div>
-
                 <div className="card cp">
-                  <div className="rowb mb10">
-                    <div className="cl">all sessions</div>
-                    <div style={{fontSize:11,color:d.t4}}>{sessions.length} sessions · {fmt(totalTime)} total.</div>
-                  </div>
-                  {sessions.length === 0 && <div className="empty" style={{padding:"14px 0"}}><div className="et">nothing yet.</div></div>}
-                  {[...sessions].reverse().map(s => (
+                  <div className="rowb mb10"><div className="cl">all sessions</div><div style={{fontSize:11,color:d.t4}}>{sessions.length} sessions · {fmt(totalTime)} total. not bad.</div></div>
+                  {[...sessions].reverse().map(s=>(
                     <div key={s.id} className="srow">
                       <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
                       <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
                       <div className="stopic">{s.topic}</div>
-                      <div className="snotes">{s.notes || "—"}</div>
+                      <div className="snotes">{s.notes||"—"}</div>
                       <div className="sdur">{fmt(s.duration)}</div>
                       <div className="sdate">{s.date}</div>
                     </div>
@@ -3126,130 +2979,31 @@ return (
               </div>
             )}
 
-            {/* ══ STREAKS ══ */}
-            {tab === "streaks" && (
-              <div className="pin">
-                <div className="streak-hero mb13">
-                  <div style={{fontSize:10,color:d.t3,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>streak</div>
-                  <div className="streak-num">{streak}</div>
-                  <div style={{fontSize:13,color:d.t3,marginTop:3}}>
-                    {streak === 0 ? "no streak. every legend starts somewhere."
-                      : streak === 1 ? "day one. don't ghost me."
-                      : streak < 7 ? `${streak} days. i've been watching.`
-                      : `${streak} days straight.${streak >= 30 ? " 🔥" : ""}`}
-                  </div>
-                  {currentMilestone && (
-                    <div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 13px",borderRadius:20,background:`${d.a1}18`,border:`1px solid ${d.a1}28`,color:d.a1,fontSize:12.5,fontWeight:600,marginTop:10}}>
-                      {currentMilestone.icon} {currentMilestone.label}
-                    </div>
-                  )}
-                  {nextMilestone && (
-                    <div style={{fontSize:11,color:d.t3,marginTop:10}}>
-                      {nextMilestone.days - streak} more day{nextMilestone.days-streak!==1?"s":""} to {nextMilestone.icon} {nextMilestone.label}.
-                    </div>
-                  )}
-                </div>
-
-                <div className="g2 mb13">
-                  <div>
-                    <div className="cl mb10">milestones</div>
-                    {STREAK_MILESTONES.map(b => {
-                      const reached = streak >= b.days;
-                      return (
-                        <div key={b.days} className={`milestone-row${reached ? " reached" : ""}`}>
-                          <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
-                            <div style={{fontSize:10.5,color:d.t4}}>{b.days} day streak</div>
-                          </div>
-                          {reached ? <div className="m-check">✓</div> : <div className="m-lock">{b.days}</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div>
-                    {nextMilestone && (
-                      <div className="card cp mb12">
-                        <div className="cl mb10">next one</div>
-                        <div style={{textAlign:"center",padding:"6px 0"}}>
-                          <div style={{fontSize:28,marginBottom:5}}>{nextMilestone.icon}</div>
-                          <div style={{fontSize:13,fontWeight:600,marginBottom:2}}>{nextMilestone.label}</div>
-                          <div style={{fontSize:11,color:d.t3,marginBottom:12}}>{nextMilestone.days} day streak</div>
-                          <div className="btrack" style={{height:5,marginBottom:4}}>
-                            <div className="bfill" style={{width:`${(streak/nextMilestone.days)*100}%`,background:d.a1}}/>
-                          </div>
-                          <div style={{fontSize:10.5,color:d.t4}}>{streak}/{nextMilestone.days}</div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="card cp mb12">
-                      <div className="cl mb10">stats</div>
-                      {[
-                        {lbl:"streak",        val:`${streak}d`,                                  c:d.a1},
-                        {lbl:"study days",    val:new Set(sessions.map(s=>s.date)).size,          c:d.a2},
-                        {lbl:"total sessions",val:sessions.length,                                c:d.a3},
-                        {lbl:"PYQs solved",   val:pyqHistory.length,                              c:d.a1},
-                      ].map(s => (
-                        <div key={s.lbl} className="rowb" style={{marginBottom:8}}>
-                          <span style={{fontSize:12,color:d.t3}}>{s.lbl}</span>
-                          <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="card cp">
-                      <div className="cl mb10">60-day history</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
-                        {Array.from({length:60}, (_,i) => {
-                          const dt = new Date(); dt.setDate(dt.getDate() - 59 + i);
-                          const ds = dt.toISOString().split("T")[0];
-                          const mins = sessions.filter(s => s.date === ds).reduce((a,s) => a+s.duration, 0);
-                          const op = mins===0?0:mins<60?.3:mins<120?.55:mins<240?.8:1;
-                          return <div key={ds} title={`${ds}: ${fmt(mins)||"No study"}`} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
-                        })}
-                      </div>
-                      <div style={{display:"flex",gap:5,marginTop:6,alignItems:"center",fontSize:9.5,color:d.t4}}>
-                        <span>Less</span>
-                        {[.3,.55,.8,1].map((o,i) => <div key={i} style={{width:9,height:9,borderRadius:2,background:d.a2,opacity:o}}/>)}
-                        <span>More</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ══ SYLLABUS ══ */}
-            {tab === "syllabus" && (() => {
-              const SUBS = ["Physics","Chemistry","Mathematics"];
-              const STATUS_OPTS = [
-                {v:"not_started",   l:"Not Started",    icon:"—", c:d.t4,  bg:"transparent"},
-                {v:"in_progress",   l:"In Progress",    icon:"▶", c:d.a3,  bg:d.a3+"15"},
-                {v:"done",          l:"Done",           icon:"✓", c:d.a2,  bg:d.a2+"15"},
-                {v:"need_revision", l:"Needs Revision", icon:"↺", c:d.a1,  bg:d.a1+"15"},
+            {/* ── STREAKS ── */}
+            {tab==="syllabus"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              const STATUS_OPTS=[
+                {v:"not_started",l:"Not Started",icon:"—",c:d.t4,bg:"transparent"},
+                {v:"in_progress",l:"In Progress",icon:"▶",c:d.a3,bg:d.a3+"15"},
+                {v:"done",l:"Done",icon:"✓",c:d.a2,bg:d.a2+"15"},
+                {v:"need_revision",l:"Needs Revision",icon:"↺",c:d.a1,bg:d.a1+"15"},
               ];
-              const WT_ORDER = {H:0,M:1,L:2};
-              const allChapters = sub => {
-                const s = new Set();
-                return [...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t => { if(s.has(t)) return false; s.add(t); return true; });
-              };
-              const sorted = sub => [...allChapters(sub)].sort((a,b) => (WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
-              const chHrs  = (sub,t) => sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
-              const chAcc  = (sub,t) => { const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t); return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null; };
-              const total  = SUBS.reduce((a,sub) => a+allChapters(sub).length, 0);
-              const done   = Object.values(syllabusStatus).filter(v=>v==="done").length;
-              const prog   = Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
-              const rev    = Object.values(syllabusStatus).filter(v=>v==="need_revision").length;
-              const pct2   = total>0 ? Math.round((done/total)*100) : 0;
-              return (
+              const WT_ORDER={"H":0,"M":1,"L":2};
+              const allChapters=sub=>{const s=new Set();return[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t=>{if(s.has(t))return false;s.add(t);return true;});};
+              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
+              const chHrs=(sub,t)=>sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
+              const chAcc=(sub,t)=>{const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
+              const total=SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
+              const done=Object.values(syllabusStatus).filter(v=>v==="done").length;
+              const prog=Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
+              const rev=Object.values(syllabusStatus).filter(v=>v==="need_revision").length;
+              const pct=total>0?Math.round((done/total)*100):0;
+              return(
                 <div>
-                  {/* Progress header */}
                   <div className="card cp mb16">
                     <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
                       <div style={{textAlign:"center",minWidth:70}}>
-                        <div style={{fontFamily:"'DM Serif Display',serif",fontSize:48,fontWeight:400,color:pct2>=80?d.a2:pct2>=50?d.a1:d.danger,letterSpacing:"-.04em",lineHeight:1}}>{pct2}%</div>
+                        <div style={{fontSize:48,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:pct>=80?d.a2:pct>=50?d.gold:d.danger,letterSpacing:"-.04em",lineHeight:1}}>{pct}%</div>
                         <div style={{fontSize:10,color:d.t3,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>covered</div>
                       </div>
                       <div style={{flex:1,minWidth:160}}>
@@ -3259,7 +3013,7 @@ return (
                           <div style={{width:`${Math.round((rev/total)*100)}%`,background:d.a1}}/>
                         </div>
                         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                          {[{l:"Done",v:done,c:d.a2},{l:"In Progress",v:prog,c:d.a3},{l:"Revision",v:rev,c:d.a1},{l:"Not Started",v:total-done-prog-rev,c:d.t4}].map(s => (
+                          {[{l:"Done",v:done,c:d.a2},{l:"In Progress",v:prog,c:d.a3},{l:"Revision",v:rev,c:d.a1},{l:"Not Started",v:total-done-prog-rev,c:d.t4}].map(s=>(
                             <div key={s.l} style={{display:"flex",alignItems:"center",gap:4}}>
                               <div style={{width:6,height:6,borderRadius:2,background:s.c}}/>
                               <span style={{fontSize:10,color:d.t3}}>{s.l}</span>
@@ -3274,52 +3028,49 @@ return (
                       </div>
                     </div>
                   </div>
-
-                  {SUBS.map(sub => {
-                    const chapters  = sorted(sub);
-                    const subDone   = chapters.filter(t => syllabusStatus[sub+"|"+t]==="done").length;
-                    const subPct    = Math.round((subDone/chapters.length)*100);
-                    const sColor    = SUBJECT_COLORS[sub];
-                    return (
+                  {SUBS.map(sub=>{
+                    const chapters=sorted(sub);
+                    const subDone=chapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length;
+                    const subPct=Math.round((subDone/chapters.length)*100);
+                    const subColor=SUBJECT_COLORS[sub];
+                    return(
                       <div key={sub} style={{marginBottom:14}}>
-                        {/* Subject header row */}
-                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${sColor}`,borderRadius:4,marginBottom:2}}>
-                          <div style={{fontSize:12,fontWeight:700,color:sColor,flex:1}}>{sub}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2}}>
+                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1}}>{sub}</div>
                           <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length}</div>
                           <div style={{width:60,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
-                            <div style={{height:"100%",width:`${subPct}%`,background:sColor,borderRadius:2}}/>
+                            <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2}}/>
                           </div>
-                          <div style={{fontSize:11,fontWeight:700,color:sColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
+                          <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
                         </div>
-
-                        {["H","M","L"].map(wt => {
-                          const wtCh    = chapters.filter(t => (JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
-                          if (!wtCh.length) return null;
-                          const wtColor = wt==="H"?d.danger:wt==="M"?d.a1:d.t4;
-                          return (
+                        {["H","M","L"].map(wt=>{
+                          const wtCh=chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
+                          if(!wtCh.length)return null;
+                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          return(
                             <div key={wt}>
-                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 14px",background:wt==="H"?`${d.danger}06`:wt==="M"?`${d.a1}06`:`${d.t4}06`,borderLeft:`3px solid ${wtColor}30`,borderBottom:`1px solid ${d.b}`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 14px",background:wt==="H"?`${d.danger}06`:wt==="M"?`${d.gold}06`:`${d.t4}06`,borderLeft:`3px solid ${wtColor}30`,borderBottom:`1px solid ${d.b}`}}>
                                 <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:wtColor}}>{wt==="H"?"High Priority":wt==="M"?"Medium":"Low"}</div>
                                 <div style={{fontSize:9,color:d.t4}}>{wtCh.filter(t=>syllabusStatus[sub+"|"+t]==="done").length}/{wtCh.length} done</div>
                               </div>
-                              {wtCh.map(topic => {
-                                const status = syllabusStatus[sub+"|"+topic] || "not_started";
-                                const hrs2   = chHrs(sub, topic);
-                                const acc2   = chAcc(sub, topic);
-                                const sOpt   = STATUS_OPTS.find(s => s.v===status) || STATUS_OPTS[0];
-                                return (
+                              {wtCh.map((topic,idx)=>{
+                                const status=syllabusStatus[sub+"|"+topic]||"not_started";
+                                const hrs=chHrs(sub,topic);
+                                const acc=chAcc(sub,topic);
+                                const sOpt=STATUS_OPTS.find(s=>s.v===status)||STATUS_OPTS[0];
+                                return(
                                   <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s"}}>
                                     <div style={{flex:1,minWidth:0}}>
                                       <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
                                       <div style={{display:"flex",gap:6,marginTop:2}}>
-                                        {hrs2>0 && <span style={{fontSize:9,color:d.t3,background:d.inp,padding:"1px 5px",borderRadius:2}}>{fmt(hrs2)}</span>}
-                                        {acc2!==null && <span style={{fontSize:9,fontWeight:600,color:acc2>=70?d.a2:acc2>=40?d.a1:d.danger,background:acc2>=70?`${d.a2}15`:acc2>=40?`${d.a1}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc2}%</span>}
+                                        {hrs>0&&<span style={{fontSize:9,color:d.t3,background:d.hover,padding:"1px 5px",borderRadius:2}}>{fmt(hrs)}</span>}
+                                        {acc!==null&&<span style={{fontSize:9,fontWeight:600,color:acc>=70?d.a2:acc>=40?d.gold:d.danger,background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc}%</span>}
                                       </div>
                                     </div>
                                     <div style={{display:"flex",gap:2,flexShrink:0}}>
-                                      {STATUS_OPTS.map(opt => (
-                                        <button key={opt.v} onClick={() => setSyllabusChapter(sub, topic, opt.v)} title={opt.l}
-                                          style={{width:24,height:24,borderRadius:3,fontSize:10,fontWeight:700,cursor:"pointer",background:status===opt.v?opt.bg:d.inp,border:`1px solid ${status===opt.v?opt.c:d.b}`,color:status===opt.v?opt.c:d.t4,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .1s"}}>
+                                      {STATUS_OPTS.map(opt=>(
+                                        <button key={opt.v} onClick={()=>setSyllabusChapter(sub,topic,opt.v)} title={opt.l}
+                                          style={{width:24,height:24,borderRadius:3,fontSize:10,fontWeight:700,cursor:"pointer",background:status===opt.v?opt.bg:d.hover,border:`1px solid ${status===opt.v?opt.c:d.b}`,color:status===opt.v?opt.c:d.t4,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .1s"}}>
                                           {opt.icon}
                                         </button>
                                       ))}
@@ -3337,15 +3088,84 @@ return (
               );
             })()}
 
-          </div>{/* end .inner */}
-        </div>{/* end .content */}
-      </div>{/* end .layout */}
+            {tab==="streaks"&&(
+              <div className="pin">
+                <div className="streak-hero mb13">
+                  <div style={{fontSize:10,color:d.t3,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>streak</div>
+                  <div className="streak-num">{streak}</div>
+                  <div style={{fontSize:13,color:d.t3,marginTop:3}}>{streak===0?"no streak. every legend starts somewhere.":streak===1?"day one. don't ghost me.":streak<7?`${streak} days. i\'ve been watching.`:`${streak} days straight.${streak>=30?" 🔥":""}`}</div>
+                  {currentMilestone&&<div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 13px",borderRadius:20,background:`${d.gold}18`,border:`1px solid ${d.gold}28`,color:d.gold,fontSize:12.5,fontWeight:600,marginTop:10}}>{currentMilestone.icon} {currentMilestone.label}</div>}
+                  {nextMilestone&&<div style={{fontSize:11,color:d.t3,marginTop:10}}>{nextMilestone.days-streak} more day{nextMilestone.days-streak!==1?"s":""} to {nextMilestone.icon} {nextMilestone.label}. keep it goingked in 🔒</div>}
+                </div>
+                <div className="g2 mb13">
+                  <div>
+                    <div className="cl mb10">milestones</div>
+                    {STREAK_MILESTONES.map(b=>{
+                      const reached=streak>=b.days;
+                      return(
+                        <div key={b.days} className={`milestone-row${reached?" reached":""}`}>
+                          <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
+                            <div style={{fontSize:10.5,color:d.t4}}>{b.days} day streak</div>
+                          </div>
+                          {reached?<div className="m-check">✓</div>:<div className="m-lock">{b.days}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div>
+                    {nextMilestone&&(
+                      <div className="card cp mb12">
+                        <div className="cl mb10">next one</div>
+                        <div style={{textAlign:"center",padding:"6px 0"}}>
+                          <div style={{fontSize:28,marginBottom:5}}>{nextMilestone.icon}</div>
+                          <div style={{fontSize:13,fontWeight:600,marginBottom:2}}>{nextMilestone.label}</div>
+                          <div style={{fontSize:11,color:d.t3,marginBottom:12}}>{nextMilestone.days} day streak</div>
+                          <div className="btrack" style={{height:5,marginBottom:4}}><div className="bfill" style={{width:`${(streak/nextMilestone.days)*100}%`,background:d.a1}}/></div>
+                          <div style={{fontSize:10.5,color:d.t4}}>{streak}/{nextMilestone.days}</div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="card cp mb12">
+                      <div className="cl mb10">stats</div>
+                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:pyqHistory.length,c:d.gold}].map(s=>(
+                        <div key={s.lbl} className="rowb" style={{marginBottom:8}}>
+                          <span style={{fontSize:12,color:d.t3}}>{s.lbl}</span>
+                          <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="card cp">
+                      <div className="cl mb10">60-day history — every square is a day you showed up</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                        {Array.from({length:60},(_,i)=>{
+                          const dt=new Date();dt.setDate(dt.getDate()-59+i);
+                          const ds=dt.toISOString().split("T")[0];
+                          const mins=sessions.filter(s=>s.date===ds).reduce((a,s)=>a+s.duration,0);
+                          const op=mins===0?0:mins<60?.3:mins<120?.55:mins<240?.8:1;
+                          return <div key={ds} title={`${ds}: ${fmt(mins)||"No study"}`} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
+                        })}
+                      </div>
+                      <div style={{display:"flex",gap:5,marginTop:6,alignItems:"center",fontSize:9.5,color:d.t4}}>
+                        <span>Less</span>{[.3,.55,.8,1].map((o,i)=><div key={i} style={{width:9,height:9,borderRadius:2,background:d.a2,opacity:o}}/>)}<span>More</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
-      {/* ── MOBILE BOTTOM TABS ── */}
+          </div>
+        </div>
+      </div>
+      {/* Mobile bottom tabs */}
       <div className="mob-tabs">
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => switchTab(t.id)}
-            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,background:"none",border:"none",cursor:"pointer",padding:"8px 2px",color:tab===t.id?d.a1:d.t3,minWidth:0,boxSizing:"border-box"}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>switchTab(t.id)}
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+              gap:1,background:"none",border:"none",cursor:"pointer",padding:"8px 2px",
+              color:tab===t.id?d.a1:d.t3,minWidth:0,boxSizing:"border-box"}}>
             <span style={{fontSize:16,lineHeight:1}}>{t.icon}</span>
             <span style={{fontSize:8,fontWeight:tab===t.id?700:400,whiteSpace:"nowrap",overflow:"hidden",maxWidth:"100%",textOverflow:"ellipsis"}}>
               {t.label.slice(0,5)}
@@ -3356,3 +3176,4 @@ return (
     </>
   );
 }
+
