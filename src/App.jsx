@@ -1,64 +1,70 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-
+// ── Supabase config — replace with your project values ───────────────────────
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
-const OR_KEY  = "YOUR_OPENROUTER_KEY"; 
+const OR_KEY  = "YOUR_OPENROUTER_KEY"; // ← from openrouter.ai → API Keys
+
+// ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password}),
     });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
+    if(!r.ok) throw new Error(d.error_description||d.msg||"Sign up failed");
     return d;
   },
-
   async signInEmail(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password}),
     });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
+    if(!r.ok) throw new Error(d.error_description||d.msg||"Login failed");
     return d;
   },
-
   async signOut(accessToken) {
     await fetch(`${SB_URL}/auth/v1/logout`, {
-      method: "POST",
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
     });
+    localStorage.removeItem("slothr_auth");
   },
-
   async getUser(accessToken) {
     const r = await fetch(`${SB_URL}/auth/v1/user`, {
-      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
     });
-    if (!r.ok) return null;
+    if(!r.ok) return null;
     return await r.json();
   },
-
   async loadData(table, userId, accessToken) {
     const r = await fetch(
-      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
-      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
+      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*&order=created_at.asc`,
+      {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`}}
     );
-    if (!r.ok) return [];
+    if(!r.ok) return [];
     return await r.json();
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
+// Parses a LaTeX-subset string into tokens, renders as React elements.
+// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
+
 function parseMath(raw) {
- 
+  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-   
+    // reads {content} starting at from, returns [content, endIndex]
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -73,7 +79,7 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
-    
+    // backslash command
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
@@ -385,20 +391,28 @@ const PAPERS = [
 
 ];
 
-
+// ── Placeholder questions — you'll populate these from Supabase ───────────────
+// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
+// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
+// Replace these with real questions fetched from Supabase.
+// IMPORTANT: every real question MUST include a `topic` field (chapter name).
+// This is how the Analytics tab and AI coach know which chapter you got wrong.
+// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
+// ─────────────────────────────────────────────────────────────────────────────
 
 const SECTIONS = ["Physics","Chemistry","Mathematics"];
 const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
 const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
 
-
+// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
+// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
 function getNTA(dark){
   if(!dark) return {
-   
+    // Real NTA colours
     bg:"#f5f5f5",
-    header:"#1a7c3e",        
+    header:"#1a7c3e",        // NTA green
     headerText:"#ffffff",
-    subBar:"#f47920",        
+    subBar:"#f47920",        // NTA orange
     subBarText:"#ffffff",
     subBarActive:"#ffffff",
     subBarActiveBg:"rgba(255,255,255,.18)",
@@ -410,7 +424,7 @@ function getNTA(dark){
     text3:"#666666",
     text4:"#999999",
     hover:"#f0f0f0",
-    // Palette 
+    // Palette (NTA official)
     notVisited:"#9e9e9e",
     notAnswered:"#e53935",
     answered:"#43a047",
@@ -476,8 +490,8 @@ function fmtTime(secs) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
-// ── Question Status 
-
+// ── Question Status ───────────────────────────────────────────────────────────
+// notVisited | notAnswered | answered | markedReview | answeredMarked
 function getStatus(state) {
   if (!state.visited) return "notVisited";
   if (state.markedReview && state.answer !== null) return "answeredMarked";
@@ -496,7 +510,9 @@ function statusColor(status, nta) {
   }[status] || nta.notVisited;
 }
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// PAPER LIST — card view
+// ─────────────────────────────────────────────────────────────────────────────
 function PaperList({onStart,onExit,nta,completedTests,onReview}){
   const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
   return(
@@ -1126,13 +1142,13 @@ function ResultScreen({paper,questions,qState,user,onRetry,onBack,nta,dark}){
         ))}
       </div>
 
-      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px"}}>
+      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px",boxSizing:"border-box",width:"100%"}}>
 
         {/* ── TAB: SCORE OVERVIEW ── */}
         {activeTab==="overview"&&(
           <div>
             {/* Section cards */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:20}}>
               {SECTIONS.map(sec=>{
                 const s=secScores[sec];
                 const sp=Math.max(0,(s.marks/Math.max(s.total*4,1))*100);
@@ -1173,7 +1189,7 @@ function ResultScreen({paper,questions,qState,user,onRetry,onBack,nta,dark}){
             {/* Marks breakdown */}
             <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:3,padding:"16px 20px"}}>
               <div style={{fontWeight:700,fontSize:12,color:nta.text,marginBottom:12,letterSpacing:".04em",textTransform:"uppercase"}}>Marks Breakdown</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,textAlign:"center"}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,textAlign:"center"}}>
                 {[
                   {v:`+${overall.correct*4}`,l:"From Correct",c:nta.answered},
                   {v:`-${questions.filter(q=>qState[q.id]?.answer&&qState[q.id].answer!==q.correct&&q.type==="mcq").length}`,l:"Negative Marks",c:nta.notAnswered},
@@ -2179,7 +2195,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .layout{display:flex;min-height:100vh;overflow-x:hidden;width:100%;max-width:100%;}
     .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:20;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
     .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;min-width:0;overflow-x:hidden;width:calc(100% - ${SW}px);box-sizing:border-box;}
-    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
+    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;display:block;}
     /* ── RESPONSIVE ── */
     @media(min-width:1400px){
       .inner{padding:36px 56px;}
@@ -2246,7 +2262,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
 
     /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;box-sizing:border-box;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
     .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
     .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
     .tbr{display:flex;align-items:center;gap:7px;}
@@ -2387,7 +2403,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}
 
     /* Coach */
-    .coach-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px;margin-bottom:16px;}
+    .coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:13px;margin-bottom:16px;}
     .coach-card{padding:17px;border-radius:12px;border:1px solid ${d.b};background:${d.card};position:relative;overflow:hidden;}
     .coach-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
     .coach-card.danger::before{background:${d.danger};}
@@ -2710,9 +2726,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         <div className="content">
           {tab!=="pyq"&&<div className="topbar">
             {/* Always-visible Slothr logo */}
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
               <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
-              <div>
+              <div style={{minWidth:0}}>
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
                   {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. days left. tick tock.`}
@@ -2742,7 +2758,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {tab==="overview"&&(
               <div className="pin">
                 {/* ── Hero stats — editorial wide layout ── */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
                   {[
                     {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
                     {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
