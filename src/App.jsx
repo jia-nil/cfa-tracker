@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── Supabase config — replace with your project values ───────────────────────
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
-const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
-const OR_KEY  = "YOUR_OPENROUTER_KEY"; // ← from openrouter.ai → API Keys
+const SB_URL  = import.meta.env.VITE_SB_URL;
+const SB_ANON = import.meta.env.VITE_SB_ANON;// ← from openrouter.ai → API Keys
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
@@ -2184,42 +2184,44 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   const SW=sideOpen?220:56;
   const css=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
-    html,body{overflow-x:hidden;width:100%;}
-    body{margin:0;padding:0;}
+    html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}
+    *{box-sizing:border-box;}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     body{background:${d.bg};font-family:'DM Sans',sans-serif;color:${d.t};-webkit-font-smoothing:antialiased;}
     *{transition:background-color .18s,border-color .18s,color .12s;}
     ::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:${d.b};border-radius:1px;}
 
     /* ── LAYOUT ── */
-    .layout{display:flex;min-height:100vh;overflow-x:hidden;width:100%;max-width:100%;}
-    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:20;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
-    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;min-width:0;overflow-x:hidden;width:calc(100% - ${SW}px);box-sizing:border-box;}
-    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;display:block;}
+    .layout{display:flex;min-height:100vh;width:100%;position:relative;}
+    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
+    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;overflow-x:hidden;box-sizing:border-box;}
+    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
     /* ── RESPONSIVE ── */
+    /* Large desktop */
     @media(min-width:1400px){
-      .inner{padding:36px 56px;}
-      .topbar{padding:0 56px;}
+      .inner{padding:36px 60px;}
+      .topbar{padding:0 60px;}
     }
+    /* Desktop 1100-1400 */
     @media(max-width:1100px){
-      .inner{padding:28px 28px;}
-      .topbar{padding:0 28px;}
+      .inner{padding:28px 32px;}
+      .topbar{padding:0 32px;}
     }
+    /* Tablet 600-900: sidebar overlays, content full width */
     @media(max-width:900px){
-      .sidebar{width:${sideOpen?"220px":"0px"} !important;z-index:50;box-shadow:${sideOpen?"2px 0 24px rgba(0,0,0,.5)":"none"};}
-      .content{margin-left:0 !important;width:100% !important;}
-      .inner{padding:20px 18px;}
-      .topbar{padding:0 18px !important;}
+      .content{margin-left:0 !important;}
+      .inner{padding:20px 20px;}
+      .topbar{padding:0 20px !important;}
       .g3{grid-template-columns:1fr 1fr !important;}
       .g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}
-      .stat-num{font-size:30px !important;}
+      .coach-grid{grid-template-columns:1fr 1fr !important;}
+      .stat-num{font-size:28px !important;}
     }
+    /* Mobile ≤600: sidebar hidden, bottom tabs */
     @media(max-width:600px){
-      .sidebar{width:0 !important;transform:translateX(-110%) !important;box-shadow:none !important;}
-      .content{margin-left:0 !important;width:100% !important;padding-bottom:68px;}
-      .inner{padding:14px 12px !important;}
-      .topbar{padding:0 12px !important;min-height:50px;}
+      .content{margin-left:0 !important;padding-bottom:64px;}
+      .inner{padding:14px 14px !important;}
+      .topbar{padding:0 14px !important;min-height:50px;}
       .g2{grid-template-columns:1fr 1fr !important;}
       .g3,.g4{grid-template-columns:1fr 1fr !important;}
       .coach-grid{grid-template-columns:1fr !important;}
@@ -2229,18 +2231,26 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       .section-head{font-size:16px !important;}
       .snotes{display:none;}
     }
-    @media(max-width:400px){
+    /* Very small ≤380 */
+    @media(max-width:380px){
       .g2,.g3,.g4{grid-template-columns:1fr !important;}
       .inner{padding:12px 10px !important;}
       .stat-num{font-size:18px !important;}
     }
-    /* sidebar overlay on tablet */
-    .sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:45;cursor:pointer;}
-    @media(max-width:900px){.sb-overlay{display:${sideOpen?"block":"none"};}}
-    /* hamburger for tablet */
-    .mob-btn{display:none;width:34px;height:34px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;}
+    /* Sidebar overlay backdrop */
+    .sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;display:none;}
+    @media(max-width:900px){
+      .sb-overlay{display:${sideOpen?"block":"none"};}
+      .sidebar{width:${sideOpen?"240px":"0px"} !important;box-shadow:${sideOpen?"4px 0 32px rgba(0,0,0,.5)":"none"};}
+    }
+    @media(max-width:600px){
+      .sidebar{width:${sideOpen?"85vw":"0px"} !important;max-width:300px;}
+    }
+    /* Hamburger button - shown on tablet+mobile */
+    .mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:${d.hover};border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;transition:background .15s;}
+    .mob-btn:hover{background:${d.card};}
     @media(max-width:900px){.mob-btn{display:flex;}}
-    /* mobile bottom tab bar */
+    /* Mobile bottom tab bar */
     .mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:30;background:${d.sb};border-top:1px solid ${d.b};align-items:stretch;padding-bottom:env(safe-area-inset-bottom,0px);}
     @media(max-width:600px){.mob-tabs{display:flex;}}
 
@@ -2262,7 +2272,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
 
     /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;box-sizing:border-box;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;box-sizing:border-box;width:100%;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
     .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
     .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
     .tbr{display:flex;align-items:center;gap:7px;}
@@ -2667,7 +2677,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       {/* ── Ad Modals ── */}
 
       {fullscreen&&renderFS()}
-      <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}><style>{css}</style>
+      <style>{css}</style>
+      <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}>
       {/* ── Sticky Banner Ad ── */}
 
         <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
@@ -3238,4 +3249,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
