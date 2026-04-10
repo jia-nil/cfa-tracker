@@ -4,7 +4,53 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsbWF6ZHJubmR5bGFmaGZ4c3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODEwNjAsImV4cCI6MjA4ODE1NzA2MH0.gGPknDEdaGfzDb2JJ2amEY9b33jlbTY3brvbbhvvIWg";
 const OR_KEY  = "YOUR_OPENROUTER_KEY"; 
+const SB_AUTH = {
+  async signUp(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Sign up failed");
+    return d;
+  },
 
+  async signInEmail(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
+    return d;
+  },
+
+  async signOut(accessToken) {
+    await fetch(`${SB_URL}/auth/v1/logout`, {
+      method: "POST",
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+  },
+
+  async getUser(accessToken) {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, {
+      headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  },
+
+  async loadData(table, userId, accessToken) {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*`,
+      { headers: { "apikey": SB_ANON, "Authorization": `Bearer ${accessToken}` } }
+    );
+    if (!r.ok) return [];
+    return await r.json();
+  },
+};
 function parseMath(raw) {
  
   const out = [];
