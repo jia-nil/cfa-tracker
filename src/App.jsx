@@ -1,11 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ── Supabase config — replace with your project values ───────────────────────
-const SB_URL  = "https://tlmazdrnndylafhfxsrc.supabase.co";
 const SB_URL  = import.meta.env.VITE_SB_URL;
-const SB_ANON = import.meta.env.VITE_SB_ANON;// ← from openrouter.ai → API Keys
-
-// ── Supabase Auth helpers ─────────────────────────────────────────────────────
+const SB_ANON = import.meta.env.VITE_SB_ANON;
+const OR_KEY = import.meta.env.VITE_OR_KEY;
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -3249,3 +3246,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
