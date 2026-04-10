@@ -48,20 +48,15 @@ const SB_AUTH = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
-// Parses a LaTeX-subset string into tokens, renders as React elements.
-// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
 
 function parseMath(raw) {
-  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
+  
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-    // reads {content} starting at from, returns [content, endIndex]
+    
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -76,7 +71,7 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
-    // backslash command
+  
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
@@ -204,7 +199,6 @@ function MathText({ t, style }) {
   );
 }
 
-// Plain-text fallback for non-JSX contexts (list views, etc.)
 function renderMath(text) {
   if (!text) return text;
   return text
@@ -280,7 +274,6 @@ const THEME = {
 
 
 
-// ── Placeholder papers — replace questions with real ones from your DB ────────
 const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
 const TOPICS = {
   Physics:{
@@ -346,7 +339,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
     duration:180, status:"available",
   },
-  // ── 2023 ─────────────────────────────────────────────────────────────────
+  // 2023
   {
     id:"adv-2023-p1",
     year:"2023", exam:"JEE Advanced", session:"Paper 1",
@@ -359,7 +352,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
     duration:180, status:"available",
   },
-  // ── 2022 ─────────────────────────────────────────────────────────────────
+  // 2022
   {
     id:"adv-2022-p1",
     year:"2022", exam:"JEE Advanced", session:"Paper 1",
@@ -372,7 +365,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"28 Aug 2022",
     duration:180, status:"available",
   },
-  // ── 2025 ─────────────────────────────────────────────────────────────────
+  // 2025 
   {
     id:"adv-2025-p1",
     year:"2025", exam:"JEE Advanced", session:"Paper 1",
@@ -388,28 +381,19 @@ const PAPERS = [
 
 ];
 
-// ── Placeholder questions — you'll populate these from Supabase ───────────────
-// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
-// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
-// Replace these with real questions fetched from Supabase.
-// IMPORTANT: every real question MUST include a `topic` field (chapter name).
-// This is how the Analytics tab and AI coach know which chapter you got wrong.
-// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
-// ─────────────────────────────────────────────────────────────────────────────
 
 const SECTIONS = ["Physics","Chemistry","Mathematics"];
 const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
 const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
 
-// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
-// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
+
 function getNTA(dark){
   if(!dark) return {
-    // Real NTA colours
+   
     bg:"#f5f5f5",
-    header:"#1a7c3e",        // NTA green
+    header:"#1a7c3e",       
     headerText:"#ffffff",
-    subBar:"#f47920",        // NTA orange
+    subBar:"#f47920",        
     subBarText:"#ffffff",
     subBarActive:"#ffffff",
     subBarActiveBg:"rgba(255,255,255,.18)",
@@ -421,16 +405,16 @@ function getNTA(dark){
     text3:"#666666",
     text4:"#999999",
     hover:"#f0f0f0",
-    // Palette (NTA official)
+   
     notVisited:"#9e9e9e",
     notAnswered:"#e53935",
     answered:"#43a047",
     markedReview:"#7b1fa2",
     answeredMarked:"#7b1fa2",
-    // Timer
+    
     timerNormal:"#1a7c3e",
     timerWarn:"#e53935",
-    // Buttons
+   
     btnPrimary:"#1a7c3e",
     btnSave:"#43a047",
     btnClear:"#e53935",
@@ -443,7 +427,7 @@ function getNTA(dark){
     scoreMid:"#f47920",
     scoreBad:"#e53935",
   };
-  // Dark mode — same identity, darker surfaces
+  
   return {
     bg:"#0d0d0c",
     header:"#1a5c2e",
@@ -487,8 +471,7 @@ function fmtTime(secs) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
-// ── Question Status ───────────────────────────────────────────────────────────
-// notVisited | notAnswered | answered | markedReview | answeredMarked
+
 function getStatus(state) {
   if (!state.visited) return "notVisited";
   if (state.markedReview && state.answer !== null) return "answeredMarked";
@@ -507,9 +490,7 @@ function statusColor(status, nta) {
   }[status] || nta.notVisited;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PAPER LIST — card view
-// ─────────────────────────────────────────────────────────────────────────────
+
 function PaperList({onStart,onExit,nta,completedTests,onReview}){
   const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
   return(
