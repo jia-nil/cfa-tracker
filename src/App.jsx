@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-
 const SB_URL  = import.meta.env.VITE_SB_URL;
 const SB_ANON = import.meta.env.VITE_SB_ANON;
-const OR_KEY = import.meta.env.VITE_OR_KEY;
+const OR_KEY  = import.meta.env.VITE_OR_KEY;
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -48,15 +47,20 @@ const SB_AUTH = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
+// Parses a LaTeX-subset string into tokens, renders as React elements.
+// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
 
 function parseMath(raw) {
-  
+  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
   const out = [];
   let i = 0;
   const BSRE = /^\\([a-zA-Z]+|\^)/;
 
   function readBraced(from) {
-    
+    // reads {content} starting at from, returns [content, endIndex]
     if (raw[from] !== '{') return ['', from];
     let depth = 1, j = from + 1, buf = '';
     while (j < raw.length && depth > 0) {
@@ -71,7 +75,7 @@ function parseMath(raw) {
   while (i < raw.length) {
     const ch = raw[i];
 
-  
+    // backslash command
     if (ch === '\\') {
       const m = raw.slice(i).match(BSRE);
       if (!m) { pushTxt('\\'); i++; continue; }
@@ -199,6 +203,7 @@ function MathText({ t, style }) {
   );
 }
 
+// Plain-text fallback for non-JSX contexts (list views, etc.)
 function renderMath(text) {
   if (!text) return text;
   return text
@@ -274,6 +279,7 @@ const THEME = {
 
 
 
+// ── Placeholder papers — replace questions with real ones from your DB ────────
 const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
 const TOPICS = {
   Physics:{
@@ -339,7 +345,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
     duration:180, status:"available",
   },
-  // 2023
+  // ── 2023 ─────────────────────────────────────────────────────────────────
   {
     id:"adv-2023-p1",
     year:"2023", exam:"JEE Advanced", session:"Paper 1",
@@ -352,7 +358,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
     duration:180, status:"available",
   },
-  // 2022
+  // ── 2022 ─────────────────────────────────────────────────────────────────
   {
     id:"adv-2022-p1",
     year:"2022", exam:"JEE Advanced", session:"Paper 1",
@@ -365,7 +371,7 @@ const PAPERS = [
     shift:"Afternoon (2:30 PM – 5:30 PM)", date:"28 Aug 2022",
     duration:180, status:"available",
   },
-  // 2025 
+  // ── 2025 ─────────────────────────────────────────────────────────────────
   {
     id:"adv-2025-p1",
     year:"2025", exam:"JEE Advanced", session:"Paper 1",
@@ -381,19 +387,28 @@ const PAPERS = [
 
 ];
 
+// ── Placeholder questions — you'll populate these from Supabase ───────────────
+// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
+// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
+// Replace these with real questions fetched from Supabase.
+// IMPORTANT: every real question MUST include a `topic` field (chapter name).
+// This is how the Analytics tab and AI coach know which chapter you got wrong.
+// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
+// ─────────────────────────────────────────────────────────────────────────────
 
 const SECTIONS = ["Physics","Chemistry","Mathematics"];
 const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
 const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
 
-
+// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
+// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
 function getNTA(dark){
   if(!dark) return {
-   
+    // Real NTA colours
     bg:"#f5f5f5",
-    header:"#1a7c3e",       
+    header:"#1a7c3e",        // NTA green
     headerText:"#ffffff",
-    subBar:"#f47920",        
+    subBar:"#f47920",        // NTA orange
     subBarText:"#ffffff",
     subBarActive:"#ffffff",
     subBarActiveBg:"rgba(255,255,255,.18)",
@@ -405,16 +420,16 @@ function getNTA(dark){
     text3:"#666666",
     text4:"#999999",
     hover:"#f0f0f0",
-   
+    // Palette (NTA official)
     notVisited:"#9e9e9e",
     notAnswered:"#e53935",
     answered:"#43a047",
     markedReview:"#7b1fa2",
     answeredMarked:"#7b1fa2",
-    
+    // Timer
     timerNormal:"#1a7c3e",
     timerWarn:"#e53935",
-   
+    // Buttons
     btnPrimary:"#1a7c3e",
     btnSave:"#43a047",
     btnClear:"#e53935",
@@ -427,7 +442,7 @@ function getNTA(dark){
     scoreMid:"#f47920",
     scoreBad:"#e53935",
   };
-  
+  // Dark mode — same identity, darker surfaces
   return {
     bg:"#0d0d0c",
     header:"#1a5c2e",
@@ -471,7 +486,8 @@ function fmtTime(secs) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 
-
+// ── Question Status ───────────────────────────────────────────────────────────
+// notVisited | notAnswered | answered | markedReview | answeredMarked
 function getStatus(state) {
   if (!state.visited) return "notVisited";
   if (state.markedReview && state.answer !== null) return "answeredMarked";
@@ -490,7 +506,9 @@ function statusColor(status, nta) {
   }[status] || nta.notVisited;
 }
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// PAPER LIST — card view
+// ─────────────────────────────────────────────────────────────────────────────
 function PaperList({onStart,onExit,nta,completedTests,onReview}){
   const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
   return(
@@ -1695,10 +1713,10 @@ function AuthScreen({onAuth}) {
 
 
 export default function App(){
-  // Tab switch
+  // Tab switch — also closes sidebar on mobile
   function switchTab(newTab){
-    if(newTab===tab) return;
     setTab(newTab);
+    if(window.innerWidth<=900) setSideOpen(false);
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -1766,7 +1784,7 @@ export default function App(){
     return()=>clearTimeout(t);
   },[authSession?.refresh_token]);
   const [dark,setDark]=useState(true);
-  const [sideOpen,setSideOpen]=useState(true);
+  const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
   const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
   const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
@@ -2170,67 +2188,55 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     ::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:${d.b};border-radius:1px;}
 
     /* ── LAYOUT ── */
-    .layout{display:flex;min-height:100vh;width:100%;position:relative;}
-    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:width .28s cubic-bezier(.16,1,.3,1);}
-    .content{margin-left:${SW}px;flex:1;background:${d.bg};min-height:100vh;transition:margin-left .25s ease;overflow-x:hidden;box-sizing:border-box;}
+    .layout{display:block;min-height:100vh;width:100%;background:${d.bg};}
+    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}
+    .content{margin-left:${SW}px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - ${SW}px);}
     .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
     /* ── RESPONSIVE ── */
-    /* Large desktop */
     @media(min-width:1400px){
       .inner{padding:36px 60px;}
       .topbar{padding:0 60px;}
     }
-    /* Desktop 1100-1400 */
     @media(max-width:1100px){
       .inner{padding:28px 32px;}
       .topbar{padding:0 32px;}
     }
-    /* Tablet 600-900: sidebar overlays, content full width */
+    /* Tablet & mobile: sidebar floats over content, content is full width */
     @media(max-width:900px){
-      .content{margin-left:0 !important;}
-      .inner{padding:20px 20px;}
-      .topbar{padding:0 20px !important;}
+      .content{margin-left:0 !important;width:100% !important;}
+      .inner{padding:20px 18px;}
+      .topbar{padding:0 18px !important;}
       .g3{grid-template-columns:1fr 1fr !important;}
       .g4{grid-template-columns:1fr 1fr !important;}
       .coach-grid{grid-template-columns:1fr 1fr !important;}
-      .stat-num{font-size:28px !important;}
+      .stat-num{font-size:26px !important;}
+      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:260px !important;}
     }
-    /* Mobile ≤600: sidebar hidden, bottom tabs */
     @media(max-width:600px){
-      .content{margin-left:0 !important;padding-bottom:64px;}
+      .content{margin-left:0 !important;width:100% !important;}
       .inner{padding:14px 14px !important;}
-      .topbar{padding:0 14px !important;min-height:50px;}
+      .topbar{padding:0 14px !important;min-height:52px;}
       .g2{grid-template-columns:1fr 1fr !important;}
       .g3,.g4{grid-template-columns:1fr 1fr !important;}
       .coach-grid{grid-template-columns:1fr !important;}
       .stat-num{font-size:20px !important;}
-      .ptitle{font-size:14px !important;}
+      .ptitle{font-size:15px !important;}
       .psub{display:none !important;}
       .section-head{font-size:16px !important;}
       .snotes{display:none;}
+      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:80vw !important;max-width:280px !important;}
     }
-    /* Very small ≤380 */
     @media(max-width:380px){
       .g2,.g3,.g4{grid-template-columns:1fr !important;}
       .inner{padding:12px 10px !important;}
-      .stat-num{font-size:18px !important;}
     }
-    /* Sidebar overlay backdrop */
-    .sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;display:none;}
-    @media(max-width:900px){
-      .sb-overlay{display:${sideOpen?"block":"none"};}
-      .sidebar{width:${sideOpen?"240px":"0px"} !important;box-shadow:${sideOpen?"4px 0 32px rgba(0,0,0,.5)":"none"};}
-    }
-    @media(max-width:600px){
-      .sidebar{width:${sideOpen?"85vw":"0px"} !important;max-width:300px;}
-    }
-    /* Hamburger button - shown on tablet+mobile */
-    .mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:${d.hover};border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;transition:background .15s;}
-    .mob-btn:hover{background:${d.card};}
+    /* Overlay behind sidebar on mobile */
+    .sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;
+      opacity:${sideOpen?1:0};pointer-events:${sideOpen?"auto":"none"};transition:opacity .25s;}
+    @media(min-width:901px){.sb-overlay{display:none;}}
+    /* Hamburger — only on mobile/tablet */
+    .mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:${d.hover};border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;}
     @media(max-width:900px){.mob-btn{display:flex;}}
-    /* Mobile bottom tab bar */
-    .mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:30;background:${d.sb};border-top:1px solid ${d.b};align-items:stretch;padding-bottom:env(safe-area-inset-bottom,0px);}
-    @media(max-width:600px){.mob-tabs{display:flex;}}
 
     /* ── SIDEBAR ── */
     .s-logo{padding:18px 16px 14px;border-bottom:1px solid ${d.b};display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}
@@ -2250,7 +2256,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
 
     /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;box-sizing:border-box;width:100%;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;width:100%;box-sizing:border-box;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
     .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
     .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
     .tbr{display:flex;align-items:center;gap:7px;}
@@ -2736,9 +2742,11 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             </div>
           </div>}
 
-          {/* ── PRACTICE — full bleed, no inner wrapper ── */}
+          {/* ── PRACTICE ── */}
           {tab==="pyq"&&(
-            <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
+            <div style={{width:"100%",minHeight:"100vh"}}>
+              <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
+            </div>
           )}
 
           <div className="inner" style={{display:tab==="pyq"?"none":"block"}}>
@@ -3211,19 +3219,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         </div>
       </div>
       {/* Mobile bottom tabs */}
-      <div className="mob-tabs">
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>switchTab(t.id)}
-            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-              gap:1,background:"none",border:"none",cursor:"pointer",padding:"8px 2px",
-              color:tab===t.id?d.a1:d.t3,minWidth:0,boxSizing:"border-box"}}>
-            <span style={{fontSize:16,lineHeight:1}}>{t.icon}</span>
-            <span style={{fontSize:8,fontWeight:tab===t.id?700:400,whiteSpace:"nowrap",overflow:"hidden",maxWidth:"100%",textOverflow:"ellipsis"}}>
-              {t.label.slice(0,5)}
-            </span>
-          </button>
-        ))}
-      </div>
+
     </>
   );
 }
