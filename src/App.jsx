@@ -1,1561 +1,2616 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { supabase } from './supabase'
-import './App.css'
+import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+// ── Config — paste your values here, OR set as Vite env vars ─────────────────
+const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
+const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const SUBJECTS = ['Physics', 'Mathematics', 'Chemistry']
+// ── Supabase Auth helpers ─────────────────────────────────────────────────────
+const SB_AUTH = {
+  async signUp(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password}),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error_description||d.msg||"Sign up failed");
+    return d;
+  },
+  async signInEmail(email, password) {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password}),
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error_description||d.msg||"Login failed");
+    return d;
+  },
+  async signOut(accessToken) {
+    await fetch(`${SB_URL}/auth/v1/logout`, {
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
+    });
+    localStorage.removeItem("slothr_auth");
+  },
+  async getUser(accessToken) {
+    const r = await fetch(`${SB_URL}/auth/v1/user`, {
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
+    });
+    if(!r.ok) return null;
+    return await r.json();
+  },
+  async loadData(table, userId, accessToken) {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*&order=created_at.asc`,
+      {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`}}
+    );
+    if(!r.ok) return [];
+    return await r.json();
+  },
+};
 
-const CHAPTER_DATA = {
-  Physics: [
-    'Kinematics', 'Laws of Motion', 'Work, Energy & Power', 'Rotational Motion',
-    'Gravitation', 'Properties of Matter', 'SHM & Waves', 'Thermodynamics',
-    'Electrostatics', 'Current Electricity', 'Magnetism', 'EMI & AC Circuits',
-    'Optics', 'Modern Physics', 'Semiconductors',
-  ],
-  Mathematics: [
-    'Complex Numbers', 'Quadratic Equations', 'Sequences & Series', 'Binomial Theorem',
-    'Permutation & Combination', 'Probability', 'Matrices & Determinants',
-    'Straight Lines', 'Circles', 'Conic Sections', 'Limits & Continuity',
-    'Differentiation', 'Applications of Derivatives', 'Indefinite Integrals',
-    'Definite Integrals', 'Differential Equations', 'Vectors', '3D Geometry',
-  ],
-  Chemistry: [
-    'Mole Concept', 'Atomic Structure', 'Chemical Bonding', 'States of Matter',
-    'Thermodynamics', 'Equilibrium', 'Redox Reactions', 'Electrochemistry',
-    'Chemical Kinetics', 'Nuclear Chemistry', 'GOC', 'Hydrocarbons',
-    'Halides & Alcohols', 'Carbonyl Compounds', 'Coordination Compounds',
-    'p-Block Elements', 'd-Block Elements', 'Biomolecules',
-  ],
-}
+// ─────────────────────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG = {
-  todo:      { label: 'Not started', color: '#888780', bg: '#F1EFE8' },
-  progress:  { label: 'In Progress', color: '#BA7517', bg: '#FAEEDA' },
-  revision:  { label: 'Revision',    color: '#534AB7', bg: '#EEEDFE' },
-  done:      { label: 'Done ✓',      color: '#0F6E56', bg: '#E1F5EE' },
-}
+// ── Math renderer — proper stacked fractions via JSX ─────────────────────────
+// Parses a LaTeX-subset string into tokens, renders as React elements.
+// Supports: \frac{}{}, \sqrt{}, ^{}, _{}, Greek, trig inverses, operators.
 
-// ─── ROOT ────────────────────────────────────────────────────────────────────
+function parseMath(raw) {
+  // Returns array of token objects: {t:"txt"|"frac"|"sqrt"|"sup"|"sub", ...}
+  const out = [];
+  let i = 0;
+  const BSRE = /^\\([a-zA-Z]+|\^)/;
 
-export default function App() {
-  const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [profile, setProfile] = useState(null)
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-    })
-    return () => subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    if (!session?.user) return
-    fetchOrCreateProfile(session.user)
-  }, [session])
-
-  async function fetchOrCreateProfile(user) {
-    let { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single()
-
-    if (!data) {
-      const handle = user.email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase()
-      const { data: created } = await supabase.from('profiles').insert({
-        id: user.id,
-        full_name: user.user_metadata?.full_name || user.email.split('@')[0],
-        avatar_url: user.user_metadata?.avatar_url || null,
-        handle,
-        target_college: 'IIT Bombay',
-        bio: 'JEE Aspirant 🚀',
-      }).select().single()
-      data = created
+  function readBraced(from) {
+    // reads {content} starting at from, returns [content, endIndex]
+    if (raw[from] !== '{') return ['', from];
+    let depth = 1, j = from + 1, buf = '';
+    while (j < raw.length && depth > 0) {
+      if (raw[j] === '{') depth++;
+      else if (raw[j] === '}') depth--;
+      if (depth > 0) buf += raw[j];
+      j++;
     }
-    setProfile(data)
+    return [buf, j];
   }
 
-  if (loading) return <Splash />
-  if (!session) return <AuthPage />
-  if (!profile) return <Splash />
-  return <MainApp session={session} profile={profile} setProfile={setProfile} />
-}
+  while (i < raw.length) {
+    const ch = raw[i];
 
-// ─── SPLASH ───────────────────────────────────────────────────────────────────
+    // backslash command
+    if (ch === '\\') {
+      const m = raw.slice(i).match(BSRE);
+      if (!m) { pushTxt('\\'); i++; continue; }
+      const cmd = m[1];
+      i += 1 + cmd.length;
 
-function Splash() {
-  return (
-    <div className="splash">
-      <div className="splash-logo">⚡</div>
-      <div className="splash-name">StudyRun</div>
-      <div className="splash-loader"><div className="splash-bar" /></div>
-    </div>
-  )
-}
-
-// ─── AUTH ─────────────────────────────────────────────────────────────────────
-
-function AuthPage() {
-  const [loading, setLoading] = useState(false)
-  async function signInWithGoogle() {
-    setLoading(true)
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
-  }
-  return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <div className="auth-logo">⚡ StudyRun</div>
-        <div className="auth-tagline">JEE prep, social and serious.</div>
-        <div className="auth-features">
-          <span>📊 Track every session</span>
-          <span>🏆 Compete on leaderboards</span>
-          <span>⚡ Join study events</span>
-          <span>👥 Follow top rankers</span>
-        </div>
-        <button className="google-btn" onClick={signInWithGoogle} disabled={loading}>
-          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
-          {loading ? 'Signing in…' : 'Continue with Google'}
-        </button>
-        <p className="auth-note">Free for JEE aspirants</p>
-      </div>
-    </div>
-  )
-}
-
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
-
-function MainApp({ session, profile, setProfile }) {
-  const [page, setPage] = useState('feed')
-  const [viewingProfile, setViewingProfile] = useState(null) // userId of profile being viewed
-  const [modal, setModal] = useState(null) // 'log'
-  const [modalData, setModalData] = useState(null)
-
-  // session timer
-  const [timerRunning, setTimerRunning] = useState(false)
-  const [timerSeconds, setTimerSeconds] = useState(0)
-  const timerRef = useRef(null)
-  const timerSecondsRef = useRef(0) // always-current mirror, safe to read in closures
-
-  useEffect(() => {
-    if (timerRunning) {
-      timerRef.current = setInterval(() => {
-        setTimerSeconds(s => {
-          timerSecondsRef.current = s + 1
-          return s + 1
-        })
-      }, 1000)
-    } else {
-      clearInterval(timerRef.current)
+      if (cmd === 'frac') {
+        const [num, i2] = readBraced(i);
+        const [den, i3] = readBraced(i2);
+        out.push({ t: 'frac', num, den });
+        i = i3; continue;
+      }
+      if (cmd === 'sqrt') {
+        const [inner, i2] = readBraced(i);
+        out.push({ t: 'sqrt', inner });
+        i = i2; continue;
+      }
+      // trig inverses: \tan^{-1}
+      if ((cmd === 'tan' || cmd === 'sin' || cmd === 'cos') && raw.slice(i, i+4) === '^{-1') {
+        out.push({ t: 'txt', v: cmd + '\u207b\u00b9' }); // ⁻¹
+        i += 5; continue; // skip ^{-1}
+      }
+      const SYMS = {
+        alpha:'α',beta:'β',gamma:'γ',delta:'δ',Delta:'Δ',theta:'θ',phi:'φ',
+        pi:'π',omega:'ω',Omega:'Ω',mu:'μ',lambda:'λ',sigma:'σ',epsilon:'ε',
+        rho:'ρ',eta:'η',xi:'ξ',zeta:'ζ',Lambda:'Λ',Gamma:'Γ',Phi:'Φ',Psi:'Ψ',
+        tau:'τ',nu:'ν',kappa:'κ',
+        tan:'tan',sin:'sin',cos:'cos',log:'log',ln:'ln',
+        arctan:'tan⁻¹',arcsin:'sin⁻¹',arccos:'cos⁻¹',
+        rightarrow:'→',leftarrow:'←',to:'→',Rightarrow:'⇒',leftrightarrow:'↔',rightleftharpoons:'⇌',
+        times:'×',cdot:'·',div:'÷',leq:'≤',geq:'≥',neq:'≠',
+        approx:'≈',infty:'∞',pm:'±',mp:'∓',circ:'°',degree:'°',
+        int:'∫',sum:'Σ',prod:'Π',partial:'∂',nabla:'∇',
+        forall:'∀',exists:'∃',
+      };
+      pushTxt(SYMS[cmd] ?? '');
+      continue;
     }
-    return () => clearInterval(timerRef.current)
-  }, [timerRunning])
 
-  function startTimer() { setTimerSeconds(0); timerSecondsRef.current = 0; setTimerRunning(true) }
-  function stopTimer() {
-    setTimerRunning(false)
-    const elapsed = timerSecondsRef.current
-    if (elapsed > 30) {
-      setModal('log')
-      setModalData({ duration: elapsed })
+    // superscript  ^{...} or ^digit
+    if (ch === '^') {
+      if (raw[i+1] === '{') {
+        const [val, i2] = readBraced(i+1);
+        out.push({ t: 'sup', v: val });
+        i = i2; continue;
+      }
+      if (/\d/.test(raw[i+1])) { out.push({ t: 'sup', v: raw[i+1] }); i+=2; continue; }
     }
-  }
 
-  function openProfilePage(userId) { setViewingProfile(userId); setPage('profile') }
-
-  const nav = (pg) => { setPage(pg); setViewingProfile(null) }
-
-  return (
-    <div className="app-shell">
-      <Sidebar page={page} nav={nav} profile={profile} timerRunning={timerRunning} />
-
-      <div className="app-content">
-        {page === 'feed' && (
-          <FeedPage
-            profile={profile}
-            timerRunning={timerRunning}
-            timerSeconds={timerSeconds}
-            onStart={startTimer}
-            onStop={stopTimer}
-            onOpenProfile={openProfilePage}
-          />
-        )}
-        {page === 'events' && <EventsPage profile={profile} onOpenProfile={openProfilePage} />}
-        {page === 'leaderboard' && <LeaderboardPage profile={profile} onOpenProfile={openProfilePage} />}
-        {page === 'explore' && <ExplorePage profile={profile} onOpenProfile={openProfilePage} />}
-        {page === 'chapters' && <ChaptersPage profile={profile} />}
-        {page === 'profile' && (
-          <ProfilePage
-            profile={profile}
-            setProfile={setProfile}
-            viewingId={viewingProfile || session.user.id}
-            isOwn={!viewingProfile || viewingProfile === session.user.id}
-            onOpenProfile={openProfilePage}
-          />
-        )}
-      </div>
-
-      {modal === 'log' && (
-        <LogSessionModal
-          profile={profile}
-          durationSeconds={modalData?.duration || 0}
-          onClose={() => setModal(null)}
-          onPosted={() => { setModal(null); nav('feed') }}
-        />
-      )}
-
-      {/* EditProfileModal is triggered inline inside ProfilePage, not via MainApp modal */}
-    </div>
-  )
-}
-
-// ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-
-function Sidebar({ page, nav, profile, timerRunning }) {
-  async function signOut() {
-    await supabase.auth.signOut()
-    window.location.reload()
-  }
-  const navItems = [
-    { id: 'feed',        icon: 'home',          label: 'Feed' },
-    { id: 'events',      icon: 'calendar-event', label: 'Events' },
-    { id: 'leaderboard', icon: 'trophy',         label: 'Leaderboard' },
-    { id: 'explore',     icon: 'users',          label: 'Explore' },
-  ]
-  const myItems = [
-    { id: 'chapters', icon: 'book',  label: 'Chapters' },
-    { id: 'profile',  icon: 'user',  label: 'My Profile' },
-  ]
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <span className="sidebar-logomark">⚡ StudyRun</span>
-        <span className="sidebar-tagline">JEE social tracker</span>
-      </div>
-      <nav className="sidebar-nav">
-        {navItems.map(item => (
-          <button
-            key={item.id}
-            className={`nav-item${page === item.id ? ' active' : ''}`}
-            onClick={() => nav(item.id)}
-          >
-            <i className={`ti ti-${item.icon}`} aria-hidden="true" />
-            {item.label}
-            {item.id === 'feed' && timerRunning && <span className="timer-dot" />}
-          </button>
-        ))}
-        <div className="nav-section-label">My Progress</div>
-        {myItems.map(item => (
-          <button
-            key={item.id}
-            className={`nav-item${page === item.id ? ' active' : ''}`}
-            onClick={() => nav(item.id)}
-          >
-            <i className={`ti ti-${item.icon}`} aria-hidden="true" />
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      <div className="sidebar-footer">
-        <button className="sidebar-user" onClick={() => nav('profile')}>
-          <Avatar profile={profile} size={32} />
-          <div className="sidebar-user-info">
-            <span className="sidebar-user-name">{profile.full_name}</span>
-            <span className="sidebar-user-handle">@{profile.handle}</span>
-          </div>
-        </button>
-        <button className="signout-btn" onClick={signOut} title="Sign out">
-          <i className="ti ti-logout" aria-hidden="true" />
-        </button>
-      </div>
-    </aside>
-  )
-}
-
-// ─── FEED PAGE ────────────────────────────────────────────────────────────────
-
-function FeedPage({ profile, timerRunning, timerSeconds, onStart, onStop, onOpenProfile }) {
-  const [posts, setPosts] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { fetchFeed() }, [])
-
-  async function fetchFeed() {
-    setLoading(true)
-    // Get people this user follows + own posts
-    const { data: follows } = await supabase
-      .from('follows')
-      .select('following_id')
-      .eq('follower_id', profile.id)
-
-    const followIds = (follows || []).map(f => f.following_id)
-    const feedIds = [profile.id, ...followIds]
-
-    const { data } = await supabase
-      .from('study_sessions')
-      .select(`
-        *,
-        profiles:user_id ( id, full_name, handle, avatar_url, avatar_color ),
-        kudos:session_kudos ( user_id )
-      `)
-      .in('user_id', feedIds)
-      .order('created_at', { ascending: false })
-      .limit(30)
-
-    // Derive kudos count and whether current user has kudosed — from embedded rows
-    setPosts((data || []).map(s => ({
-      ...s,
-      kudos_count: (s.kudos || []).length,
-      kudos_given: (s.kudos || []).some(k => k.user_id === profile.id),
-    })))
-    setLoading(false)
-  }
-
-  async function toggleKudos(post) {
-    if (post.user_id === profile.id) return
-    if (post.kudos_given) {
-      await supabase.from('session_kudos').delete()
-        .eq('session_id', post.id).eq('user_id', profile.id)
-    } else {
-      await supabase.from('session_kudos').insert({ session_id: post.id, user_id: profile.id })
+    // subscript  _{...} or _digit
+    if (ch === '_') {
+      if (raw[i+1] === '{') {
+        const [val, i2] = readBraced(i+1);
+        out.push({ t: 'sub', v: val });
+        i = i2; continue;
+      }
+      if (/\d/.test(raw[i+1])) { out.push({ t: 'sub', v: raw[i+1] }); i+=2; continue; }
     }
-    setPosts(prev => prev.map(p => p.id === post.id
-      ? { ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1) }
-      : p
-    ))
+
+    pushTxt(ch); i++;
   }
 
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        <h1 className="page-title">Feed</h1>
+  function pushTxt(c) {
+    const last = out[out.length - 1];
+    if (last && last.t === 'txt') last.v += c;
+    else out.push({ t: 'txt', v: c });
+  }
 
-        {/* Session starter card */}
-        <div className="card session-card">
-          <StreakWidget profile={profile} />
-          <button
-            className={`session-btn${timerRunning ? ' recording' : ''}`}
-            onClick={timerRunning ? onStop : onStart}
-          >
-            <i className={`ti ti-${timerRunning ? 'player-stop' : 'player-play'}`} aria-hidden="true" />
-            {timerRunning ? 'Stop & Log Session' : 'Start Study Session'}
-          </button>
-          {timerRunning && (
-            <div className="timer-display">
-              <span className="timer-time">{formatTime(timerSeconds)}</span>
-              <span className="timer-label">session in progress</span>
-            </div>
-          )}
-        </div>
-
-        {loading ? <Spinner /> : posts.length === 0 ? (
-          <EmptyState
-            icon="users"
-            title="Your feed is empty"
-            desc="Follow other students to see their sessions here, or log your first session!"
-          />
-        ) : posts.map(post => (
-          <PostCard
-            key={post.id}
-            post={post}
-            currentUserId={profile.id}
-            onKudos={() => toggleKudos(post)}
-            onOpenProfile={onOpenProfile}
-          />
-        ))}
-      </div>
-
-      <div className="col-side">
-        <MyStatsWidget profile={profile} />
-        <LiveEventsWidget />
-        <SuggestionsWidget profile={profile} onOpenProfile={onOpenProfile} />
-      </div>
-    </div>
-  )
+  return out;
 }
 
-// ─── POST CARD ────────────────────────────────────────────────────────────────
-
-function PostCard({ post, currentUserId, onKudos, onOpenProfile }) {
-  const user = post.profiles
-  const subjectColors = {
-    Physics: { bg: '#E6F1FB', color: '#0C447C' },
-    Mathematics: { bg: '#E1F5EE', color: '#085041' },
-    Chemistry: { bg: '#FAEEDA', color: '#633806' },
-  }
-  const sc = subjectColors[post.subject] || { bg: '#F1EFE8', color: '#444441' }
-  const mins = Math.floor(post.duration_seconds / 60)
-  const hrs = Math.floor(mins / 60)
-  const displayDur = hrs > 0 ? `${hrs}h ${mins % 60}m` : `${mins}m`
-
+function MathText({ t, style }) {
+  if (!t) return null;
+  const tokens = parseMath(t);
   return (
-    <div className="card post-card">
-      <div className="post-header">
-        <button className="post-avatar-btn" onClick={() => onOpenProfile(user.id)}>
-          <Avatar profile={user} size={36} />
-        </button>
-        <div className="post-meta">
-          <div className="post-meta-top">
-            <button className="post-username" onClick={() => onOpenProfile(user.id)}>
-              {user.full_name}
-            </button>
-            <span className="subject-badge" style={{ background: sc.bg, color: sc.color }}>
-              {post.subject}
+    <span style={style}>
+      {tokens.map((tok, i) => {
+        if (tok.t === 'txt') return <span key={i}>{tok.v}</span>;
+
+        if (tok.t === 'sup') return (
+          <sup key={i} style={{fontSize:'0.72em',lineHeight:0,verticalAlign:'super',position:'relative',top:'-0.3em'}}>
+            <MathText t={tok.v}/>
+          </sup>
+        );
+
+        if (tok.t === 'sub') return (
+          <sub key={i} style={{fontSize:'0.72em',lineHeight:0,verticalAlign:'sub',position:'relative',bottom:'-0.2em'}}>
+            <MathText t={tok.v}/>
+          </sub>
+        );
+
+        if (tok.t === 'sqrt') return (
+          <span key={i} style={{display:'inline-flex',alignItems:'stretch',verticalAlign:'middle',margin:'0 1px'}}>
+            <span style={{fontSize:'1.2em',lineHeight:1,paddingRight:1,alignSelf:'center'}}>√</span>
+            <span style={{borderTop:'1.5px solid currentColor',paddingTop:1,paddingLeft:2,paddingRight:3}}>
+              <MathText t={tok.inner}/>
             </span>
+          </span>
+        );
+
+        if (tok.t === 'frac') return (
+          <span key={i} style={{
+            display:'inline-flex',flexDirection:'column',alignItems:'center',
+            verticalAlign:'middle',margin:'0 3px',lineHeight:1.15,
+          }}>
+            <span style={{
+              borderBottom:'1.5px solid currentColor',
+              paddingBottom:2,paddingLeft:4,paddingRight:4,
+              whiteSpace:'nowrap',textAlign:'center',fontSize:'0.88em',
+            }}>
+              <MathText t={tok.num}/>
+            </span>
+            <span style={{
+              paddingTop:2,paddingLeft:4,paddingRight:4,
+              whiteSpace:'nowrap',textAlign:'center',fontSize:'0.88em',
+            }}>
+              <MathText t={tok.den}/>
+            </span>
+          </span>
+        );
+
+        return null;
+      })}
+    </span>
+  );
+}
+
+// Plain-text fallback for non-JSX contexts (list views, etc.)
+function renderMath(text) {
+  if (!text) return text;
+  return text
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g,'($1)/($2)')
+    .replace(/\\sqrt\{([^}]+)\}/g,'√($1)').replace(/\\sqrt(?![{])/g,'√')
+    .replace(/\^\{([^}]+)\}/g,(_,p)=>{const m={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','n':'ⁿ','-':'⁻'};return p.split('').map(c=>m[c]||c).join('');})
+    .replace(/\^(\d)/g,(_,d)=>'⁰¹²³⁴⁵⁶⁷⁸⁹'[d])
+    .replace(/\_\{([^}]+)\}/g,(_,s)=>{const m={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};return s.split('').map(c=>m[c]||c).join('');})
+    .replace(/_(\d)/g,(_,d)=>'₀₁₂₃₄₅₆₇₈₉'[d])
+    .replace(/\\arctan/g,'tan⁻¹').replace(/\\arcsin/g,'sin⁻¹').replace(/\\arccos/g,'cos⁻¹')
+    .replace(/\\tan\^{-1}/g,'tan⁻¹').replace(/\\sin\^{-1}/g,'sin⁻¹').replace(/\\cos\^{-1}/g,'cos⁻¹')
+    .replace(/\\alpha/g,'α').replace(/\\beta/g,'β').replace(/\\gamma/g,'γ').replace(/\\delta/g,'δ')
+    .replace(/\\Delta/g,'Δ').replace(/\\theta/g,'θ').replace(/\\phi/g,'φ').replace(/\\pi/g,'π')
+    .replace(/\\omega/g,'ω').replace(/\\Omega/g,'Ω').replace(/\\mu/g,'μ').replace(/\\lambda/g,'λ')
+    .replace(/\\sigma/g,'σ').replace(/\\epsilon/g,'ε').replace(/\\rho/g,'ρ')
+    .replace(/\\to(?![a-z])/g,'→').replace(/\\rightarrow/g,'→').replace(/\\rightleftharpoons/g,'⇌').replace(/\\times/g,'×')
+    .replace(/\\leq/g,'≤').replace(/\\geq/g,'≥').replace(/\\neq/g,'≠').replace(/\\approx/g,'≈')
+    .replace(/\\infty/g,'∞').replace(/\\pm/g,'±').replace(/\\cdot/g,'·')
+    .replace(/\\int/g,'∫').replace(/\\sum/g,'Σ').replace(/\\partial/g,'∂')
+    .replace(/\\[a-zA-Z]+/g,'');
+}
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NTA SIMULATION — Practice Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLOTHR — NTA JEE MAINS SIMULATION
+// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
+// Students add their own questions via the admin panel (slothr-admin.jsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Utility functions ────────────────────────────────────────────────────────
+const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
+const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
+function isOverdue(dateStr){return dateStr<today();}
+function isDueToday(dateStr){return dateStr===today();}
+function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
+function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
+
+// ── Select component ──────────────────────────────────────────────────────────
+function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
+  return(
+    <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
+      style={{background:d?d.inp:"#1a1816",border:`1px solid ${d?d.b:"rgba(255,255,255,0.07)"}`,
+        color:d?d.t:"#f5f0e8",borderRadius:5,padding:"7px 10px",fontSize:13,
+        fontFamily:"inherit",cursor:"pointer",minWidth:minWidth||120,outline:"none"}}>
+      {placeholder&&<option value="">{placeholder}</option>}
+      {options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
+    </select>
+  );
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const THEME = {
+  dark:{
+    bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
+    b:"rgba(255,255,255,0.07)",bs:"rgba(255,255,255,0.14)",
+    t:"#f5f0e8",t2:"#c8c0b0",t3:"#8a8070",t4:"#4a4540",
+    a1:"#e8723c",a2:"#4d9e78",a3:"#7a8fc2",
+    inp:"#1a1816",ring:"#e8723c",danger:"#d4604a",
+  },
+  light:{
+    bg:"#f7f4ee",sb:"#f0ece3",card:"#ffffff",hover:"#f0ece3",
+    b:"rgba(0,0,0,0.08)",bs:"rgba(0,0,0,0.16)",
+    t:"#1a1510",t2:"#4a4035",t3:"#8a7a6a",t4:"#c0b8a8",
+    a1:"#d4612a",a2:"#3d8a63",a3:"#5b6fa8",
+    inp:"#f7f4ee",ring:"#d4612a",danger:"#c44a35",
+  },
+};
+
+
+
+
+
+// ── Placeholder papers — replace questions with real ones from your DB ────────
+const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
+const TOPICS = {
+  Physics:{
+    "11th":["Kinematics","Laws of Motion","Work & Energy","Rotational Motion","Gravitation","Thermodynamics","Waves","Oscillations","Properties of Matter","Kinetic Theory"],
+    "12th":["Electrostatics","Current Electricity","Magnetism","EMI & AC","Optics","Modern Physics","Semiconductors","Dual Nature","Atoms & Nuclei","Communication"],
+    dropper:["Kinematics","Laws of Motion","Work & Energy","Rotational Motion","Gravitation","Thermodynamics","Waves","Oscillations","Electrostatics","Current Electricity","Magnetism","EMI & AC","Optics","Modern Physics","Semiconductors"]
+  },
+  Chemistry:{
+    "11th":["Mole Concept","Atomic Structure","Chemical Bonding","States of Matter","Thermodynamics","Equilibrium","Redox","Organic Basics","Hydrocarbons","s-Block Elements"],
+    "12th":["Electrochemistry","Chemical Kinetics","Solutions","Surface Chemistry","p-Block Elements","d-Block Elements","Coordination Compounds","Haloalkanes","Alcohols","Amines"],
+    dropper:["Mole Concept","Atomic Structure","Chemical Bonding","Thermodynamics","Equilibrium","Electrochemistry","Chemical Kinetics","Coordination Compounds","Organic Chemistry","p-Block Elements"]
+  },
+  Mathematics:{
+    "11th":["Sets & Functions","Trigonometry","Sequences & Series","Straight Lines","Conic Sections","Permutations","Binomial Theorem","Limits","Statistics","Probability"],
+    "12th":["Matrices","Determinants","Continuity & Differentiability","Applications of Derivatives","Integrals","Differential Equations","Vectors","3D Geometry","Probability","Linear Programming"],
+    dropper:["Calculus","Algebra","Coordinate Geometry","Trigonometry","Vectors & 3D","Probability","Matrices","Complex Numbers","Sequences & Series","Differential Equations"]
+  }
+};
+const JEE_WEIGHTAGE = {
+  Physics:{"Kinematics":"M","Laws of Motion":"H","Work & Energy":"H","Rotational Motion":"H","Gravitation":"M","Thermodynamics":"H","Waves":"M","Oscillations":"H","Properties of Matter":"L","Kinetic Theory":"M","Electrostatics":"H","Current Electricity":"H","Magnetism":"H","EMI & AC":"H","Optics":"H","Modern Physics":"H","Semiconductors":"M","Dual Nature":"M","Atoms & Nuclei":"M","Communication":"L"},
+  Chemistry:{"Mole Concept":"H","Atomic Structure":"H","Chemical Bonding":"H","States of Matter":"M","Thermodynamics":"H","Equilibrium":"H","Redox":"M","Organic Basics":"H","Hydrocarbons":"H","s-Block Elements":"L","Electrochemistry":"H","Chemical Kinetics":"H","Solutions":"M","Surface Chemistry":"L","p-Block Elements":"H","d-Block Elements":"H","Coordination Compounds":"H","Haloalkanes":"M","Alcohols":"M","Amines":"M","Organic Chemistry":"H"},
+  Mathematics:{"Sets & Functions":"L","Trigonometry":"H","Sequences & Series":"M","Straight Lines":"M","Conic Sections":"H","Permutations":"M","Binomial Theorem":"M","Limits":"H","Statistics":"L","Probability":"H","Matrices":"M","Determinants":"M","Continuity & Differentiability":"H","Applications of Derivatives":"H","Integrals":"H","Differential Equations":"H","Vectors":"H","3D Geometry":"H","Linear Programming":"L","Calculus":"H","Algebra":"H","Coordinate Geometry":"H","Vectors & 3D":"H","Complex Numbers":"H"}
+};
+const CLASSES = [
+  {id:"11th", label:"Class 11th", icon:"①"},
+  {id:"12th", label:"Class 12th", icon:"②"},
+  {id:"dropper", label:"Dropper", icon:"↻"},
+];
+
+const STREAK_MILESTONES = [
+  {days:1,  icon:"🌱", label:"First Day"},
+  {days:5,  icon:"🔥", label:"5 Day Streak"},
+  {days:7,  icon:"⚡", label:"One Week"},
+  {days:10, icon:"💪", label:"10 Days"},
+  {days:15, icon:"🎯", label:"15 Days"},
+  {days:21, icon:"🏆", label:"3 Weeks"},
+  {days:30, icon:"👑", label:"30 Days"},
+  {days:50, icon:"💎", label:"50 Days"},
+  {days:100,icon:"🦥", label:"100 Days"},
+];
+
+const TABS=[
+  {id:"overview",label:"Overview",icon:"⌂"},
+  {id:"coach",label:"Analytics",icon:"◈"},
+  {id:"goals",label:"today's goals",icon:"◎"},
+  {id:"sessions",label:"Sessions",icon:"◷"},
+  {id:"streaks",label:"Streaks",icon:"🔥"},
+  {id:"syllabus",label:"Syllabus",icon:"📋"},
+  {id:"revision",label:"Revision",icon:"↺"},
+  {id:"rank",label:"Rank",icon:"🎯"},
+  {id:"feed",label:"Feed",icon:"◉"},
+  {id:"events",label:"Events",icon:"⚡"},
+  {id:"profile",label:"Profile",icon:"◯"},
+];
+
+
+// ── Placeholder questions — you'll populate these from Supabase ───────────────
+// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
+// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
+// Replace these with real questions fetched from Supabase.
+// IMPORTANT: every real question MUST include a `topic` field (chapter name).
+// This is how the Analytics tab and AI coach know which chapter you got wrong.
+// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
+// ─────────────────────────────────────────────────────────────────────────────const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
+
+// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
+// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
+
+
+// ── Question Status ───────────────────────────────────────────────────────────
+// notVisited | notAnswered | answered | markedReview | answeredMarked
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAPER LIST — card view
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+// ── Auth Screen ───────────────────────────────────────────────────────────────
+function AuthScreen({onAuth}) {
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSubmit() {
+    if(!email||!password){setError("fill in both fields.");return;}
+    if(password.length<6){setError("password must be at least 6 characters.");return;}
+    setLoading(true); setError("");
+    try {
+      if(mode==="signup") {
+        await SB_AUTH.signUp(email, password);
+        setError("account created! log in now.");
+        setMode("login"); setLoading(false); return;
+      }
+      const session = await SB_AUTH.signInEmail(email, password);
+      const stored = {
+        access_token:session.access_token, refresh_token:session.refresh_token,
+        expires_at:Date.now()+(session.expires_in||3600)*1000, user:session.user,
+      };
+      localStorage.setItem("slothr_auth", JSON.stringify(stored));
+      onAuth(stored);
+    } catch(e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  const inp = {
+    width:"100%", padding:"11px 14px", border:"1px solid rgba(255,255,255,.12)",
+    borderRadius:8, background:"rgba(255,255,255,.06)", color:"#f5f0e8",
+    fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box",
+    WebkitAppearance:"none",
+  };
+
+  return (
+    <div style={{
+      position:"fixed", top:0, left:0, right:0, bottom:0, zIndex:9999,
+      background:"#0e0d0b", display:"flex", alignItems:"center",
+      justifyContent:"center", padding:"20px 16px", boxSizing:"border-box",
+      fontFamily:"'DM Sans',sans-serif", overflowY:"auto",
+    }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{width:"100%", maxWidth:380, margin:"auto"}}>
+        <div style={{textAlign:"center", marginBottom:32}}>
+          <div style={{fontSize:40, marginBottom:8}}>🦥</div>
+          <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
+            sloth<span style={{color:"#e8723c"}}>r</span>
           </div>
-          <span className="post-time">{timeAgo(post.created_at)}</span>
+          <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your smartest situationship.</div>
         </div>
-      </div>
-
-      <div className="post-title">{post.title}</div>
-      {post.notes && <div className="post-notes">{post.notes}</div>}
-
-      <div className="post-stats-grid">
-        <div className="pstat">
-          <span className="pstat-val">{displayDur}</span>
-          <span className="pstat-lbl">Duration</span>
-        </div>
-        <div className="pstat">
-          <span className="pstat-val">{post.problems_solved ?? '—'}</span>
-          <span className="pstat-lbl">Problems</span>
-        </div>
-        <div className="pstat">
-          <span className="pstat-val">{post.accuracy_pct != null ? `${post.accuracy_pct}%` : '—'}</span>
-          <span className="pstat-lbl">Accuracy</span>
-        </div>
-      </div>
-
-      <div className="post-actions">
-        <button
-          className={`action-btn${post.kudos_given ? ' kudosed' : ''}`}
-          onClick={onKudos}
-          disabled={post.user_id === currentUserId}
-        >
-          <i className={`ti ti-heart${post.kudos_given ? '-filled' : ''}`} aria-hidden="true" />
-          {post.kudos_count} Kudos
+        <button onClick={()=>window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`}
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#1a1510",
+            border:"none", fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:14,
+            display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+            fontFamily:"inherit", boxSizing:"border-box"}}>
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 0 1 0-3.04V5.41H1.83a8 8 0 0 0 0 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.4L4.5 7.49a4.77 4.77 0 0 1 4.48-3.31z"/></svg>
+          continue with Google
         </button>
-        <button className="action-btn">
-          <i className="ti ti-message-circle" aria-hidden="true" />
-          Comment
+        <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14}}>
+          <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
+          <span style={{fontSize:11, color:"#4a4540"}}>or</span>
+          <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
+        </div>
+        <div style={{marginBottom:10}}>
+          <input style={inp} type="email" placeholder="email" value={email}
+            onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <input style={inp} type="password" placeholder="password (min 6 chars)" value={password}
+            onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
+        </div>
+        {error&&<div style={{fontSize:12, color:error.includes("created")?"#4d9e78":"#d4604a",
+          marginBottom:12, textAlign:"center", lineHeight:1.5}}>{error}</div>}
+        <button onClick={handleSubmit} disabled={loading}
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#e8723c",
+            color:"#fff", border:"none", fontSize:14, fontWeight:700,
+            cursor:loading?"not-allowed":"pointer", opacity:loading?.6:1,
+            fontFamily:"inherit", boxSizing:"border-box"}}>
+          {loading?"...":(mode==="login"?"log in":"sign up")}
         </button>
-        <button className="action-btn" style={{ marginLeft: 'auto' }}>
-          <i className="ti ti-share" aria-hidden="true" />
-          Share
-        </button>
+        <div style={{textAlign:"center", marginTop:14, fontSize:12, color:"#8a8070"}}>
+          {mode==="login"?"no account? ":"have one? "}
+          <span style={{color:"#e8723c", cursor:"pointer"}}
+            onClick={()=>{setMode(m=>m==="login"?"signup":"login");setError("");}}>
+            {mode==="login"?"sign up":"log in"}
+          </span>
+        </div>
       </div>
     </div>
-  )
+  );
 }
 
-// ─── EVENTS PAGE ──────────────────────────────────────────────────────────────
 
-function EventsPage({ profile, onOpenProfile }) {
-  const [events, setEvents] = useState([])
-  const [registered, setRegistered] = useState(new Set())
-  const [loading, setLoading] = useState(true)
+function buildCSS(d,dark,sideOpen,SW,subColor,sT,sW6,sOD,sOO,sOP,tBg,fsB,fsDo,sIP,sIJ){
+// sT=sideTranslate, sW6=sideW600, sOD=sbOverlayDisplay, sOO=sbOverlayOp, sOP=sbOverlayPE
+// tBg=topbarBg, fsB=fsOverlayBg, fsDo=fsDoneBg, sIP=sItemPad, sIJ=sItemJust
+var c=[];
+c.push("@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');");
+c.push("html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}");
+c.push("*{box-sizing:border-box;}");
+c.push("*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}");
+c.push("body{background:"+d.bg+";font-family:'DM Sans',sans-serif;color:"+d.t+";-webkit-font-smoothing:antialiased;}");
+c.push("*{transition:background-color .18s,border-color .18s,color .12s;}");
+c.push("::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:"+d.b+";border-radius:1px;}");
+c.push(".layout{display:block;min-height:100vh;width:100%;background:"+d.bg+";}");
+c.push(".sidebar{width:"+SW+"px;min-height:100vh;background:"+d.sb+";border-right:1px solid "+d.b+";position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}");
+c.push(".content{margin-left:"+SW+"px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - "+SW+"px);}");
+c.push(".inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;overflow-x:hidden;}");
+c.push("@media(min-width:1400px){.inner{padding:36px 60px;}.topbar{padding:0 60px;}}");
+c.push("@media(max-width:1100px){.inner{padding:28px 32px;}.topbar{padding:0 32px;}}");
+c.push("@media(max-width:900px){.content{margin-left:0!important;width:100%!important;}.inner{padding:20px 18px;}.topbar{padding:0 18px!important;}.g3{grid-template-columns:1fr 1fr!important;}.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr 1fr!important;}.stat-num{font-size:26px!important;}.sidebar{transform:translateX("+sT+");width:260px!important;}}");
+c.push("@media(max-width:600px){.content{margin-left:0!important;width:100%!important;}.inner{padding:14px 14px!important;}.topbar{padding:0 14px!important;min-height:52px;}.g2{grid-template-columns:1fr 1fr!important;}.g3,.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr!important;}.stat-num{font-size:20px!important;}.ptitle{font-size:15px!important;}.psub{display:none!important;}.section-head{font-size:16px!important;}.snotes{display:none;}.sidebar{transform:translateX("+sT+");width:80vw!important;max-width:280px!important;}}");
+c.push("@media(max-width:380px){.g2,.g3,.g4{grid-template-columns:1fr!important;}.inner{padding:12px 10px!important;}}");
+c.push(".sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;opacity:"+sOO+";pointer-events:"+sOP+";transition:opacity .25s;}");
+c.push("@media(min-width:901px){.sb-overlay{display:none;}}");
+c.push(".mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:"+d.hover+";border:1px solid "+d.b+";cursor:pointer;align-items:center;justify-content:center;color:"+d.t+";font-size:18px;flex-shrink:0;}");
+c.push("@media(max-width:900px){.mob-btn{display:flex;}}");
+c.push(".s-logo{padding:18px 16px 14px;border-bottom:1px solid "+d.b+";display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}");
+c.push(".s-brand{font-size:16px;font-weight:700;color:"+d.t+";letter-spacing:-.05em;white-space:nowrap;line-height:1;font-family:'DM Serif Display',serif;}");
+c.push(".s-toggle{width:26px;height:26px;border-radius:4px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;color:"+d.t3+";font-size:11px;flex-shrink:0;}");
+c.push(".s-toggle:hover{color:"+d.t+";border-color:"+d.bs+";}");
+c.push(".s-nav{padding:10px 8px;flex:1;overflow-y:auto;overflow-x:hidden;}");
+c.push(".s-sec{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:"+d.t4+";padding:0 8px;margin:14px 0 4px;font-family:'DM Sans',sans-serif;font-weight:600;}");
+c.push(".s-item{display:flex;align-items:center;gap:9px;padding:"+sIP+";border-radius:3px;cursor:pointer;color:"+d.t3+";font-size:12px;margin-bottom:1px;border:1px solid transparent;user-select:none;justify-content:"+sIJ+";font-weight:500;letter-spacing:.01em;}");
+c.push(".s-item:hover{color:"+d.t+";background:"+d.hover+";}");
+c.push(".s-item.active{color:"+d.t+";background:"+d.hover+";font-weight:600;}");
+c.push(".s-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center;opacity:.6;}");
+c.push(".s-item.active .s-icon{opacity:1;}");
+c.push(".s-label{white-space:nowrap;overflow:hidden;}");
+c.push(".s-footer{padding:12px 14px;border-top:1px solid "+d.b+";flex-shrink:0;}");
+c.push(".s-av{width:26px;height:26px;border-radius:2px;background:"+d.a1+";display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;}");
+c.push(".s-uinfo{overflow:hidden;}");
+c.push(".topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid "+d.b+";background:"+tBg+";position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;width:100%;box-sizing:border-box;}");
+c.push(".ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}");
+c.push(".psub{font-size:11px;color:"+d.t3+";margin-top:3px;letter-spacing:.01em;font-style:italic;}");
+c.push(".tbr{display:flex;align-items:center;gap:7px;}");
+c.push(".icon-btn{width:30px;height:30px;border-radius:3px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:"+d.t3+";}");
+c.push(".icon-btn:hover{border-color:"+d.bs+";color:"+d.t+";}");
+c.push(".ghost-sm{background:transparent;color:"+d.t3+";border:1px solid "+d.b+";border-radius:3px;padding:5px 12px;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;font-weight:500;}");
+c.push(".ghost-sm:hover{color:"+d.t+";border-color:"+d.bs+";}");
+c.push(".card{background:"+d.card+";border:1px solid "+d.b+";border-radius:2px;}");
+c.push(".cp{padding:20px 22px;}");
+c.push(".cl{font-size:8.5px;color:"+d.t3+";font-weight:700;letter-spacing:.16em;text-transform:uppercase;font-family:'DM Sans',sans-serif;}");
+c.push(".g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}");
+c.push(".g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}");
+c.push(".g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}");
+c.push(".mb12{margin-bottom:12px;}.mb16{margin-bottom:16px;}");
+c.push(".field{margin-bottom:11px;}");
+c.push(".fl{display:block;font-size:10px;color:"+d.t3+";margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}");
+c.push("input.inp,textarea.inp{width:100%;padding:9px 13px;border:1px solid "+d.b+";border-radius:3px;background:"+d.inp+";font-family:'DM Sans',sans-serif;font-size:13px;color:"+d.t+";outline:none;}");
+c.push("input.inp:focus,textarea.inp:focus{border-color:"+d.a1+"66;}");
+c.push("input.inp::placeholder{color:"+d.t4+";}");
+c.push(".btn{border:none;border-radius:3px;padding:9px 18px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.02em;}");
+c.push(".btn-d{background:"+d.t+";color:"+d.bg+";}");
+c.push(".btn-d:hover{opacity:.84;}.btn-d:disabled{opacity:.25;cursor:not-allowed;}");
+c.push(".btn-full{width:100%;padding:11px;}.btn-danger{background:"+d.danger+";color:#fff;}");
+c.push(".btrack{height:2px;background:"+d.b+";border-radius:1px;overflow:hidden;}");
+c.push(".bfill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.16,1,.3,1);}");
+c.push(".dot{width:5px;height:5px;border-radius:50%;}.row{display:flex;align-items:center;}.rowb{display:flex;align-items:center;justify-content:space-between;}.f1{flex:1;}");
+c.push(".pin{animation:pin .2s ease;}@keyframes pin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}");
+c.push(".shim{border-radius:2px;height:10px;background:linear-gradient(90deg,"+d.b+" 25%,"+d.hover+" 50%,"+d.b+" 75%);background-size:200%;animation:sh 1.5s infinite;margin-bottom:8px;}@keyframes sh{0%{background-position:200%}100%{background-position:-200%}}");
+c.push(".empty{text-align:center;padding:44px 20px;}");
+c.push(".et{font-size:13px;font-weight:500;color:"+d.t3+";margin-bottom:3px;font-style:italic;font-family:'DM Serif Display',serif;}");
+c.push(".es{font-size:11px;color:"+d.t4+";}");
+c.push("hr{border:none;border-top:1px solid "+d.b+";margin:14px 0;}");
+c.push(".rec-dot{display:inline-block;width:4px;height:4px;background:"+subColor+";border-radius:50%;margin-right:5px;animation:blink 1.2s infinite;}@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}");
+c.push("@keyframes ring-pulse{0%,100%{opacity:1}50%{opacity:.3}}.ring-alert{animation:ring-pulse .75s infinite;}");
+c.push(".stat-num{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1;letter-spacing:-.02em;}");
+c.push(".stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:"+d.t3+";margin-top:5px;}");
+c.push(".stat-hint{font-size:11px;color:"+d.t3+";margin-top:4px;font-style:italic;}");
+c.push(".sec-rule{display:flex;align-items:center;gap:10px;margin-bottom:16px;}.sec-rule-line{flex:1;height:1px;background:"+d.b+";}.sec-rule-label{font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:"+d.t4+";}");
+c.push(".section-head{font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;letter-spacing:-.02em;color:"+d.t+";line-height:1.2;margin-bottom:4px;}");
+c.push(".section-sub{font-size:11px;color:"+d.t3+";margin-bottom:20px;font-style:italic;}");
+c.push(".mode-tab{display:flex;background:"+d.inp+";border:1px solid "+d.b+";border-radius:10px;padding:3px;gap:3px;margin-bottom:16px;}");
+c.push(".mode-opt{flex:1;padding:7px;border-radius:7px;border:none;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;cursor:pointer;background:none;color:"+d.t3+";}");
+c.push(".mode-opt.active{background:"+d.card+";color:"+d.t+";box-shadow:0 1px 4px rgba(0,0,0,.2);}");
+c.push(".ring-wrap{position:relative;width:200px;height:200px;margin:0 auto;}");
+c.push(".ring-svg{position:absolute;inset:0;width:100%;height:100%;}");
+c.push(".ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}");
+c.push(".ring-time{font-size:42px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}");
+c.push(".ring-sub{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:"+d.t4+";margin-top:4px;}");
+c.push(".fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:"+fsB+";}");
+c.push(".fs-exit{position:absolute;top:20px;right:22px;background:"+d.hover+";border:1px solid "+d.b+";border-radius:8px;padding:7px 13px;font-family:'DM Sans',sans-serif;font-size:12px;color:"+d.t3+";cursor:pointer;}");
+c.push(".fs-exit:hover{color:"+d.t+";}.fs-sub{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:"+subColor+";margin-bottom:6px;}");
+c.push(".fs-topic{font-size:14px;color:"+d.t2+";margin-bottom:32px;}.fs-time{font-size:100px;font-weight:200;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:"+d.t+";}");
+c.push(".fs-actions{display:flex;gap:12px;margin-top:36px;}.fs-btn{padding:12px 28px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}");
+c.push(".fs-btn-stop{background:"+d.danger+";color:#fff;}.fs-btn-pause{background:"+d.hover+";color:"+d.t+";border:1px solid "+d.b+";}.fs-done{text-align:center;}");
+c.push(".fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}");
+c.push(".coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:16px;width:100%;}");
+c.push(".coach-card{padding:17px;border-radius:12px;border:1px solid "+d.b+";background:"+d.card+";position:relative;overflow:hidden;}");
+c.push(".coach-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}");
+c.push(".coach-card.danger::before{background:"+d.danger+";}.coach-card.success::before{background:"+d.a2+";}.coach-card.warning::before{background:"+d.gold+";}.coach-card.info::before{background:"+d.a3+";}.coach-card.primary::before{background:"+d.a1+";}");
+c.push(".cc-icon{font-size:19px;margin-bottom:9px;}.cc-title{font-size:12px;font-weight:600;color:"+d.t+";margin-bottom:7px;}");
+c.push(".cc-insight{font-size:11.5px;color:"+d.t2+";line-height:1.7;margin-bottom:9px;}");
+c.push(".cc-topics{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;}.cc-topic{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;}");
+c.push(".cc-action{font-size:11px;color:"+d.t3+";padding:8px 10px;background:"+d.hover+";border-radius:7px;line-height:1.5;border-left:2px solid "+d.a1+";}");
+c.push(".goal-item{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border-radius:9px;margin-bottom:6px;border:1px solid "+d.b+";background:"+d.card+";}");
+c.push(".goal-item.achieved{border-color:"+d.a2+"30;background:"+d.a2+"05;}");
+c.push(".goal-check{width:19px;height:19px;border-radius:50%;border:1.5px solid "+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px;cursor:pointer;}");
+c.push(".goal-check.done{background:"+d.a2+";border-color:"+d.a2+";color:white;}");
+c.push(".goal-text{font-size:13px;flex:1;line-height:1.4;}.goal-text.done{text-decoration:line-through;color:"+d.t3+";}");
+c.push(".goal-meta{font-size:10.5px;color:"+d.t3+";margin-top:2px;}");
+c.push(".goal-ai-badge{font-size:9px;padding:1px 6px;border-radius:20px;background:"+d.a3+"18;color:"+d.a3+";font-weight:500;flex-shrink:0;}");
+c.push(".goal-prog{height:2px;background:"+d.b+";border-radius:2px;overflow:hidden;margin-top:5px;}.goal-prog-fill{height:100%;border-radius:2px;background:"+d.a2+";}");
+c.push(".streak-hero{text-align:center;padding:24px 20px;border-radius:14px;background:linear-gradient(135deg,"+d.a1+"10,"+d.a3+"10);border:1px solid "+d.b+";margin-bottom:13px;}");
+c.push(".streak-num{font-size:60px;font-weight:700;letter-spacing:-.04em;line-height:1;color:"+d.a1+";}");
+c.push(".milestone-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:9px;margin-bottom:3px;border:1px solid transparent;}");
+c.push(".milestone-row.reached{background:"+d.hover+";border-color:"+d.b+";}.milestone-row:not(.reached){opacity:.38;}");
+c.push(".m-check{width:18px;height:18px;border-radius:50%;background:"+d.a2+";display:flex;align-items:center;justify-content:center;font-size:9px;color:white;flex-shrink:0;}");
+c.push(".m-lock{width:18px;height:18px;border-radius:50%;background:"+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;color:"+d.t4+";flex-shrink:0;}");
+c.push(".srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid "+d.b+";margin-bottom:0;}");
+c.push(".srow:hover{background:transparent;}.ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}");
+c.push(".stopic{font-size:13px;flex:1;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
+c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid "+d.b+";}.sdate{font-size:10px;color:"+d.t4+";flex-shrink:0;}");
+return c.join("\n");
+}
 
-  useEffect(() => {
-    fetchEvents()
-  }, [])
 
-  async function fetchEvents() {
-    setLoading(true)
-    const { data: evts } = await supabase
-      .from('events')
-      .select('*, event_registrations(count)')
-      .gte('ends_at', new Date().toISOString())
-      .order('starts_at', { ascending: true })
-
-    const { data: myRegs } = await supabase
-      .from('event_registrations')
-      .select('event_id')
-      .eq('user_id', profile.id)
-
-    setEvents(evts || [])
-    setRegistered(new Set((myRegs || []).map(r => r.event_id)))
-    setLoading(false)
+export default function App(){
+  // Tab switch — also closes sidebar on mobile
+  function switchTab(newTab){
+    setTab(newTab);
+    if(window.innerWidth<=900) setSideOpen(false);
   }
 
-  async function toggleRegister(eventId) {
-    if (registered.has(eventId)) {
-      await supabase.from('event_registrations')
-        .delete().eq('event_id', eventId).eq('user_id', profile.id)
-      setRegistered(prev => { const s = new Set(prev); s.delete(eventId); return s })
-    } else {
-      await supabase.from('event_registrations')
-        .insert({ event_id: eventId, user_id: profile.id })
-      setRegistered(prev => new Set([...prev, eventId]))
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [authSession,setAuthSession]=useState(()=>{
+    try{
+      const s=localStorage.getItem("slothr_auth");
+      if(!s)return null;
+      const p=JSON.parse(s);
+      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("slothr_auth");return null;}
+      return p;
+    }catch(e){return null;}
+  });
+  const user=authSession?{
+    name:authSession.user?.user_metadata?.full_name||authSession.user?.email?.split("@")[0]||"Student",
+    email:authSession.user?.email||"",
+    avatar:authSession.user?.user_metadata?.avatar_url||null,
+    id:authSession.user?.id,
+  }:{name:"Student",email:"",avatar:null,id:null};
+  function handleAuthSuccess(stored){
+    const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
+    const p=prev();
+    if(p?.user?.id&&p.user.id!==stored?.user?.id){
+      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
+    localStorage.setItem("slothr_auth",JSON.stringify(stored));
+    setAuthSession(stored);
   }
-
-  const isLive = (evt) => {
-    const now = new Date()
-    return new Date(evt.starts_at) <= now && new Date(evt.ends_at) >= now
+  function handleSignOut(){
+    if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
+    setAuthSession(null);
+    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
+    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
-
-  const subjectBadgeStyle = (subject) => {
-    const map = {
-      Physics: { bg: '#E6F1FB', color: '#0C447C' },
-      Mathematics: { bg: '#E1F5EE', color: '#085041' },
-      Chemistry: { bg: '#FAEEDA', color: '#633806' },
-      'All Subjects': { bg: '#EEEDFE', color: '#3C3489' },
+  // OAuth redirect handler
+  const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
+  useEffect(()=>{
+    const hash=window.location.hash;
+    if(hash.includes("access_token")){
+      const p=new URLSearchParams(hash.replace("#","?"));
+      const token=p.get("access_token");
+      if(token){
+        SB_AUTH.getUser(token).then(u=>{
+          if(u){
+            const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
+            handleAuthSuccess(stored);
+            window.history.replaceState(null,"",window.location.pathname);
+          }
+          setAuthLoading(false);
+        }).catch(()=>setAuthLoading(false));
+      } else {
+        setAuthLoading(false);
+      }
     }
-    return map[subject] || { bg: '#F1EFE8', color: '#444441' }
+  },[]);
+  // Token refresh
+  useEffect(()=>{
+    if(!authSession?.refresh_token)return;
+    const ms=Math.max(0,(authSession.expires_at||0)-Date.now()-5*60*1000);
+    const t=setTimeout(async()=>{
+      try{
+        const r=await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"apikey":SB_ANON,"Content-Type":"application/json"},body:JSON.stringify({refresh_token:authSession.refresh_token})});
+        if(r.ok){const d=await r.json();handleAuthSuccess({access_token:d.access_token,refresh_token:d.refresh_token,expires_at:Date.now()+(d.expires_in||3600)*1000,user:d.user});}
+      }catch(e){}
+    },ms);
+    return()=>clearTimeout(t);
+  },[authSession?.refresh_token]);
+  const [dark,setDark]=useState(true);
+  const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
+  const [tab,setTab]=useState("overview");
+  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
+  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
+
+  // ── Receive completed practice test result ──────────────────────────────────
+  function handleTestComplete({mockEntry, pyqEntries}){
+    setMocks(prev=>[...prev, mockEntry]);
+    setPyqHistory(prev=>[...prev, ...pyqEntries]);
   }
 
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        <h1 className="page-title">Events</h1>
-        <p className="page-subtitle">Compete with peers in timed study challenges</p>
+  // Goals
+  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [goalInput,setGoalInput]=useState("");
+  const [goalSub,setGoalSub]=useState("Physics");
+  const [goalTopic,setGoalTopic]=useState("");
+  const [goalType,setGoalType]=useState("study");
+  const [goalTarget,setGoalTarget]=useState("");
+  const [goalLoading,setGoalLoading]=useState(false);
 
-        {loading ? <Spinner /> : events.length === 0 ? (
-          <EmptyState icon="calendar-event" title="No upcoming events" desc="Check back soon — events are added weekly." />
-        ) : events.map(evt => {
-          const live = isLive(evt)
-          const sc = subjectBadgeStyle(evt.subject)
-          const participantCount = evt.event_registrations?.[0]?.count || 0
-          return (
-            <div className="card event-full-card" key={evt.id}>
-              <div className="event-card-header">
-                <div>
-                  <div className="event-title-row">
-                    <span className="event-title">{evt.name}</span>
-                    {live
-                      ? <span className="event-status-badge live">🔴 Live now</span>
-                      : <span className="event-status-badge upcoming">Upcoming</span>}
-                  </div>
-                  <span className="subject-badge" style={{ background: sc.bg, color: sc.color, marginTop: 4, display: 'inline-block' }}>
-                    {evt.subject}
-                  </span>
-                </div>
-              </div>
-              <p className="event-desc">{evt.description}</p>
-              <div className="event-meta-row">
-                <span className="event-meta-item">
-                  <i className="ti ti-calendar" aria-hidden="true" />
-                  {formatEventDate(evt.starts_at)}
-                </span>
-                <span className="event-meta-item">
-                  <i className="ti ti-clock" aria-hidden="true" />
-                  {durationLabel(evt.starts_at, evt.ends_at)}
-                </span>
-                <span className="event-meta-item">
-                  <i className="ti ti-users" aria-hidden="true" />
-                  {participantCount} registered
-                </span>
-              </div>
-              <button
-                className={`event-join-btn${registered.has(evt.id) ? ' registered' : ''}${live ? ' live-btn' : ''}`}
-                onClick={() => toggleRegister(evt.id)}
-              >
-                {registered.has(evt.id)
-                  ? (live ? '✓ Joined — good luck!' : '✓ Registered — cancel?')
-                  : (live ? 'Join live session' : 'Register for event')}
-              </button>
-            </div>
-          )
-        })}
-      </div>
+  // PYQ
+  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
 
-      <div className="col-side">
-        <MyEventsWidget profile={profile} />
-        <BadgesWidget profile={profile} />
-      </div>
-    </div>
-  )
-}
-
-// ─── LEADERBOARD PAGE ─────────────────────────────────────────────────────────
-
-function LeaderboardPage({ profile, onOpenProfile }) {
-  const [board, setBoard] = useState([])
-  const [period, setPeriod] = useState('all') // 'all' | 'week' | 'month'
-  const [subject, setSubject] = useState('All')
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { fetchBoard() }, [period, subject])
-
-  async function fetchBoard() {
-    setLoading(true)
-    let query = supabase
-      .from('study_sessions')
-      .select('user_id, duration_seconds, subject, profiles:user_id(id, full_name, handle, avatar_url, avatar_color)')
-
-    if (period === 'week') {
-      const since = new Date(); since.setDate(since.getDate() - 7)
-      query = query.gte('created_at', since.toISOString())
-    } else if (period === 'month') {
-      const since = new Date(); since.setMonth(since.getMonth() - 1)
-      query = query.gte('created_at', since.toISOString())
-    }
-    if (subject !== 'All') query = query.eq('subject', subject)
-
-    const { data } = await query
-
-    // Aggregate by user
-    const map = {}
-    ;(data || []).forEach(s => {
-      const uid = s.user_id
-      if (!map[uid]) map[uid] = { profile: s.profiles, total_seconds: 0 }
-      map[uid].total_seconds += s.duration_seconds
-    })
-
-    const sorted = Object.values(map)
-      .sort((a, b) => b.total_seconds - a.total_seconds)
-      .slice(0, 50)
-
-    setBoard(sorted)
-    setLoading(false)
+  // Coach
+  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
+  // Revision scheduler state
+  const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
+  useEffect(()=>{try{localStorage.setItem("slothr_revision",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
+  function markStudied(sub,topic){
+    const now=today();
+    setRevisionLog(prev=>({...prev,[sub+"|"+topic]:{
+      lastStudied:now,
+      nextRevisions:[
+        addDays(now,3),
+        addDays(now,7),
+        addDays(now,14),
+        addDays(now,30),
+      ],
+      doneRevisions:[],
+    }}));
   }
-
-  const myRank = board.findIndex(e => e.profile?.id === profile.id) + 1
-
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        <h1 className="page-title">Leaderboard</h1>
-
-        <div className="lb-filters">
-          <div className="pill-group">
-            {['all', 'week', 'month'].map(p => (
-              <button
-                key={p}
-                className={`pill${period === p ? ' active' : ''}`}
-                onClick={() => setPeriod(p)}
-              >
-                {p === 'all' ? 'All time' : p === 'week' ? 'This week' : 'This month'}
-              </button>
-            ))}
-          </div>
-          <div className="pill-group">
-            {['All', ...SUBJECTS].map(s => (
-              <button
-                key={s}
-                className={`pill${subject === s ? ' active' : ''}`}
-                onClick={() => setSubject(s)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="card">
-          {loading ? <Spinner /> : board.length === 0 ? (
-            <EmptyState icon="trophy" title="No data yet" desc="Be the first to log a session!" />
-          ) : board.filter(entry => entry.profile != null).map((entry, i) => {
-            const isMe = entry.profile.id === profile.id
-            return (
-              <div key={entry.profile.id} className={`lb-row${isMe ? ' lb-me' : ''}`}>
-                <span className={`lb-rank ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}`}>
-                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
-                </span>
-                <button className="lb-avatar-btn" onClick={() => onOpenProfile(entry.profile.id)}>
-                  <Avatar profile={entry.profile} size={32} />
-                </button>
-                <div className="lb-info">
-                  <button className="lb-name" onClick={() => onOpenProfile(entry.profile.id)}>
-                    {entry.profile.full_name} {isMe && <span className="you-tag">you</span>}
-                  </button>
-                  <span className="lb-handle">@{entry.profile.handle}</span>
-                </div>
-                <div className="lb-hours">{formatHours(entry.total_seconds)}</div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="col-side">
-        <div className="card">
-          <div className="widget-title">Your position</div>
-          <div className="rank-highlight">
-            <span className="rank-big">{myRank > 0 ? `#${myRank}` : '—'}</span>
-            <span className="rank-sub">out of {board.filter(e => e.profile).length} students</span>
-          </div>
-        </div>
-        <SubjectRankWidget profile={profile} />
-      </div>
-    </div>
-  )
-}
-
-// ─── EXPLORE PAGE ─────────────────────────────────────────────────────────────
-
-function ExplorePage({ profile, onOpenProfile }) {
-  const [users, setUsers] = useState([])
-  const [search, setSearch] = useState('')
-  const [following, setFollowing] = useState(new Set())
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { fetchUsers() }, [])
-
-  async function fetchUsers() {
-    setLoading(true)
-    const { data: all } = await supabase
-      .from('profiles')
-      .select('id, full_name, handle, avatar_url, avatar_color, target_college, bio')
-      .neq('id', profile.id)
-      .order('full_name')
-
-    const { data: myFollows } = await supabase
-      .from('follows')
-      .select('following_id')
-      .eq('follower_id', profile.id)
-
-    setUsers(all || [])
-    setFollowing(new Set((myFollows || []).map(f => f.following_id)))
-    setLoading(false)
+  function markRevisionDone(sub,topic){
+    setRevisionLog(prev=>{
+      const key=sub+"|"+topic;
+      const entry=prev[key];
+      if(!entry)return prev;
+      const [next,...rest]=entry.nextRevisions;
+      return {...prev,[key]:{
+        ...entry,
+        doneRevisions:[...(entry.doneRevisions||[]),{date:today(),scheduled:next}],
+        nextRevisions:rest,
+        lastRevised:today(),
+      }};
+    });
   }
+  const [coachCards,setCoachCards]=useState(null);
+  // ── Social state ──────────────────────────────────────────────────────────
+  const [feed,setFeed]=useState([]);
+  const [feedLoading,setFeedLoading]=useState(false);
+  const [profile,setProfile]=useState(null);
+  const [profileLoading,setProfileLoading]=useState(false);
+  const [follows,setFollows]=useState(new Set()); // set of user_ids we follow
+  const [events,setEvents]=useState([]);
+  const [eventsLoading,setEventsLoading]=useState(false);
+  const [joinedEvents,setJoinedEvents]=useState(new Set());
+  const [showCreateEvent,setShowCreateEvent]=useState(false);
+  const [eventForm,setEventForm]=useState({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
+  const [postCapture,setPostCapture]=useState(null); // base64 image from camera
+  const [postText,setPostText]=useState("");
+  const [postLoading,setPostLoading]=useState(false);
+  const [cameraStream,setCameraStream]=useState(null);
+  const [showCamera,setShowCamera]=useState(false);
+  const [leaderboard,setLeaderboard]=useState([]);
+  const [feedTab,setFeedTab]=useState("following"); // following | discover
+  const [viewProfile,setViewProfile]=useState(null); // userId to view
+  const videoRef=useRef(null);
+  const canvasRef=useRef(null);
+  function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
+  const [coachLoading,setCoachLoading]=useState(false);
 
-  async function toggleFollow(userId) {
-    if (following.has(userId)) {
-      await supabase.from('follows').delete()
-        .eq('follower_id', profile.id).eq('following_id', userId)
-      setFollowing(prev => { const s = new Set(prev); s.delete(userId); return s })
-    } else {
-      await supabase.from('follows').insert({ follower_id: profile.id, following_id: userId })
-      setFollowing(prev => new Set([...prev, userId]))
-    }
-  }
+  // Timer
+  const [timerMode,setTimerMode]=useState("stopwatch");
+  const [timerOn,setTimerOn]=useState(false);
+  const [timerSec,setTimerSec]=useState(0);
+  const [countdownSet,setCountdownSet]=useState(25);
+  const [customMins,setCustomMins]=useState("");
+  const [countdownSec,setCountdownSec]=useState(25*60);
+  const [timerSub,setTimerSub]=useState("Physics");
+  const [timerTopic,setTimerTopic]=useState("");
+  const [timerNotes,setTimerNotes]=useState("");
+  const [fullscreen,setFullscreen]=useState(false);
+  const [timerDone,setTimerDone]=useState(false);
+  const timerRef=useRef(null);
+  const wakeLockRef=useRef(null);
+  const timerSecRef=useRef(0); // always-current mirror of timerSec for stopTimer
 
-  const filtered = users.filter(u =>
-    u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    u.handle?.toLowerCase().includes(search.toLowerCase()) ||
-    u.target_college?.toLowerCase().includes(search.toLowerCase())
-  )
+  const [toast,setToast]=useState(null);
+  function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
+  const d=(dark?THEME.dark:THEME.light)||THEME.dark;
+  const SW=sideOpen?220:56;
+  const sideTranslate=sideOpen?"0":"-100%";
+  const sideW600=sideOpen?"80vw":"0px";
+  const sbOverlayDisplay=sideOpen?"block":"none";
+  const sbOverlayOp=sideOpen?1:0;
+  const sbOverlayPE=sideOpen?"auto":"none";
+  const topbarBg=dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)";
+  const fsOverlayBg=dark?"#0e0d0b":"#f7f4ee";
+  const fsDoneBg=dark?"#0d0d0c":"#f8f8f6";
+  const sItemPad=sideOpen?"7px 10px":"7px";
+  const sItemJust=sideOpen?"flex-start":"center";
+  const subColor=SUBJECT_COLORS[timerSub]||d.a1;
+  const css=buildCSS(d,dark,sideOpen,SW,subColor,sideTranslate,sideW600,sbOverlayDisplay,sbOverlayOp,sbOverlayPE,topbarBg,fsOverlayBg,fsDoneBg,sItemPad,sItemJust);
+  useEffect(()=>{
+    let el=document.getElementById("slothr-css");
+    if(!el){el=document.createElement("style");el.id="slothr-css";document.head.appendChild(el);}
+    el.textContent=css;
+  },[css]);
+  const classTopics=sub=>TOPICS[sub][jeClass]||TOPICS[sub].dropper;
 
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        <h1 className="page-title">Explore Students</h1>
-        <div className="search-wrap">
-          <i className="ti ti-search search-icon" aria-hidden="true" />
-          <input
-            className="search-input"
-            type="text"
-            placeholder="Search by name, handle, or target college…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
+  // ── Wake Lock ─────────────────────────────────────────────────────────────
+  const acquireWakeLock=useCallback(async()=>{
+    try{
+      if("wakeLock" in navigator){
+        wakeLockRef.current=await navigator.wakeLock.request("screen");
+        wakeLockRef.current.addEventListener("release",()=>{wakeLockRef.current=null;});
+      }
+    }catch(e){}
+  },[]);
+  const releaseWakeLock=useCallback(()=>{
+    try{wakeLockRef.current?.release();wakeLockRef.current=null;}catch(e){}
+  },[]);
+  useEffect(()=>{
+    if(timerOn){acquireWakeLock();}
+    else{releaseWakeLock();}
+    return()=>releaseWakeLock();
+  },[timerOn]);
+  // Reacquire wake lock when page becomes visible again
+  useEffect(()=>{
+    const fn=async()=>{if(document.visibilityState==="visible"&&timerOn){await acquireWakeLock();}};
+    document.addEventListener("visibilitychange",fn);
+    return()=>document.removeEventListener("visibilitychange",fn);
+  },[timerOn]);
 
-        {loading ? <Spinner /> : filtered.length === 0 ? (
-          <EmptyState icon="search" title="No students found" desc="Try a different search." />
-        ) : filtered.map(u => (
-          <div key={u.id} className="card explore-card">
-            <button className="explore-avatar-btn" onClick={() => onOpenProfile(u.id)}>
-              <Avatar profile={u} size={44} />
-            </button>
-            <div className="explore-info">
-              <button className="explore-name" onClick={() => onOpenProfile(u.id)}>{u.full_name}</button>
-              <span className="explore-handle">@{u.handle}</span>
-              {u.target_college && <span className="explore-target">🎯 {u.target_college}</span>}
-            </div>
-            <button
-              className={`follow-btn${following.has(u.id) ? ' following' : ''}`}
-              onClick={() => toggleFollow(u.id)}
-            >
-              {following.has(u.id) ? 'Following' : 'Follow'}
-            </button>
-          </div>
-        ))}
-      </div>
+  // ── Timer tick — Date-based so it works in background ───────────────────
+  const timerStartRef=useRef(null);   // wall-clock ms when timer last started
+  const timerBaseRef=useRef(0);       // seconds already accumulated before last start
+  useEffect(()=>{
+    if(timerOn){
+      // Record wall-clock start + base
+      timerStartRef.current=Date.now();
+      timerBaseRef.current=timerMode==="stopwatch"?timerSecRef.current:null;
+      const cdBase=timerMode==="countdown"?countdownSec:null;
 
-      <div className="col-side">
-        <TrendingChaptersWidget />
-      </div>
-    </div>
-  )
-}
-
-// ─── CHAPTERS PAGE ────────────────────────────────────────────────────────────
-
-function ChaptersPage({ profile }) {
-  const [activeSubject, setActiveSubject] = useState('Physics')
-  const [progress, setProgress] = useState({}) // { [subject_chapter]: status }
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { fetchProgress() }, [])
-
-  async function fetchProgress() {
-    setLoading(true)
-    const { data } = await supabase
-      .from('chapter_progress')
-      .select('subject, chapter, status')
-      .eq('user_id', profile.id)
-
-    const map = {}
-    ;(data || []).forEach(r => { map[`${r.subject}__${r.chapter}`] = r.status })
-    setProgress(map)
-    setLoading(false)
-  }
-
-  async function updateStatus(subject, chapter, status) {
-    const key = `${subject}__${chapter}`
-    setProgress(prev => ({ ...prev, [key]: status }))
-
-    await supabase.from('chapter_progress').upsert({
-      user_id: profile.id,
-      subject,
-      chapter,
-      status,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,subject,chapter' })
-  }
-
-  const chapters = CHAPTER_DATA[activeSubject] || []
-  const done = chapters.filter(c => progress[`${activeSubject}__${c}`] === 'done').length
-
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        <h1 className="page-title">Chapter Tracker</h1>
-
-        <div className="tab-bar">
-          {SUBJECTS.map(s => (
-            <button
-              key={s}
-              className={`tab${activeSubject === s ? ' active' : ''}`}
-              onClick={() => setActiveSubject(s)}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <div className="progress-header">
-            <span>{done}/{chapters.length} chapters done</span>
-            <span className="progress-pct">{Math.round((done / chapters.length) * 100)}%</span>
-          </div>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${Math.round((done / chapters.length) * 100)}%` }} />
-          </div>
-        </div>
-
-        {loading ? <Spinner /> : (
-          <div className="card">
-            {chapters.map(chapter => {
-              const key = `${activeSubject}__${chapter}`
-              const status = progress[key] || 'todo'
-              const sc = STATUS_CONFIG[status]
-              return (
-                <div key={chapter} className="chapter-row">
-                  <span className="chapter-name">{chapter}</span>
-                  <select
-                    className="status-select"
-                    value={status}
-                    onChange={e => updateStatus(activeSubject, chapter, e.target.value)}
-                    style={{ background: sc.bg, color: sc.color }}
-                  >
-                    {Object.entries(STATUS_CONFIG).map(([val, cfg]) => (
-                      <option key={val} value={val}>{cfg.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="col-side">
-        <AllSubjectProgressWidget progress={progress} />
-      </div>
-    </div>
-  )
-}
-
-// ─── PROFILE PAGE ─────────────────────────────────────────────────────────────
-
-function ProfilePage({ profile, setProfile, viewingId, isOwn, onOpenProfile }) {
-  const [viewedProfile, setViewedProfile] = useState(null)
-  const [posts, setPosts] = useState([])
-  const [stats, setStats] = useState({ totalHours: 0, streak: 0, followers: 0, following: 0 })
-  const [isFollowing, setIsFollowing] = useState(false)
-  const [tab, setTab] = useState('sessions')
-  const [showEditModal, setShowEditModal] = useState(false)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => { loadProfile() }, [viewingId])
-
-  async function loadProfile() {
-    setLoading(true)
-    const { data: prof } = await supabase.from('profiles').select('*').eq('id', viewingId).single()
-    setViewedProfile(prof)
-
-    // Sessions — embed kudos rows so we can count & check current user's kudos inline
-    const { data: sessions } = await supabase
-      .from('study_sessions')
-      .select('*, kudos:session_kudos(user_id)')
-      .eq('user_id', viewingId)
-      .order('created_at', { ascending: false })
-      .limit(20)
-
-    // Stats
-    const totalSecs = (sessions || []).reduce((sum, s) => sum + s.duration_seconds, 0)
-
-    const { count: followers } = await supabase.from('follows')
-      .select('*', { count: 'exact', head: true }).eq('following_id', viewingId)
-    const { count: followingCount } = await supabase.from('follows')
-      .select('*', { count: 'exact', head: true }).eq('follower_id', viewingId)
-
-    // Is current user following this profile?
-    if (!isOwn) {
-      const { data: fol } = await supabase.from('follows')
-        .select('id').eq('follower_id', profile.id).eq('following_id', viewingId).single()
-      setIsFollowing(!!fol)
-    }
-
-    // Derive kudos count and whether current user has kudosed — from embedded rows
-    setPosts((sessions || []).map(s => ({
-      ...s,
-      profiles: prof,
-      kudos_count: (s.kudos || []).length,
-      kudos_given: (s.kudos || []).some(k => k.user_id === profile.id),
-    })))
-    setStats({ totalHours: totalSecs / 3600, followers: followers || 0, following: followingCount || 0, streak: 0 })
-    setLoading(false)
-  }
-
-  async function toggleFollow() {
-    if (isFollowing) {
-      await supabase.from('follows').delete()
-        .eq('follower_id', profile.id).eq('following_id', viewingId)
-      setIsFollowing(false)
-      setStats(s => ({ ...s, followers: s.followers - 1 }))
-    } else {
-      await supabase.from('follows').insert({ follower_id: profile.id, following_id: viewingId })
-      setIsFollowing(true)
-      setStats(s => ({ ...s, followers: s.followers + 1 }))
-    }
-  }
-
-  async function toggleKudos(post) {
-    if (post.user_id === profile.id) return
-    if (post.kudos_given) {
-      await supabase.from('session_kudos').delete().eq('session_id', post.id).eq('user_id', profile.id)
-    } else {
-      await supabase.from('session_kudos').insert({ session_id: post.id, user_id: profile.id })
-    }
-    setPosts(prev => prev.map(p => p.id === post.id
-      ? { ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1) }
-      : p
-    ))
-  }
-
-  if (loading || !viewedProfile) return <Spinner />
-
-  return (
-    <div className="page-layout two-col">
-      <div className="col-main">
-        {/* Profile header */}
-        <div className="card profile-card">
-          <div className="profile-banner" style={{ background: avatarBg(viewedProfile) }} />
-          <div className="profile-body">
-            <div className="profile-top-row">
-              <Avatar profile={viewedProfile} size={56} border />
-              {isOwn
-                ? <button className="btn-outline" onClick={() => setShowEditModal(true)}>Edit profile</button>
-                : <button className={`follow-btn${isFollowing ? ' following' : ''}`} onClick={toggleFollow}>
-                    {isFollowing ? 'Following' : 'Follow'}
-                  </button>}
-            </div>
-            <div className="profile-name">{viewedProfile.full_name}</div>
-            <div className="profile-handle">@{viewedProfile.handle}</div>
-            {viewedProfile.bio && <div className="profile-bio">{viewedProfile.bio}</div>}
-            {viewedProfile.target_college && (
-              <div className="profile-target">🎯 {viewedProfile.target_college}</div>
-            )}
-            <div className="profile-stats-row">
-              <div className="pstat-col">
-                <span className="pstat-big">{stats.totalHours.toFixed(0)}h</span>
-                <span className="pstat-sm">studied</span>
-              </div>
-              <div className="pstat-col">
-                <span className="pstat-big">{stats.followers}</span>
-                <span className="pstat-sm">followers</span>
-              </div>
-              <div className="pstat-col">
-                <span className="pstat-big">{stats.following}</span>
-                <span className="pstat-sm">following</span>
-              </div>
-              <div className="pstat-col">
-                <span className="pstat-big">{posts.length}</span>
-                <span className="pstat-sm">sessions</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="tab-bar">
-          <button className={`tab${tab === 'sessions' ? ' active' : ''}`} onClick={() => setTab('sessions')}>Sessions</button>
-          <button className={`tab${tab === 'stats' ? ' active' : ''}`} onClick={() => setTab('stats')}>Stats</button>
-        </div>
-
-        {tab === 'sessions' && (
-          posts.length === 0
-            ? <EmptyState icon="book" title="No sessions yet" desc="Sessions posted here after logging." />
-            : posts.map(p => (
-                <PostCard key={p.id} post={p} currentUserId={profile.id} onKudos={() => toggleKudos(p)} onOpenProfile={onOpenProfile} />
-              ))
-        )}
-        {tab === 'stats' && <ProfileStatsTab sessions={posts} />}
-      </div>
-
-      <div className="col-side">
-        <SubjectBreakdownWidget sessions={posts} />
-        <BadgesWidget profile={viewedProfile} />
-      </div>
-
-      {showEditModal && (
-        <EditProfileModal
-          profile={profile}
-          setProfile={setProfile}
-          onClose={() => { setShowEditModal(false); loadProfile() }}
-        />
-      )}
-    </div>
-  )
-}
-
-// ─── MODALS ───────────────────────────────────────────────────────────────────
-
-function LogSessionModal({ profile, durationSeconds, onClose, onPosted }) {
-  const [form, setForm] = useState({
-    title: '',
-    subject: 'Physics',
-    problems_solved: '',
-    accuracy_pct: '',
-    notes: '',
-  })
-  const [saving, setSaving] = useState(false)
-
-  async function submit() {
-    if (!form.title.trim()) return
-    setSaving(true)
-    await supabase.from('study_sessions').insert({
-      user_id: profile.id,
-      title: form.title,
-      subject: form.subject,
-      duration_seconds: durationSeconds,
-      problems_solved: form.problems_solved ? parseInt(form.problems_solved) : null,
-      accuracy_pct: form.accuracy_pct ? parseInt(form.accuracy_pct) : null,
-      notes: form.notes || null,
-    })
-    setSaving(false)
-    onPosted()
-  }
-
-  return (
-    <Modal title="Log study session" onClose={onClose}>
-      <div className="field-group">
-        <label className="field-label">Session title *</label>
-        <input
-          type="text"
-          placeholder="e.g. Electrostatics + Current Electricity"
-          value={form.title}
-          onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-        />
-      </div>
-      <div className="field-row">
-        <div className="field-group">
-          <label className="field-label">Subject</label>
-          <select value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}>
-            {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-        <div className="field-group">
-          <label className="field-label">Problems solved</label>
-          <input type="number" min="0" placeholder="0" value={form.problems_solved}
-            onChange={e => setForm(f => ({ ...f, problems_solved: e.target.value }))} />
-        </div>
-        <div className="field-group">
-          <label className="field-label">Accuracy %</label>
-          <input type="number" min="0" max="100" placeholder="—" value={form.accuracy_pct}
-            onChange={e => setForm(f => ({ ...f, accuracy_pct: e.target.value }))} />
-        </div>
-      </div>
-      <div className="field-group">
-        <label className="field-label">Notes</label>
-        <textarea
-          placeholder="What did you cover? Any breakthroughs or struggles?"
-          value={form.notes}
-          onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-        />
-      </div>
-      <div className="session-summary-row">
-        <i className="ti ti-clock" aria-hidden="true" />
-        Duration logged: <strong>{formatTime(durationSeconds)}</strong>
-      </div>
-      <div className="modal-footer">
-        <button className="btn-outline" onClick={onClose}>Discard</button>
-        <button className="btn-primary" onClick={submit} disabled={saving || !form.title.trim()}>
-          {saving ? 'Posting…' : 'Post to feed'}
-        </button>
-      </div>
-    </Modal>
-  )
-}
-
-function EditProfileModal({ profile, setProfile, onClose }) {
-  const [form, setForm] = useState({
-    full_name: profile.full_name || '',
-    handle: profile.handle || '',
-    bio: profile.bio || '',
-    target_college: profile.target_college || '',
-  })
-  const [saving, setSaving] = useState(false)
-
-  async function save() {
-    setSaving(true)
-    const { data } = await supabase
-      .from('profiles')
-      .update(form)
-      .eq('id', profile.id)
-      .select()
-      .single()
-    if (data) setProfile(data)
-    setSaving(false)
-    onClose()
-  }
-
-  return (
-    <Modal title="Edit profile" onClose={onClose}>
-      <div className="field-group">
-        <label className="field-label">Display name</label>
-        <input type="text" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
-      </div>
-      <div className="field-group">
-        <label className="field-label">Handle</label>
-        <input type="text" value={form.handle} onChange={e => setForm(f => ({ ...f, handle: e.target.value }))} />
-      </div>
-      <div className="field-group">
-        <label className="field-label">Bio</label>
-        <textarea value={form.bio} onChange={e => setForm(f => ({ ...f, bio: e.target.value }))} rows={2} />
-      </div>
-      <div className="field-group">
-        <label className="field-label">Target college</label>
-        <input type="text" placeholder="e.g. IIT Bombay" value={form.target_college}
-          onChange={e => setForm(f => ({ ...f, target_college: e.target.value }))} />
-      </div>
-      <div className="modal-footer">
-        <button className="btn-outline" onClick={onClose}>Cancel</button>
-        <button className="btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-      </div>
-    </Modal>
-  )
-}
-
-function Modal({ title, onClose, children }) {
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box">
-        <div className="modal-header">
-          <span className="modal-title">{title}</span>
-          <button className="modal-close" onClick={onClose}><i className="ti ti-x" aria-hidden="true" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-// ─── WIDGETS ──────────────────────────────────────────────────────────────────
-
-function StreakWidget({ profile }) {
-  const [streak, setStreak] = useState(0)
-  const [days, setDays] = useState([])
-  useEffect(() => {
-    ;(async () => {
-      // Fetch sessions from the last 30 days to compute a real consecutive streak
-      const since = new Date(); since.setDate(since.getDate() - 29)
-      const { data } = await supabase
-        .from('study_sessions')
-        .select('created_at')
-        .eq('user_id', profile.id)
-        .gte('created_at', since.toISOString())
-      const activeDays = new Set((data || []).map(s => new Date(s.created_at).toDateString()))
-
-      // Last 7 days for visual dots
-      const last7 = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(); d.setDate(d.getDate() - (6 - i))
-        return { date: d, active: activeDays.has(d.toDateString()), isToday: i === 6 }
-      })
-      setDays(last7)
-
-      // Consecutive streak: count backwards from today, stop at first gap
-      let streakCount = 0
-      for (let i = 0; i < 30; i++) {
-        const d = new Date(); d.setDate(d.getDate() - i)
-        if (activeDays.has(d.toDateString())) {
-          streakCount++
+      timerRef.current=setInterval(()=>{
+        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
+        if(timerMode==="stopwatch"){
+          const next=(timerBaseRef.current||0)+elapsed;
+          timerSecRef.current=next;
+          setTimerSec(next);
         } else {
-          // Allow today to not count yet (just started) — break only if yesterday is also missing
-          if (i > 0) break
+          const next=Math.max(0,(cdBase||0)-elapsed);
+          setCountdownSec(next);
+          if(next<=0){
+            clearInterval(timerRef.current);
+            setTimerOn(false);
+            setTimerDone(true);
+            setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
+          }
+        }
+      },500); // 500ms for smoother but still accurate
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return()=>clearInterval(timerRef.current);
+  },[timerOn,timerMode]);
+
+  // Resync timer when app comes back to foreground
+  useEffect(()=>{
+    const fn=()=>{
+      if(document.visibilityState==="visible"&&timerOn&&timerStartRef.current){
+        // Force immediate tick to resync display
+        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
+        if(timerMode==="stopwatch"){
+          const next=(timerBaseRef.current||0)+elapsed;
+          timerSecRef.current=next;
+          setTimerSec(next);
         }
       }
-      setStreak(streakCount)
-    })()
-  }, [])
-  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-  return (
-    <div className="streak-widget">
-      <span className="streak-count">{streak > 0 ? `🔥 ${streak}-day streak` : 'Start your streak today!'}</span>
-      <div className="streak-dots">
-        {days.map((d, i) => (
-          <div key={i} className={`streak-dot${d.active ? ' active' : ''}${d.isToday ? ' today' : ''}`}
-            title={d.date.toDateString()}>
-            {dayLabels[d.date.getDay()]}
-          </div>
-        ))}
-      </div>
+    };
+    document.addEventListener("visibilitychange",fn);
+    return()=>document.removeEventListener("visibilitychange",fn);
+  },[timerOn,timerMode]);
+
+  useEffect(()=>{const fn=e=>{if(e.key==="Escape")setFullscreen(false);};window.addEventListener("keydown",fn);return()=>window.removeEventListener("keydown",fn);},[]);
+
+  const totBySub=Object.keys(SUBJECT_COLORS).reduce((a,s)=>({...a,[s]:sessions.filter(x=>x.subject===s).reduce((sum,x)=>sum+x.duration,0)}),{});
+  const totalTime=Object.values(totBySub).reduce((a,b)=>a+b,0);
+  const todayTime=sessions.filter(s=>s.date===today()).reduce((a,s)=>a+s.duration,0);
+  // This week = Mon–today
+  const weekStart=(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toISOString().split("T")[0];})();
+  const weekTime=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
+  const streak=calcStreak(sessions);
+  const todayGoals=goals.filter(g=>g.date===today());
+  const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
+  // Sync all data to localStorage
+  useEffect(()=>{try{localStorage.setItem("slothr_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
+  useEffect(()=>{try{localStorage.setItem("slothr_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
+  useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
+  useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
+  useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  // Load from Supabase on login (only if localStorage empty)
+  useEffect(()=>{
+    if(!authSession?.access_token||!user?.id)return;
+    const token=authSession.access_token, uid=user.id;
+    if(!localStorage.getItem("slothr_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
+  },[authSession?.access_token]);
+  useEffect(()=>{
+    setGoals(prev=>prev.map(g=>{
+      if(g.date!==today()) return g;
+      if(g.type==="study"){const done=sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0);return{...g,achieved:done>=(g.target||60)};}
+      if(g.type==="pyq"){const done=pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
+      return g;
+    }));
+  },[sessions,pyqHistory]);
+  // Auth gate — after ALL hooks
+  if(authLoading)return(
+    <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{fontSize:42}}>🦥</div>
+      <div style={{fontSize:13,color:"#8a8070",letterSpacing:".06em"}}>signing you in...</div>
     </div>
-  )
-}
+  );
+  if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
+  const barMax=Math.max(...Object.values(totBySub),1);
+  const currentMilestone=[...STREAK_MILESTONES].reverse().find(b=>streak>=b.days);
+  const nextMilestone=STREAK_MILESTONES.find(b=>b.days>streak);
+  const sc=pct=>pct>=67?d.a2:pct>=50?d.a1:d.danger;
+  const coachCardColor=color=>({danger:d.danger,success:d.a2,warning:d.gold,info:d.a3,primary:d.a1}[color]||d.a1);
 
-function MyStatsWidget({ profile }) {
-  const [stats, setStats] = useState({ totalH: 0, weekH: 0 })
-  useEffect(() => {
-    ;(async () => {
-      const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7)
-      const { data: all } = await supabase.from('study_sessions').select('duration_seconds, created_at').eq('user_id', profile.id)
-      const total = (all || []).reduce((s, r) => s + r.duration_seconds, 0)
-      const week = (all || []).filter(r => new Date(r.created_at) > weekAgo).reduce((s, r) => s + r.duration_seconds, 0)
-      setStats({ totalH: total / 3600, weekH: week / 3600 })
-    })()
-  }, [])
-  return (
-    <div className="card">
-      <div className="widget-title">Your stats</div>
-      <div className="stats-2x2">
-        <div className="stat-box"><span className="stat-val">{stats.totalH.toFixed(0)}h</span><span className="stat-lbl">Total hours</span></div>
-        <div className="stat-box"><span className="stat-val">{stats.weekH.toFixed(1)}h</span><span className="stat-lbl">This week</span></div>
-      </div>
-    </div>
-  )
-}
+  const cdTotal=countdownSet*60;
+  const cdPct=cdTotal>0?countdownSec/cdTotal:1;
+  const isLow=timerMode==="countdown"&&countdownSec<60&&timerOn;
+  const RING=85;
+  const CIRC=2*Math.PI*RING;
 
-function LiveEventsWidget() {
-  const [events, setEvents] = useState([])
-  useEffect(() => {
-    supabase.from('events')
-      .select('*')
-      .lte('starts_at', new Date().toISOString())
-      .gte('ends_at', new Date().toISOString())
-      .then(({ data }) => setEvents(data || []))
-  }, [])
-  if (!events.length) return null
-  return (
-    <div className="card">
-      <div className="widget-title">Live now</div>
-      {events.map(e => (
-        <div key={e.id} className="mini-event">
-          <span className="live-dot" />
-          <span className="mini-event-name">{e.name}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SuggestionsWidget({ profile, onOpenProfile }) {
-  const [suggestions, setSuggestions] = useState([])
-  const [following, setFollowing] = useState(new Set())
-  useEffect(() => {
-    ;(async () => {
-      const { data: alreadyFollowing } = await supabase.from('follows').select('following_id').eq('follower_id', profile.id)
-      const followedIds = (alreadyFollowing || []).map(f => f.following_id)
-      const exclude = [profile.id, ...followedIds]
-      const { data } = await supabase.from('profiles').select('id, full_name, handle, avatar_url, avatar_color, target_college')
-        .not('id', 'in', `(${exclude.join(',')})`)
-        .limit(4)
-      setSuggestions(data || [])
-      setFollowing(new Set(followedIds))
-    })()
-  }, [])
-
-  async function follow(userId) {
-    await supabase.from('follows').insert({ follower_id: profile.id, following_id: userId })
-    setFollowing(prev => new Set([...prev, userId]))
+  function addGoal(){
+    if(!goalTopic&&!goalInput.trim()) return;
+    setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Solve PYQs for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="pyq"?10:60)),achieved:false,aiGenerated:false}]);
+    setGoalInput("");setGoalTopic("");setGoalTarget("");
   }
+  function stopTimer(){
+    setTimerOn(false);
+    // Calculate accurate elapsed from wall clock
+    const elapsed=timerStartRef.current?Math.floor((Date.now()-timerStartRef.current)/1000):0;
+    const rawSec=(timerBaseRef.current||0)+elapsed;
+    timerSecRef.current=rawSec;
+    const m=Math.max(1,Math.round(rawSec/60));
+    // Only save if at least 30 seconds elapsed — prevents 0-minute ghost sessions
+    if(rawSec>=30){
+      const entry={id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:m,date:today(),notes:timerNotes||"Timer session"};
+      setSessions(p=>[...p,entry]);
+      if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
+    }
+    setTimerSec(0);
+    timerSecRef.current=0;
+  }
+  function resetTimer(){setTimerOn(false);setTimerSec(0);timerSecRef.current=0;setCountdownSec(countdownSet*60);setTimerDone(false);}
+  function applyCustom(){const m=parseInt(customMins);if(m>0&&m<=600){setCountdownSet(m);setCountdownSec(m*60);setCustomMins("");};}
 
-  if (!suggestions.length) return null
-  return (
-    <div className="card">
-      <div className="widget-title">People to follow</div>
-      {suggestions.map(u => (
-        <div key={u.id} className="suggest-row">
-          <button onClick={() => onOpenProfile(u.id)}><Avatar profile={u} size={30} /></button>
-          <div className="suggest-info">
-            <button className="suggest-name" onClick={() => onOpenProfile(u.id)}>{u.full_name}</button>
-            <span className="suggest-meta">{u.target_college || '@' + u.handle}</span>
-          </div>
-          <button className="follow-btn-sm" onClick={() => follow(u.id)}>
-            {following.has(u.id) ? '✓' : 'Follow'}
-          </button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function MyEventsWidget({ profile }) {
-  const [history, setHistory] = useState([])
-  useEffect(() => {
-    supabase.from('event_registrations')
-      .select('events:event_id(name, starts_at)')
-      .eq('user_id', profile.id)
-      .order('created_at', { ascending: false })
-      .limit(5)
-      .then(({ data }) => setHistory(data || []))
-  }, [])
-  return (
-    <div className="card">
-      <div className="widget-title">Your registrations</div>
-      {history.length === 0
-        ? <p className="empty-sm">No registrations yet</p>
-        : history.map((r, i) => (
-            <div key={i} className="mini-event">
-              <span className="mini-event-name">{r.events?.name}</span>
-            </div>
-          ))
+  async function callAI(sys,usr,json=false){
+    const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://slothr.in","X-Title":"Slothr"},
+      body:JSON.stringify({model:"anthropic/claude-sonnet-4-5",max_tokens:1500,messages:[{role:"system",content:sys},{role:"user",content:usr}]})
+    });
+    if(!r.ok){const e=await r.text();throw new Error("AI unavailable: "+e);}
+    const data=await r.json();
+    const txt=data.choices?.[0]?.message?.content||"";
+    if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
+    return txt;
+  }
+  // ── Social API helpers ────────────────────────────────────────────────────
+  async function fetchProfile(uid){
+    const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${uid}&select=*`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    return d?.[0]||null;
+  }
+  async function fetchFeed(type="following"){
+    if(!user?.id)return;
+    setFeedLoading(true);
+    try{
+      let url;
+      if(type==="following"){
+        // Posts from people we follow + our own
+        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
+      } else {
+        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
       }
-    </div>
-  )
-}
+      const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}});
+      const d=await r.json();
+      setFeed(Array.isArray(d)?d:[]);
+    }catch(e){}
+    setFeedLoading(false);
+  }
+  async function fetchFollows(){
+    if(!user?.id)return;
+    const r=await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&select=following_id`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setFollows(new Set(d.map(x=>x.following_id)));
+  }
+  async function toggleFollow(targetId){
+    if(!user?.id)return;
+    const following=follows.has(targetId);
+    if(following){
+      await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&following_id=eq.${targetId}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      setFollows(prev=>{const s=new Set(prev);s.delete(targetId);return s;});
+    } else {
+      await fetch(`${SB_URL}/rest/v1/follows`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({follower_id:user.id,following_id:targetId})
+      });
+      setFollows(prev=>new Set([...prev,targetId]));
+    }
+  }
+  async function likePost(postId,liked){
+    if(!user?.id)return;
+    if(liked){
+      await fetch(`${SB_URL}/rest/v1/post_likes?post_id=eq.${postId}&user_id=eq.${user.id}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+    } else {
+      await fetch(`${SB_URL}/rest/v1/post_likes`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({post_id:postId,user_id:user.id})
+      });
+    }
+    setFeed(prev=>prev.map(p=>p.id===postId?{...p,like_count:liked?Math.max(0,p.like_count-1):p.like_count+1,_liked:!liked}:p));
+  }
+  async function submitPost(){
+    if(!postText.trim()&&!postCapture)return;
+    setPostLoading(true);
+    try{
+      let image_url=null;
+      if(postCapture){
+        // Upload to Supabase Storage
+        const blob=await(await fetch(postCapture)).blob();
+        const fname=`${user.id}/${Date.now()}.jpg`;
+        const up=await fetch(`${SB_URL}/storage/v1/object/post-images/${fname}`,{
+          method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"image/jpeg","x-upsert":"true"},
+          body:blob
+        });
+        if(up.ok)image_url=`${SB_URL}/storage/v1/object/public/post-images/${fname}`;
+      }
+      const meta={subject:timerSub,topic:timerTopic,duration:todayTime,streak};
+      await fetch(`${SB_URL}/rest/v1/posts`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({user_id:user.id,type:"manual",content:postText,image_url,metadata:meta,is_public:true})
+      });
+      setPostText("");setPostCapture(null);
+      fetchFeed(feedTab);
+    }catch(e){}
+    setPostLoading(false);
+  }
+  async function fetchEvents(){
+    setEventsLoading(true);
+    const r=await fetch(`${SB_URL}/rest/v1/events?select=*,profiles!events_host_id_fkey(username,display_name)&is_public=eq.true&order=starts_at.asc&limit=20`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setEvents(d);
+    // Fetch joined events
+    if(user?.id){
+      const jr=await fetch(`${SB_URL}/rest/v1/event_members?user_id=eq.${user.id}&select=event_id`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      const jd=await jr.json();
+      if(Array.isArray(jd))setJoinedEvents(new Set(jd.map(x=>x.event_id)));
+    }
+    setEventsLoading(false);
+  }
+  async function joinEvent(eventId){
+    if(!user?.id)return;
+    const joined=joinedEvents.has(eventId);
+    if(joined){
+      await fetch(`${SB_URL}/rest/v1/event_members?event_id=eq.${eventId}&user_id=eq.${user.id}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      setJoinedEvents(prev=>{const s=new Set(prev);s.delete(eventId);return s;});
+    } else {
+      await fetch(`${SB_URL}/rest/v1/event_members`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({event_id:eventId,user_id:user.id})
+      });
+      setJoinedEvents(prev=>new Set([...prev,eventId]));
+    }
+    setEvents(prev=>prev.map(e=>e.id===eventId?{...e,member_count:joined?e.member_count-1:e.member_count+1}:e));
+  }
+  async function createEvent(){
+    if(!eventForm.title||!eventForm.starts_at||!eventForm.ends_at)return;
+    await fetch(`${SB_URL}/rest/v1/events`,{
+      method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+      body:JSON.stringify({...eventForm,host_id:user.id})
+    });
+    setShowCreateEvent(false);setEventForm({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
+    fetchEvents();
+  }
+  async function openCamera(){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
+      setCameraStream(stream);setShowCamera(true);
+      setTimeout(()=>{if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();}},100);
+    }catch(e){showToast("camera access denied. check browser settings.");}
+  }
+  function capturePhoto(){
+    if(!videoRef.current||!canvasRef.current)return;
+    const v=videoRef.current,c=canvasRef.current;
+    c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext("2d").drawImage(v,0,0);
+    setPostCapture(c.toDataURL("image/jpeg",0.85));
+    closeCamera();
+  }
+  function closeCamera(){
+    cameraStream?.getTracks().forEach(t=>t.stop());
+    setCameraStream(null);setShowCamera(false);
+  }
+  async function fetchLeaderboard(){
+    const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setLeaderboard(d.slice(0,50));
+  }
+  // Load social data when feed/events/profile tab opened
+  useEffect(()=>{
+    if(tab==="feed"){fetchFeed(feedTab);fetchFollows();}
+    if(tab==="events"){fetchEvents();}
+    if(tab==="profile"){
+      fetchProfile(user.id).then(p=>setProfile(p));
+      fetchLeaderboard();
+    }
+  },[tab]);
 
-function BadgesWidget({ profile }) {
-  return (
-    <div className="card">
-      <div className="widget-title">Badges</div>
-      <div className="badges-row">
-        {[['🔥','Streak'], ['⚡','Physics'], ['🏅','Top 10'], ['🧪','Chem'], ['📐','Math']].map(([icon, label]) => (
-          <div key={label} className="badge-item"><div className="badge-icon">{icon}</div><div className="badge-label">{label}</div></div>
-        ))}
-      </div>
-    </div>
-  )
-}
+  async function runCoach(){
+    const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+    if(uniqueDays<3){setCoachCards({locked:true,msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});return;}
+    setCoachLoading(true);setCoachCards(null);
+    try{
+      const ss=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(",");
+      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.physics+m.chemistry+m.math}`).join(";");
+      const tt=sessions.reduce((a,s)=>{const k=`${s.subject}-${s.topic}`;a[k]=(a[k]||0)+s.duration;return a;},{});
+      const ef=Object.entries(tt).filter(([,t])=>t>120).map(([k])=>k).join(",");
+      const ps=pyqHistory.length?`${pyqHistory.length} PYQs, ${pyqAccuracy}% accuracy`:"No PYQs yet";
+      const cards=await callAI(`You are an elite JEE coach. Return ONLY valid JSON. No markdown.
+{"cards":[{"type":"effort_trap","title":"Effort vs Score Gap","icon":"⚠","color":"danger","insight":"2-3 sharp sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"strengths","title":"Your Strengths","icon":"💪","color":"success","insight":"2-3 sentences","topics":["t1"],"action":"1 sentence"},{"type":"critical_gaps","title":"Critical Gaps","icon":"🎯","color":"warning","insight":"2-3 sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"time_analysis","title":"Time Analysis","icon":"⏱","color":"info","insight":"2-3 sentences","recommendation":"1 sentence"},{"type":"pyq_analysis","title":"PYQ Performance","icon":"📝","color":"info","insight":"2-3 sentences","action":"1 sentence"},{"type":"weekly_focus","title":"This Week's Focus","icon":"📅","color":"primary","insight":"2 sentences","plan":["Mon-Tue","Wed-Thu","Fri-Sun"]}]}`,
+        `Class:${jeClass}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
+      setCoachCards(cards.cards);
+    }catch{setCoachCards([{type:"error",title:"Error",icon:"⚠",color:"danger",insight:"broke. try again.",action:""}]);}
+    setCoachLoading(false);
+  }
+  async function aiSuggestGoals(){
+    const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+    if(uniqueDays<3){showToast("log 3 days of study first. then i'll plan your day. 😏");return;}
+    setGoalLoading(true);
+    try{
+      // ── Study totals ──────────────────────────────────────────────────────
+      const studySummary=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(", ");
 
-function AllSubjectProgressWidget({ progress }) {
-  return (
-    <div className="card">
-      <div className="widget-title">Overall progress</div>
-      {SUBJECTS.map(sub => {
-        const chs = CHAPTER_DATA[sub]
-        const done = chs.filter(c => progress[`${sub}__${c}`] === 'done').length
-        const pct = Math.round((done / chs.length) * 100)
-        return (
-          <div key={sub} className="progress-subject-row">
-            <div className="progress-subject-header">
-              <span>{sub}</span><span className="progress-pct">{done}/{chs.length}</span>
-            </div>
-            <div className="progress-track"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+      // ── Today's load ──────────────────────────────────────────────────────
+      const todayBySubject=Object.keys(SUBJECT_COLORS).reduce((a,sub)=>({
+        ...a,[sub]:sessions.filter(s=>s.date===today()&&s.subject===sub).reduce((sum,s)=>sum+s.duration,0)
+      }),{});
+      const todayStudySummary=Object.entries(todayBySubject).map(([s,t])=>`${s}:${fmt(t)||"0m"}`).join(", ");
+      const todayTotalMins=Object.values(todayBySubject).reduce((a,b)=>a+b,0);
 
-function SubjectBreakdownWidget({ sessions }) {
-  const breakdown = SUBJECTS.map(sub => ({
-    subject: sub,
-    secs: sessions.filter(s => s.subject === sub).reduce((t, s) => t + s.duration_seconds, 0),
-  }))
-  const total = breakdown.reduce((t, b) => t + b.secs, 0)
-  return (
-    <div className="card">
-      <div className="widget-title">Subject breakdown</div>
-      {breakdown.map(b => (
-        <div key={b.subject} className="progress-subject-row">
-          <div className="progress-subject-header">
-            <span>{b.subject}</span>
-            <span className="progress-pct">{(b.secs / 3600).toFixed(0)}h</span>
-          </div>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${total > 0 ? Math.round((b.secs / total) * 100) : 0}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
+      // ── Mock scores per subject ───────────────────────────────────────────
+      const mockBySubject=Object.keys(SUBJECT_COLORS).map(sub=>{
+        const scores=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
+        const avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+        const latest=scores.length?scores[scores.length-1]:null;
+        return{sub,avg,latest};
+      }).filter(s=>s.avg!==null).sort((a,b)=>a.avg-b.avg);
 
-function SubjectRankWidget({ profile }) {
-  const [ranks, setRanks] = useState({})
-  useEffect(() => {
-    ;(async () => {
-      // Single query, then aggregate client-side — 3x fewer round trips
-      const { data } = await supabase
-        .from('study_sessions')
-        .select('user_id, duration_seconds, subject')
-        .in('subject', SUBJECTS)
-      const result = {}
-      SUBJECTS.forEach(sub => {
-        const map = {}
-        ;(data || []).filter(s => s.subject === sub).forEach(s => {
-          map[s.user_id] = (map[s.user_id] || 0) + s.duration_seconds
+      // ── BUCKET A: High-weightage chapters soon studied ─────────────────
+      // These are genuine coverage gaps that cost marks
+      const highWeightGaps=Object.keys(TOPICS).flatMap(sub=>
+        classTopics(sub)
+          .filter(t=>
+            !sessions.some(s=>s.subject===sub&&s.topic===t) &&
+            (JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"
+          )
+          .map(t=>({subject:sub, topic:t, weight:"H"}))
+      ).slice(0,6);
+
+      // ── BUCKET B: Chapters studied but performing badly ───────────────────
+      // Combines mock weakness + PYQ accuracy per topic
+      const topicPyqMap=pyqHistory.reduce((acc,p)=>{
+        const key=`${p.subject}||${p.topic}`;
+        if(!acc[key]) acc[key]={subject:p.subject,topic:p.topic,correct:0,total:0};
+        acc[key].total++;
+        if(p.correct) acc[key].correct++;
+        return acc;
+      },{});
+
+      // Topics studied but with <60% PYQ accuracy (min 2 attempts), weighted by JEE weight
+      const poorPyqTopics=Object.values(topicPyqMap)
+        .map(t=>({
+          ...t,
+          acc:Math.round((t.correct/t.total)*100),
+          weight: JEE_WEIGHTAGE[t.subject]?.[t.topic]||"M",
+          studied: sessions.some(s=>s.subject===t.subject&&s.topic===t.topic)
+        }))
+        .filter(t=>t.acc<60&&t.total>=2)
+        .sort((a,b)=>{
+          // H-weight poor topics first, then by worst accuracy
+          const wdiff=WEIGHT_SCORE[b.weight]-WEIGHT_SCORE[a.weight];
+          return wdiff!==0?wdiff:a.acc-b.acc;
         })
-        const sorted = Object.entries(map).sort((a, b) => b[1] - a[1])
-        const rank = sorted.findIndex(([uid]) => uid === profile.id) + 1
-        result[sub] = rank || '—'
-      })
-      setRanks(result)
-    })()
-  }, [])
-  return (
-    <div className="card">
-      <div className="widget-title">Subject ranks</div>
-      {SUBJECTS.map(sub => (
-        <div key={sub} className="subject-rank-row">
-          <span>{sub}</span>
-          <span className="subject-rank-val">#{ranks[sub] || '—'}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
+        .slice(0,5)
+        .map(t=>`${t.subject}-${t.topic}(PYQ:${t.acc}%,${t.total}Qs,${t.weight}-weight)`);
 
-function TrendingChaptersWidget() {
-  const [chapters, setChapters] = useState([])
-  useEffect(() => {
-    supabase.from('study_sessions')
-      .select('subject')
-      .gte('created_at', new Date(Date.now() - 7 * 86400000).toISOString())
-      .then(({ data }) => {
-        const counts = {}
-        ;(data || []).forEach(s => { counts[s.subject] = (counts[s.subject] || 0) + 1 })
-        setChapters(Object.entries(counts).sort((a, b) => b[1] - a[1]))
-      })
-  }, [])
-  return (
-    <div className="card">
-      <div className="widget-title">Trending subjects (7d)</div>
-      {chapters.map(([sub, count]) => (
-        <div key={sub} className="subject-rank-row">
-          <span>{sub}</span>
-          <span className="subject-rank-val">{count} sessions</span>
-        </div>
-      ))}
-    </div>
-  )
-}
+      // Topics with study sessions but low mock performance in that subject
+      const mockWeakTopics=mockBySubject
+        .filter(s=>s.avg!==null&&s.avg<65)
+        .map(s=>{
+          // Find the most-studied topic in this weak subject as a revision candidate
+          const topicTimes=sessions
+            .filter(x=>x.subject===s.sub)
+            .reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
+          const topTopics=Object.entries(topicTimes)
+            .sort((a,b)=>b[1]-a[1])
+            .slice(0,2)
+            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${JEE_WEIGHTAGE[s.sub]?.[t]||"M"}-weight)`);
+          return topTopics;
+        }).flat().slice(0,4);
 
-function ProfileStatsTab({ sessions }) {
-  const weeklyData = {}
-  sessions.forEach(s => {
-    const week = getWeekLabel(s.created_at)
-    weeklyData[week] = (weeklyData[week] || 0) + s.duration_seconds / 3600
-  })
-  const totalH = sessions.reduce((t, s) => t + s.duration_seconds, 0) / 3600
-  const avgH = sessions.length ? totalH / sessions.length : 0
-  const totalProbs = sessions.reduce((t, s) => t + (s.problems_solved || 0), 0)
-  return (
-    <div className="card">
-      <div className="widget-title" style={{ marginBottom: '1rem' }}>All-time stats</div>
-      <div className="stats-2x2" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-        <div className="stat-box"><span className="stat-val">{totalH.toFixed(0)}h</span><span className="stat-lbl">Total hours</span></div>
-        <div className="stat-box"><span className="stat-val">{sessions.length}</span><span className="stat-lbl">Sessions</span></div>
-        <div className="stat-box"><span className="stat-val">{avgH.toFixed(1)}h</span><span className="stat-lbl">Avg per session</span></div>
-        <div className="stat-box"><span className="stat-val">{totalProbs}</span><span className="stat-lbl">Problems solved</span></div>
+      // Existing goals dedup
+      const existingGoalTopics=todayGoals.map(g=>`${g.subject}-${g.topic||"no subject picked"}`).join(", ");
+
+      const res=await callAI(
+        `You are a world-class JEE personal coach. Generate exactly 4 goals for today. Return ONLY valid JSON. No markdown.
+Format: {"goals":[{"text":"short action-oriented string","subject":"Physics|Chemistry|Mathematics","topic":"string","type":"study|pyq|revision","target":number,"reasoning":"one sentence citing the exact data point — weightage, PYQ%, mock score, or session count"}]}
+
+GOAL MIX RULES — this is the most important instruction:
+- 2 goals should address HIGH-WEIGHTAGE chapters soon studied (pure coverage gaps)
+- i know your sessions. your weak chapters. i don't miss.'ll be gentle.
+- If there aren't enough of one type, fill from the other — but always aim for this balanced split
+- Cover at least 2 different subjects across the 4 goals
+- NEVER suggest L-weight chapters that aren't studied — not worth the time at this stage
+- For "study" goals: target 45–90 minutes. For "pyq" goals: target 10–20 questions. For "revision": 30–60 min.
+- If >4hrs studied today, cap study goals at 45 min, lean towards revision and pyq
+- Avoid duplicating topics in today's existing goals
+
+GOAL TYPE GUIDANCE:
+- Unstudied H-weight chapter → type: "study"
+- Studied chapter with bad PYQ accuracy → type: "pyq" (drill it with practice questions)
+- Studied chapter with bad mock score → type: "revision" (go back and consolidate)
+- reasoning must be specific: "H-weight, 0 sessions logged" OR "44% PYQ accuracy on 6 questions" OR "Chemistry avg mock 61/100"`,
+
+        `Class: ${jeClass}. Streak: ${streak} days.
+STUDY TIME (total): ${studySummary}
+TODAY studied: ${todayStudySummary} (${fmt(todayTotalMins)} total today)
+MOCK SCORES: ${mockBySubject.map(s=>`${s.sub} avg=${s.avg}/100 latest=${s.latest}/100`).join("; ")||"no mocks yet"}
+
+BUCKET A — High-weight chapters NEVER studied (push for coverage):
+${highWeightGaps.map(t=>`  • ${t.subject} - ${t.topic} [H-weight, 0 sessions]`).join("\n")||"  None — all H-weight chapters started!"}
+
+BUCKET B — Chapters studied but performing badly (push for consolidation):
+  PYQ weak topics: ${poorPyqTopics.join(", ")||"none yet"}
+  Mock-weak chapter candidates: ${mockWeakTopics.join(", ")||"none yet"}
+
+TODAY'S EXISTING GOALS (skip these): ${existingGoalTopics||"none"}
+
+Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Bucket B (consolidation).`,true);
+
+      setGoals(p=>[...p,...res.goals.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:true}))]);
+    }catch(e){console.error(e);}
+    setGoalLoading(false);
+  }
+
+  // ── CSS ───────────────────────────────────────────────────────────────────
+  // ─── Onboarding ───────────────────────────────────────────────────────────
+
+
+  if(!jeClass) return(
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
+        <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
+          <span style={{fontSize:32,marginRight:6}}>🦥</span>sloth<span style={{color:d.a1}}>r</span>
+        </div>
+        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>who are you.</div>
+        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study less. rank more. nap often.</div>
+        {CLASSES.map(c=>(
+          <div key={c.id}
+            style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:`1.5px solid ${d.b}`,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"}}
+            onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
+            onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
+            onClick={()=>{
+                  setJeClass(c.id);
+                  try{localStorage.setItem("slothr_class",c.id);}catch(e){}
+                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
+                }}>
+            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{c.icon}</div>
+            <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
+          </div>
+        ))}
+        <div style={{fontSize:10.5,color:d.t4,textAlign:"center",marginTop:12}}>you can change this later.</div>
       </div>
     </div>
-  )
+  );
+
+  const classLabel=CLASSES.find(c=>c.id===jeClass)?.label;
+
+  // ── Fullscreen render ─────────────────────────────────────────────────────
+  const renderFS=()=>{
+    const isCD=timerMode==="countdown";
+    const FS_R=120,FS_C=2*Math.PI*FS_R;
+    return(
+      <div className="fs-overlay">  <button className="fs-exit" onClick={()=>setFullscreen(false)}>✕ back  <span style={{opacity:.4,fontSize:9}}>ESC</span></button>
+        {timerDone?(
+          <div className="fs-done">
+            
+            <div style={{fontSize:28,fontWeight:600,color:d.a2,marginBottom:6}}>session saved. look at you. knew you had it in you.</div>
+            <div style={{fontSize:14,color:d.t3,marginBottom:4}}>{countdownSet} min · {timerSub}{timerTopic?` · ${timerTopic}`:""}</div>
+            <div style={{fontSize:12,color:d.t4,marginBottom:24}}>done.</div>
+            <button className="fs-btn fs-btn-pause" onClick={()=>{setTimerDone(false);setFullscreen(false);}}>back</button>
+          </div>
+        ):(
+          <>
+            <div className="fs-sub">{timerSub}</div>
+            <div className="fs-topic">{timerTopic||"no subject picked"}</div>
+            {isCD?(
+              <div className="fs-ring-wrap">
+                <svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 300 300">
+                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={subColor+"18"} strokeWidth="10"/>
+                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="10"
+                    strokeDasharray={FS_C} strokeDashoffset={FS_C*(1-cdPct)}
+                    strokeLinecap="round" transform="rotate(-90 150 150)"
+                    className={isLow?"ring-alert":""}
+                    style={{transition:"stroke-dashoffset 1s linear,stroke .3s"}}/>
+                </svg>
+                <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                  <div style={{fontSize:72,fontWeight:200,letterSpacing:"-.04em",color:isLow?d.danger:d.t,fontVariantNumeric:"tabular-nums"}}>{fmtT(countdownSec)}</div>
+                  <div style={{fontSize:10,letterSpacing:".1em",textTransform:"uppercase",color:d.t4,marginTop:6}}>{timerOn?"locked in 🔒":"paused"}</div>
+                </div>
+              </div>
+            ):(
+              <div className="fs-time">{fmtT(timerSec)}</div>
+            )}
+            {timerOn&&<div style={{fontSize:12,color:subColor,marginTop:isCD?8:16}}><span className="rec-dot"/>don't close this tab.</div>}
+            <div className="fs-actions">
+              {timerOn?(
+                <>
+                  <button className="fs-btn fs-btn-pause" onClick={()=>setTimerOn(false)}>⏸ pause</button>
+                  {!isCD&&<button className="fs-btn fs-btn-stop" onClick={()=>{stopTimer();setFullscreen(false);}}>⏹ stop</button>}
+                </>
+              ):(
+                <>
+                  <button className="fs-btn" style={{background:subColor,color:"#fff"}} onClick={()=>{setTimerDone(false);if(isCD)setCountdownSec(s=>s||countdownSet*60);setTimerOn(true);}}>▶ lock in</button>
+                  {!isCD&&(timerSec>0)&&<button className="fs-btn fs-btn-stop" onClick={()=>{stopTimer();setFullscreen(false);}}>⏹ stop</button>}
+                  <button className="fs-btn fs-btn-pause" onClick={resetTimer}>↺ reset</button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  // ── Timer card ────────────────────────────────────────────────────────────
+  const renderTimer=()=>{
+    const isCD=timerMode==="countdown";
+    return(
+      <div className="card cp">
+        <div className="mode-tab">
+          <button className={"mode-opt"+timerMode==="stopwatch"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
+          <button className={"mode-opt"+timerMode==="countdown"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("countdown");resetTimer();}}}>⏳ Countdown</button>
+        </div>
+        <div className="field">
+          <label className="fl">subject</label>
+          <Select value={timerSub} onChange={v=>{setTimerSub(v);setTimerTopic("");}} options={Object.keys(SUBJECT_COLORS)} disabled={timerOn} d={d}/>
+        </div>
+        <div className="field">
+          <label className="fl">topic</label>
+          <Select value={timerTopic} onChange={setTimerTopic} options={[{value:"",label:"General Study"},...classTopics(timerSub).map(t=>({value:t,label:t}))]} disabled={timerOn} d={d}/>
+        </div>
+        <div className="field">
+          <label className="fl">what are we doing today.</label>
+          <input className="inp" placeholder="be specific." value={timerNotes} onChange={e=>setTimerNotes(e.target.value)} disabled={timerOn}/>
+        </div>
+        {isCD&&!timerOn&&(
+          <div className="field">
+            <label className="fl">Duration</label>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+              {[15,25,30,45,60,90].map(m=>(
+                <button key={m} onClick={()=>{setCountdownSet(m);setCountdownSec(m*60);}} style={{padding:"6px 13px",borderRadius:3,border:`1.5px solid ${countdownSet===m?subColor:d.b}`,background:countdownSet===m?`${subColor}15`:d.tag,color:countdownSet===m?subColor:d.t3,fontFamily:"inherit",fontSize:12,cursor:"pointer",fontWeight:countdownSet===m?600:400,transition:"all .12s"}}>
+                  {m}m
+                </button>
+              ))}
+            </div>
+            {/* Custom duration */}
+            <div style={{display:"flex",gap:6}}>
+              <input className="inp" type="number" placeholder="Custom (e.g. 20)" min="1" max="600" value={customMins} onChange={e=>setCustomMins(e.target.value)} onKeyDown={e=>e.key==="Enter"&&applyCustom()} style={{flex:1}}/>
+              <button onClick={applyCustom} style={{padding:"9px 14px",border:`1px solid ${d.b}`,borderRadius:3,background:d.tag,color:d.t3,fontFamily:"inherit",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>Set</button>
+            </div>
+          </div>
+        )}
+        {/* Ring display */}
+        <div style={{margin:"10px 0 8px"}}>
+          <div className="ring-wrap">
+            <svg className="ring-svg" viewBox="0 0 200 200">
+              <circle cx="100" cy="100" r={RING} fill="none" stroke={subColor+"12"} strokeWidth="7"/>
+              {isCD?(
+                <circle cx="100" cy="100" r={RING} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="7"
+                  strokeDasharray={CIRC} strokeDashoffset={CIRC*(1-cdPct)}
+                  strokeLinecap="round" transform="rotate(-90 100 100)"
+                  className={isLow?"ring-alert":""} style={{transition:"stroke-dashoffset 1s linear,stroke .3s"}}/>
+              ):timerOn?(
+                <circle cx="100" cy="100" r={RING} fill="none" stroke={subColor} strokeWidth="7"
+                  strokeDasharray={CIRC} strokeDashoffset={CIRC*(1-Math.min((timerSec%3600)/3600,1))}
+                  strokeLinecap="round" transform="rotate(-90 100 100)" style={{transition:"stroke-dashoffset 1s linear"}}/>
+              ):null}
+            </svg>
+            <div className="ring-inner">
+              <div className="ring-time" style={{color:isLow?d.danger:timerOn?d.t:d.t3}}>{isCD?fmtT(countdownSec):fmtT(timerSec)}</div>
+              <div className="ring-sub">{timerOn?(isCD?"locked in 🔒":"i'm watching. go."):""}</div>
+            </div>
+          </div>
+          {timerOn&&<div style={{textAlign:"center",fontSize:11,color:subColor,marginTop:6}}><span className="rec-dot"/>i'm watching. go.</div>}
+          {timerDone&&<div style={{textAlign:"center",fontSize:12,color:d.a2,marginTop:6,fontWeight:500}}>session saved. look at you. knew you had it in you.</div>}
+        </div>
+        {/* Controls */}
+        <div style={{display:"flex",gap:7}}>
+          {!timerOn?(
+            <>
+              <button className="btn btn-full" style={{background:subColor,color:"#fff",flex:2}}
+                onClick={()=>{setTimerDone(false);if(isCD){setCountdownSec(countdownSet*60);}setTimerOn(true);}}>
+                ▶ lock in
+              </button>
+              {(timerSec>0||(isCD&&countdownSec<cdTotal))&&<button className="btn" style={{background:d.tag,color:d.t3,border:`1px solid ${d.b}`,flex:1}} onClick={resetTimer}>↺ reset</button>}
+            </>
+          ):(
+            <>
+              <button className="btn btn-full" style={{background:d.tag,color:d.t,border:`1px solid ${d.b}`,flex:1}} onClick={()=>setTimerOn(false)}>⏸ pause</button>
+              {!isCD&&<button className="btn btn-danger btn-full" style={{flex:1}} onClick={stopTimer}>⏹ stop</button>}
+            </>
+          )}
+        </div>
+        <button className="btn btn-full" style={{background:d.tag,border:`1px solid ${d.b}`,color:d.t3,fontSize:12,marginTop:7}} onClick={()=>setFullscreen(true)}>⛶ go fullscreen</button>
+      </div>
+    );
+  };
+
+  // ── Main render ───────────────────────────────────────────────────────────
+  return(
+    <>
+      {/* ── Ad Modals ── */}
+
+      {fullscreen&&renderFS()}
+      <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}>
+      {/* ── Sticky Banner Ad ── */}
+
+        <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
+        <aside className="sidebar">
+          <div className="s-logo">
+            <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>{sideOpen?"‹":"›"}</button>
+            <div className="s-brand">
+              <span style={{fontSize:14,marginRight:4}}>🦥</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>sloth</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>r</span>
+            </div>
+          </div>
+          <nav className="s-nav">
+            <div className="s-sec" style={{marginTop:6}}>navigation</div>
+            {TABS.map(t=>(
+              <div key={t.id} className={"s-item"+tab===t.id?" active":""} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
+                <span className="s-icon">{t.icon}</span>
+                <span className="s-label">{t.label}</span>
+              </div>
+            ))}
+            {sideOpen&&(
+              <div style={{margin:"10px 4px 0",padding:"10px 11px",background:d.sa,borderRadius:3,border:`1px solid ${d.sab}`}}>
+                <div style={{fontSize:9,color:d.t4,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>today</div>
+                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>{todayTime>0?`${fmt(todayTime)} today`:"zero. the exam doesn't care."}</div>
+                <div className="btrack" style={{height:3}}>
+                  <div className="bfill" style={{width:`${Math.min((todayTime/360)*100,100)}%`,background:`linear-gradient(90deg,${d.a1},${d.a3})`}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:d.t4,marginTop:4}}>
+                  <span>{todayGoals.filter(g=>g.achieved).length}/{todayGoals.length} goals</span>
+                  <span>🔥 {streak}d</span>
+                </div>
+              </div>
+            )}
+          </nav>
+          <div className="s-footer">
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {user?.avatar?(
+                <img src={user.avatar} style={{width:27,height:27,borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="avatar"/>
+              ):(
+                <div className="s-av">{(user?.name||"S")[0].toUpperCase()}</div>
+              )}
+              <div className="s-uinfo">
+                <div style={{fontSize:12,fontWeight:500,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:130}}>{user?.name||"Student"}</div>
+                <div style={{fontSize:10,color:d.a1}}>{classLabel} · 🦥</div>
+              </div>
+              {sideOpen&&(
+                <button onClick={handleSignOut} title="sign out"
+                  style={{marginLeft:"auto",background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:14,padding:"2px 4px",flexShrink:0}}
+                  onMouseOver={e=>e.target.style.color=d.danger} onMouseOut={e=>e.target.style.color=d.t4}>
+                  ⏻
+                </button>
+              )}
+            </div>
+
+          </div>
+        </aside>
+
+        <div className="content">
+          {tab!=="pyq"&&<div className="topbar">
+            {/* Always-visible Slothr logo */}
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+              <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
+              <div style={{minWidth:0}}>
+                <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
+                <div className="psub">
+                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. days left. tick tock.`}
+                  {tab==="coach"&&"your smartest situationship. i know things about you."}
+                  {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
+                  {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
+                  {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
+                  {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
+                  {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
+                  {tab==="rank"&&"where are you tracking. be honest."}
+                  {tab==="feed"&&"what's everyone up to."}
+                  {tab==="events"&&"compete. suffer. grow."}
+                  {tab==="profile"&&`@${profile?.username||"..."}`}
+                </div>
+              </div>
+            </div>
+            <div className="tbr">
+              <button className="icon-btn" onClick={()=>setDark(p=>!p)}>{dark?"☀":"◑"}</button>
+              <button className="ghost-sm" onClick={()=>setJeClass(null)}>switch class</button>
+            </div>
+          </div>}
+
+
+
+          <div className="inner">
+
+            {/* ── OVERVIEW ── */}
+            {tab==="overview"&&(
+              <div className="pin">
+                {/* ── Hero stats — editorial wide layout ── */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:24,background:d.b,width:"100%"}}>
+                  {[
+                    {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
+                    {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
+                    {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
+                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
+                  ].map(s=>(
+                    <div key={s.lbl} style={{background:d.card,padding:"28px 26px"}}>
+                      <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:14}}>{s.lbl}</div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:46,fontWeight:400,lineHeight:1,letterSpacing:"-.02em",color:s.color,marginBottom:10}}>{s.val}</div>
+                      <div style={{fontSize:11,color:d.t3,fontStyle:"italic"}}>{s.hint}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="g2" style={{gap:14,marginBottom:24,minWidth:0}}>
+                  <div className="card cp" style={{padding:"24px 26px"}}>
+                    <div className="cl" style={{marginBottom:18,letterSpacing:".14em"}}>Subject Time</div>
+                    {Object.entries(SUBJECT_COLORS).map(([sub,color])=>(
+                      <div key={sub} style={{marginBottom:13}}>
+                        <div className="rowb" style={{marginBottom:5}}>
+                          <div className="row" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12.5,fontWeight:500}}>{sub}</span></div>
+                          <span style={{fontSize:11,color:d.t3}}>{fmt(totBySub[sub])}</span>
+                        </div>
+                        <div className="btrack"><div className="bfill" style={{width:`${(totBySub[sub]/barMax)*100}%`,background:color}}/></div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="card cp">
+                    <div className="cl mb12">Today's Goals</div>
+                    {todayGoals.length===0?(<div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>)
+                    :todayGoals.slice(0,5).map(g=>(
+                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""} style={{padding:"9px 11px"}}>
+                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                        <div style={{flex:1}}>
+                          <div className={"goal-text"+g.achieved?" done":""} style={{fontSize:12.5}}>{g.text}</div>
+                          <div className="goal-meta">{g.subject}{g.topic?` · ${g.topic}`:""}</div>
+                        </div>
+                        {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="g2" style={{gap:14,marginBottom:0}}>
+                  {/* Recent Study Sessions */}
+                  <div className="card" style={{padding:"22px 24px"}}>
+                    <div className="rowb" style={{marginBottom:16}}><div className="cl" style={{letterSpacing:".14em"}}>recent sessions</div><button className="ghost-sm" onClick={()=>setTab("sessions")}>see all →</button></div>
+                    {sessions.length===0&&<div className="empty" style={{padding:"14px 0"}}><div className="et">nothing yet.</div><div className="es">i'm watching. go.</div></div>}
+                    {[...sessions].reverse().slice(0,5).map(s=>(
+                      <div key={s.id} className="srow">
+                        <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
+                        <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
+                        <div className="stopic">{s.topic}</div>
+                        <div className="sdur">{fmt(s.duration)}</div>
+                        <div className="sdate">{s.date}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* recent practice tests — auto-populated from NTA simulation */}
+                  <div className="card" style={{padding:"22px 24px"}}>
+                    <div className="rowb" style={{marginBottom:16}}>
+                      <div className="cl" style={{letterSpacing:".14em"}}>recent practice tests</div>
+                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>{}}>take a test →</button>}
+                    </div>
+                    {mocks.length===0?(
+                      <div className="empty" style={{padding:"14px 0"}}>
+                        <div className="et">zero attempts. bold. i like the confidence.</div>
+                        <div className="es">uncharted territory. take the test.</div>
+                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>{}}>→ go to practice</button>
+                      </div>
+                    ):[...mocks].reverse().slice(0,4).map(m=>{
+                      const total=m.physics+m.chemistry+m.math;
+                      const outOf=180;
+                      const pct=Math.round((total/outOf)*100);
+                      const scoreC=pct>=60?d.a2:pct>=40?d.gold:d.danger;
+                      return(
+                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${d.div}`}}>
+                          <div style={{width:38,height:38,borderRadius:2,background:`${scoreC}14`,border:`1px solid ${scoreC}30`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                            <span style={{fontFamily:"'DM Serif Display',serif",fontSize:15,fontWeight:400,color:scoreC}}>{total}</span>
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</div>
+                            <div style={{fontSize:10.5,color:d.t3,marginTop:2}}>
+                              <span style={{color:SUBJECT_COLORS.Physics}}>P {m.physics}</span>
+                              <span style={{margin:"0 5px",color:d.t4}}>·</span>
+                              <span style={{color:SUBJECT_COLORS.Chemistry}}>C {m.chemistry}</span>
+                              <span style={{margin:"0 5px",color:d.t4}}>·</span>
+                              <span style={{color:SUBJECT_COLORS.Mathematics}}>M {m.math}</span>
+                            </div>
+                          </div>
+                          <div style={{fontSize:10,color:d.t4,flexShrink:0}}>{m.date}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── JEE COACH ── */}
+            {tab==="coach"&&(
+              <div className="pin">
+                <div className="rowb" style={{marginBottom:32,alignItems:"flex-end"}}>
+                  <div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:6,lineHeight:1.2}}>okay. let's talk about your data.</div>
+                    <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>let me tell you exactly where you're leaking marks.</div>
+                  </div>
+                  <button className="btn btn-d" onClick={runCoach} disabled={coachLoading}>{coachLoading?"looking...":"analyse"}</button>
+                </div>
+                <div className="g3 mb16">
+                  {Object.entries(SUBJECT_COLORS).map(([sub,color])=>{
+                    const sm=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
+                    const avg=sm.length?Math.round(sm.reduce((a,b)=>a+b,0)/sm.length):null;
+                    const hrs=(totBySub[sub]/60).toFixed(1);
+                    const eff=avg&&parseFloat(hrs)>0?Math.round(avg/parseFloat(hrs)):null;
+                    return(
+                      <div key={sub} className="card cp">
+                        <div className="row mb12" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12,fontWeight:600,color}}>{sub}</span></div>
+                        <div className="g2" style={{gap:7}}>
+                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color,letterSpacing:"-.02em"}}>{hrs}h</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Time</div></div>
+                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color:avg?sc(avg):d.t4,letterSpacing:"-.02em"}}>{avg||"—"}</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Avg score</div></div>
+                        </div>
+                        {eff&&<div style={{marginTop:8,fontSize:11,textAlign:"center",padding:"5px",background:eff>8?`${d.a2}10`:`${d.danger}10`,borderRadius:6,color:eff>8?d.a2:d.danger}}>{eff>8?"✓ Efficient":"⚠ Low efficiency"} · {eff} pts/hr</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                {!coachCards&&!coachLoading&&(<div className="card empty"><div style={{fontSize:26,marginBottom:10}}>👀</div><div className="et">nothing yet.</div><div className="es">i know your weak spots. i'll be gentle.ng. we fix it today.</div></div>)}
+                {coachCards?.locked&&(
+                  <div className="card cp" style={{textAlign:"center",padding:"32px 24px"}}>
+                    <div style={{fontSize:28,marginBottom:12}}>🔒</div>
+                    <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:8}}>not enough data yet.</div>
+                    <div style={{fontSize:12,color:d.t3,lineHeight:1.7}}>{coachCards.msg}</div>
+                  </div>
+                )}
+                {!coachCards?.locked&&coachLoading&&<div className="card cp">{[100,85,92,78,88,70].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}</div>}
+                {coachCards&&(
+                  <div className="coach-grid">
+                    {coachCards.map((card,i)=>(
+                      <div key={i} className={"coach-card "+card.color}>
+                        <div className="cc-icon">{card.icon}</div>
+                        <div className="cc-title">{card.title}</div>
+                        <div className="cc-insight">{card.insight}</div>
+                        {card.topics?.length>0&&<div className="cc-topics">{card.topics.map(t=><span key={t} className="cc-topic" style={{background:`${coachCardColor(card.color)}14`,color:coachCardColor(card.color)}}>{t}</span>)}</div>}
+                        {card.plan&&card.plan.map((p,pi)=><div key={pi} style={{fontSize:11,color:d.t3,padding:"3px 0",borderBottom:`1px solid ${d.div}`}}>{p}</div>)}
+                        {(card.recommendation||card.action)&&<div className="cc-action">{card.recommendation||card.action}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── GOALS ── */}
+            {tab==="goals"&&(
+              <div className="pin">
+                <div style={{marginBottom:28}}>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>today's goals.</div>
+                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>no goals yet. add one.</div>
+                </div>
+                <div className="g2" style={{gap:14,marginBottom:28}}>
+                  <div className="card cp">
+                    <div className="cl mb12">Add Goal</div>
+                    <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v=>{setGoalSub(v);setGoalTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
+                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...classTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
+                    <div className="field"><label className="fl">Type</label><Select value={goalType} onChange={setGoalType} options={[{value:"study",label:"Study (time)"},{value:"pyq",label:"Solve PYQs (count)"},{value:"revision",label:"Revision"}]} d={d}/></div>
+                    <div className="field"><label className="fl">{goalType==="pyq"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="pyq"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="pyq"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
+                    <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/></div>
+                    <button className="btn btn-d btn-full" onClick={addGoal}>+ Add Goal</button>
+                  </div>
+                  <div className="card cp">
+                    <div className="rowb mb12">
+                      <div><div style={{fontSize:13,fontWeight:500}}>let me plan your day 😏</div><div style={{fontSize:11,color:d.t3,marginTop:2}}>i know your weak spots. i'll be gentle.</div></div>
+                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={aiSuggestGoals} disabled={goalLoading}>{goalLoading?"looking...":"suggest goals"}</button>
+                    </div>
+                    {goalLoading&&[80,90,75,85].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}
+                    {/* Signal breakdown — two bucket framing */}
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      <div style={{fontSize:10,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:d.t4,marginBottom:2}}>what it looks at</div>
+                      {(()=>{
+                        const hGaps=Object.keys(TOPICS).flatMap(sub=>classTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
+                        const weakPyqs=pyqHistory.length;
+                        const hasMocks=mocks.length>0;
+                        const sigs=[
+                          {icon:"📥", label:"not started", bucket:"A", detail:`${hGaps} high-weight chapter${hGaps!==1?"s":""} soon started`, active:hGaps>0, color:d.a1},
+                          {icon:"🔁", label:"needs work", bucket:"B", detail:hasMocks?`Practice test scores + ${weakPyqs>0?weakPyqs+" PYQ attempts":"no PYQ data yet"}`:"take a test first", active:hasMocks||weakPyqs>0, color:d.a3},
+                          {icon:"⏱", label:"today", bucket:"", detail:`${fmt(todayTime)||"0m"} studied · adjusts goal intensity`, active:true, color:d.a2},
+                          {icon:"📊", label:"mock scores", bucket:"", detail:mocks.length?Object.keys(SUBJECT_COLORS).map(s=>{const sc2=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[s]));return s.slice(0,4)+" "+Math.round(sc2.reduce((a,b)=>a+b,0)/sc2.length)+"/100";}).join(" · "):"take a test first", active:mocks.length>0, color:d.gold},
+                        ];
+                        return sigs.map(sig=>(
+                          <div key={sig.label} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 11px",borderRadius:3,background:sig.active?sig.color+"08":d.hover,border:"1px solid "+(sig.active?sig.color+"22":d.b)}}>
+                            <span style={{fontSize:13,flexShrink:0}}>{sig.icon}</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                <span style={{fontSize:11.5,fontWeight:500,color:sig.active?d.t:d.t3}}>{sig.label}</span>
+                                {sig.bucket&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:`${sig.color}18`,color:sig.color}}>Bucket {sig.bucket}</span>}
+                              </div>
+                              <div style={{fontSize:10.5,color:d.t4,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sig.detail}</div>
+                            </div>
+                            <div style={{width:6,height:6,borderRadius:"50%",background:sig.active?sig.color:d.t4,flexShrink:0,opacity:sig.active?1:.4}}/>
+                          </div>
+                        ));
+                      })()}
+                      <div style={{fontSize:10.5,color:d.t4,padding:"6px 8px",lineHeight:1.6}}>
+                        i know your weak spots. let me plan your day.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="card cp">
+                  <div className="rowb mb12">
+                    <div className="cl">{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</div>
+                    <div style={{fontSize:11,color:d.t3}}>{todayGoals.filter(g=>g.achieved).length}/{todayGoals.length} done</div>
+                  </div>
+                  {todayGoals.length>0&&<div style={{marginBottom:12}}><div className="btrack" style={{height:4}}><div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/></div></div>}
+                  {todayGoals.length===0&&<div className="empty" style={{padding:"22px 0"}}><div className="et">no goals yet.</div><div className="es">let me plan your day. i know exactly what you need. 😏</div></div>}
+                  {todayGoals.map(g=>{
+                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
+                    const pct=Math.min((prog/g.target)*100,100);
+                    return(
+                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""}>
+                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                        <div className="f1">
+                          <div className="rowb">
+                            <div className={"goal-text"+g.achieved?" done":""}>{g.text}</div>
+                            {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
+                          </div>
+                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
+                          <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${pct}%`}}/></div>
+                        </div>
+                        <button onClick={()=>setGoals(p=>p.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── SESSIONS ── */}
+            {tab==="sessions"&&(
+              <div className="pin">
+                <div style={{marginBottom:28}}>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>sessions.</div>
+                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>{sessions.length===0?"nothing yet.":`${sessions.length} session${sessions.length!==1?"s":""} · ${fmt(totalTime)} total. not bad.`}</div>
+                </div>
+                <div className="g2" style={{gap:14,marginBottom:28}}>
+                  {renderTimer()}
+                  <div className="card cp">
+                    <div className="cl mb12">today's sessions</div>
+                    {sessions.filter(s=>s.date===today()).length===0?(
+                      <div className="empty" style={{padding:"18px 0"}}><div className="et">nothing yet.</div><div className="es">timer is right there.</div></div>
+                    ):sessions.filter(s=>s.date===today()).map(s=>(
+                      <div key={s.id} className="srow">
+                        <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
+                        <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
+                        <div className="stopic">{s.topic}</div>
+                        <div className="snotes">{s.notes||""}</div>
+                        <div className="sdur">{fmt(s.duration)}</div>
+                      </div>
+                    ))}
+                    {sessions.filter(s=>s.date===today()).length>0&&(
+                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${d.div}`,display:"flex",justifyContent:"space-between",fontSize:12}}>
+                        <span style={{color:d.t3}}>total today</span>
+                        <span style={{fontWeight:600,color:d.a2}}>{fmt(todayTime)} today</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="card cp">
+                  <div className="rowb mb10"><div className="cl">all sessions</div><div style={{fontSize:11,color:d.t4}}>{sessions.length} sessions · {fmt(totalTime)} total. not bad.</div></div>
+                  {[...sessions].reverse().map(s=>(
+                    <div key={s.id} className="srow">
+                      <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
+                      <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
+                      <div className="stopic">{s.topic}</div>
+                      <div className="snotes">{s.notes||"—"}</div>
+                      <div className="sdur">{fmt(s.duration)}</div>
+                      <div className="sdate">{s.date}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── STREAKS ── */}
+            {tab==="syllabus"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              const STATUS_OPTS=[
+                {v:"not_started",l:"Not Started",icon:"—",c:d.t4,bg:"transparent"},
+                {v:"in_progress",l:"In Progress",icon:"▶",c:d.a3,bg:d.a3+"15"},
+                {v:"done",l:"Done",icon:"✓",c:d.a2,bg:d.a2+"15"},
+                {v:"need_revision",l:"Needs Revision",icon:"↺",c:d.a1,bg:d.a1+"15"},
+              ];
+              const WT_ORDER={"H":0,"M":1,"L":2};
+              const allChapters=sub=>{const s=new Set();return[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t=>{if(s.has(t))return false;s.add(t);return true;});};
+              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
+              const chHrs=(sub,t)=>sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
+              const chAcc=(sub,t)=>{const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
+              const total=SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
+              const done=Object.values(syllabusStatus).filter(v=>v==="done").length;
+              const prog=Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
+              const rev=Object.values(syllabusStatus).filter(v=>v==="need_revision").length;
+              const pct=total>0?Math.round((done/total)*100):0;
+              return(
+                <div>
+                  <div className="card cp mb16">
+                    <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
+                      <div style={{textAlign:"center",minWidth:70}}>
+                        <div style={{fontSize:48,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:pct>=80?d.a2:pct>=50?d.gold:d.danger,letterSpacing:"-.04em",lineHeight:1}}>{pct}%</div>
+                        <div style={{fontSize:10,color:d.t3,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>covered</div>
+                      </div>
+                      <div style={{flex:1,minWidth:160}}>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden",marginBottom:10,display:"flex"}}>
+                          <div style={{width:`${Math.round((done/total)*100)}%`,background:d.a2,transition:"width .5s"}}/>
+                          <div style={{width:`${Math.round((prog/total)*100)}%`,background:d.a3}}/>
+                          <div style={{width:`${Math.round((rev/total)*100)}%`,background:d.a1}}/>
+                        </div>
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                          {[{l:"Done",v:done,c:d.a2},{l:"In Progress",v:prog,c:d.a3},{l:"Revision",v:rev,c:d.a1},{l:"Not Started",v:total-done-prog-rev,c:d.t4}].map(s=>(
+                            <div key={s.l} style={{display:"flex",alignItems:"center",gap:4}}>
+                              <div style={{width:6,height:6,borderRadius:2,background:s.c}}/>
+                              <span style={{fontSize:10,color:d.t3}}>{s.l}</span>
+                              <span style={{fontSize:11,fontWeight:700,color:s.c}}>{s.v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:d.t3}}>JEE Advanced 2026</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left</div>
+                      </div>
+                    </div>
+                  </div>
+                  {SUBS.map(sub=>{
+                    const chapters=sorted(sub);
+                    const subDone=chapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length;
+                    const subPct=Math.round((subDone/chapters.length)*100);
+                    const subColor=SUBJECT_COLORS[sub];
+                    return(
+                      <div key={sub} style={{marginBottom:14}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2}}>
+                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1}}>{sub}</div>
+                          <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length}</div>
+                          <div style={{width:60,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2}}/>
+                          </div>
+                          <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
+                        </div>
+                        {["H","M","L"].map(wt=>{
+                          const wtCh=chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
+                          if(!wtCh.length)return null;
+                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          return(
+                            <div key={wt}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 14px",background:wt==="H"?`${d.danger}06`:wt==="M"?`${d.gold}06`:`${d.t4}06`,borderLeft:`3px solid ${wtColor}30`,borderBottom:`1px solid ${d.b}`}}>
+                                <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:wtColor}}>{wt==="H"?"High Priority":wt==="M"?"Medium":"Low"}</div>
+                                <div style={{fontSize:9,color:d.t4}}>{wtCh.filter(t=>syllabusStatus[sub+"|"+t]==="done").length}/{wtCh.length} done</div>
+                              </div>
+                              {wtCh.map((topic,idx)=>{
+                                const status=syllabusStatus[sub+"|"+topic]||"not_started";
+                                const hrs=chHrs(sub,topic);
+                                const acc=chAcc(sub,topic);
+                                const sOpt=STATUS_OPTS.find(s=>s.v===status)||STATUS_OPTS[0];
+                                return(
+                                  <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s"}}>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
+                                      <div style={{display:"flex",gap:6,marginTop:2}}>
+                                        {hrs>0&&<span style={{fontSize:9,color:d.t3,background:d.hover,padding:"1px 5px",borderRadius:2}}>{fmt(hrs)}</span>}
+                                        {acc!==null&&<span style={{fontSize:9,fontWeight:600,color:acc>=70?d.a2:acc>=40?d.gold:d.danger,background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc}%</span>}
+                                      </div>
+                                    </div>
+                                    <div style={{display:"flex",gap:2,flexShrink:0}}>
+                                      {STATUS_OPTS.map(opt=>(
+                                        <button key={opt.v} onClick={()=>setSyllabusChapter(sub,topic,opt.v)} title={opt.l}
+                                          style={{width:24,height:24,borderRadius:3,fontSize:10,fontWeight:700,cursor:"pointer",background:status===opt.v?opt.bg:d.hover,border:`1px solid ${status===opt.v?opt.c:d.b}`,color:status===opt.v?opt.c:d.t4,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .1s"}}>
+                                          {opt.icon}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+
+
+            {/* ── FEED ── */}
+            {tab==="feed"&&(
+              <div className="pin">
+                {/* Camera modal */}
+                {showCamera&&(
+                  <div style={{position:"fixed",inset:0,zIndex:200,background:"#000",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    <video ref={videoRef} style={{width:"100%",maxWidth:500,borderRadius:8}} playsInline muted/>
+                    <canvas ref={canvasRef} style={{display:"none"}}/>
+                    <div style={{display:"flex",gap:12,marginTop:20}}>
+                      <button onClick={capturePhoto} style={{padding:"14px 32px",borderRadius:40,background:d.t,color:d.bg,border:"none",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📸 capture</button>
+                      <button onClick={closeCamera} style={{padding:"14px 24px",borderRadius:40,background:"transparent",color:"#fff",border:"1px solid #fff",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Compose box */}
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"flex-start"}}>
+                    <div style={{width:36,height:36,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",flexShrink:0,fontSize:14}}>
+                      {(user?.name||"S")[0].toUpperCase()}
+                    </div>
+                    <textarea
+                      value={postText} onChange={e=>setPostText(e.target.value)}
+                      placeholder={"what are you grinding today, @"+profile?.username||"..."+"?"}
+                      style={{flex:1,background:d.hover,border:`1px solid ${d.b}`,borderRadius:8,padding:"10px 14px",
+                        color:d.t,fontFamily:"'DM Sans',sans-serif",fontSize:13,resize:"none",outline:"none",minHeight:72,lineHeight:1.6}}
+                    />
+                  </div>
+                  {postCapture&&(
+                    <div style={{position:"relative",marginBottom:12,borderRadius:8,overflow:"hidden",maxHeight:240}}>
+                      <img src={postCapture} style={{width:"100%",objectFit:"cover",borderRadius:8,maxHeight:240}}/>
+                      <button onClick={()=>setPostCapture(null)}
+                        style={{position:"absolute",top:8,right:8,width:28,height:28,borderRadius:"50%",background:"rgba(0,0,0,.7)",color:"#fff",border:"none",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+                    </div>
+                  )}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <button onClick={openCamera}
+                      style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                      📷 camera
+                    </button>
+                    <button onClick={submitPost} disabled={postLoading||(!postText.trim()&&!postCapture)}
+                      style={{padding:"8px 20px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",opacity:postLoading||(!postText.trim()&&!postCapture)?.4:1}}>
+                      {postLoading?"posting...":"post"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feed / Discover tabs */}
+                <div style={{display:"flex",gap:4,marginBottom:16}}>
+                  {[["following","Following"],["discover","Discover"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>{setFeedTab(v);fetchFeed(v);}}
+                      style={{padding:"7px 18px",borderRadius:6,border:`1px solid ${feedTab===v?d.a1:d.b}`,
+                        background:feedTab===v?`${d.a1}12`:"transparent",color:feedTab===v?d.a1:d.t3,
+                        cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {feedLoading&&[1,2,3].map(i=>(
+                  <div key={i} className="card cp" style={{marginBottom:12}}>
+                    <div className="shim" style={{width:"40%",height:12}}/>
+                    <div className="shim" style={{width:"80%",height:10}}/>
+                    <div className="shim" style={{width:"60%",height:10}}/>
+                  </div>
+                ))}
+
+                {!feedLoading&&feed.length===0&&(
+                  <div className="card empty">
+                    <div style={{fontSize:28,marginBottom:10}}>◉</div>
+                    <div className="et">{feedTab==="following"?"follow some people first.":"no posts yet. be the first."}</div>
+                    <div className="es">find people in discover → follow → see their grind</div>
+                  </div>
+                )}
+
+                {feed.map(post=>{
+                  const p=post.profiles||{};
+                  const meta=post.metadata||{};
+                  const liked=post._liked||false;
+                  const timeAgo=t=>{const s=Math.floor((Date.now()-new Date(t))/1000);if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";if(s<86400)return Math.floor(s/3600)+"h";return Math.floor(s/86400)+"d";};
+
+                  return(
+                    <div key={post.id} className="card" style={{marginBottom:12,overflow:"hidden"}}>
+                      {/* Post header */}
+                      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px 10px"}}>
+                        <div style={{width:36,height:36,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",flexShrink:0,fontSize:14}}>
+                          {p.avatar_url?<img src={p.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(p.display_name||"?")[0].toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{p.display_name||p.username}</div>
+                          <div style={{fontSize:11,color:d.t3}}>@{p.username} · {timeAgo(post.created_at)}</div>
+                        </div>
+                        {meta.subject&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:`${SUBJECT_COLORS[meta.subject]||d.a3}18`,color:SUBJECT_COLORS[meta.subject]||d.a3,fontWeight:700}}>{meta.subject}</span>}
+                      </div>
+
+                      {/* Content */}
+                      {post.content&&<div style={{padding:"0 16px 10px",fontSize:13.5,color:d.t,lineHeight:1.7}}>{post.content}</div>}
+
+                      {/* Photo */}
+                      {post.image_url&&(
+                        <div style={{width:"100%",maxHeight:320,overflow:"hidden",marginBottom:2}}>
+                          <img src={post.image_url} style={{width:"100%",objectFit:"cover",maxHeight:320,display:"block"}}/>
+                        </div>
+                      )}
+
+                      {/* Session metadata chip */}
+                      {meta.duration&&(
+                        <div style={{margin:"0 16px 10px",display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t2}}>⏱ {fmt(meta.duration)}</span>
+                          {meta.topic&&<span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t2}}>{meta.topic}</span>}
+                          {meta.streak&&<span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1}}>🔥 {meta.streak}d streak</span>}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div style={{display:"flex",gap:4,padding:"8px 12px",borderTop:`1px solid ${d.b}`}}>
+                        <button onClick={()=>likePost(post.id,liked)}
+                          style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${liked?d.danger+"60":d.b}`,color:liked?d.danger:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit",transition:"all .15s"}}>
+                          {liked?"♥":"♡"} {post.like_count||0}
+                        </button>
+                        <button style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                          ◌ {post.comment_count||0}
+                        </button>
+                        {post.user_id!==user?.id&&(
+                          <button onClick={()=>toggleFollow(post.user_id)}
+                            style={{marginLeft:"auto",padding:"6px 14px",borderRadius:6,
+                              background:follows.has(post.user_id)?d.hover:d.a1,
+                              color:follows.has(post.user_id)?d.t3:"#fff",
+                              border:`1px solid ${follows.has(post.user_id)?d.b:d.a1}`,
+                              cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>
+                            {follows.has(post.user_id)?"following":"+ follow"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── EVENTS ── */}
+            {tab==="events"&&(
+              <div className="pin">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                  <div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em"}}>Events</div>
+                    <div style={{fontSize:12,color:d.t3,fontStyle:"italic",marginTop:2}}>compete. suffer. grow.</div>
+                  </div>
+                  <button onClick={()=>setShowCreateEvent(p=>!p)}
+                    style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                    + Host Event
+                  </button>
+                </div>
+
+                {/* Create event form */}
+                {showCreateEvent&&(
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:14}}>Host a New Event</div>
+                    <div className="field"><label className="fl">Title</label>
+                      <input className="inp" placeholder="e.g. Physics PYQ Marathon" value={eventForm.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}/>
+                    </div>
+                    <div className="field"><label className="fl">Description</label>
+                      <input className="inp" placeholder="what's the challenge?" value={eventForm.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}/>
+                    </div>
+                    <div className="g2" style={{gap:10,marginBottom:10}}>
+                      <div className="field">
+                        <label className="fl">Subject</label>
+                        <Select value={eventForm.subject} onChange={v=>setEventForm(p=>({...p,subject:v}))} options={["Physics","Chemistry","Mathematics","All"]} d={d}/>
+                      </div>
+                      <div className="field">
+                        <label className="fl">Type</label>
+                        <Select value={eventForm.type} onChange={v=>setEventForm(p=>({...p,type:v}))} options={["marathon","challenge","sprint"]} d={d}/>
+                      </div>
+                    </div>
+                    <div className="g2" style={{gap:10,marginBottom:14}}>
+                      <div className="field"><label className="fl">Starts At</label>
+                        <input className="inp" type="datetime-local" value={eventForm.starts_at} onChange={e=>setEventForm(p=>({...p,starts_at:e.target.value}))}/>
+                      </div>
+                      <div className="field"><label className="fl">Ends At</label>
+                        <input className="inp" type="datetime-local" value={eventForm.ends_at} onChange={e=>setEventForm(p=>({...p,ends_at:e.target.value}))}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={createEvent} style={{padding:"9px 20px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>Create Event</button>
+                      <button onClick={()=>setShowCreateEvent(false)} style={{padding:"9px 16px",borderRadius:6,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {eventsLoading&&[1,2].map(i=><div key={i} className="card cp" style={{marginBottom:12}}><div className="shim" style={{width:"60%"}}/><div className="shim" style={{width:"40%"}}/></div>)}
+
+                {!eventsLoading&&events.length===0&&(
+                  <div className="card empty">
+                    <div style={{fontSize:28,marginBottom:10}}>⚡</div>
+                    <div className="et">no events yet.</div>
+                    <div className="es">host the first one. be that person.</div>
+                  </div>
+                )}
+
+                {events.map(ev=>{
+                  const joined=joinedEvents.has(ev.id);
+                  const now=new Date();
+                  const start=new Date(ev.starts_at);
+                  const end=new Date(ev.ends_at);
+                  const isLive=now>=start&&now<=end;
+                  const isUpcoming=now<start;
+                  const isPast=now>end;
+                  const subColor=SUBJECT_COLORS[ev.subject]||d.a3;
+                  const typeEmoji={marathon:"🏃",challenge:"⚡",sprint:"🎯"}[ev.type]||"◎";
+                  return(
+                    <div key={ev.id} className="card" style={{marginBottom:12,overflow:"hidden",border:`1px solid ${isLive?d.a1+"60":d.b}`,borderTop:`3px solid ${isLive?d.a1:isPast?d.t4:subColor}`}}>
+                      <div style={{padding:"14px 16px"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:8}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4,flexWrap:"wrap"}}>
+                              <span style={{fontSize:14}}>{typeEmoji}</span>
+                              <span style={{fontSize:14,fontWeight:700,color:d.t}}>{ev.title}</span>
+                              {isLive&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${d.a1}20`,color:d.a1,fontWeight:700,letterSpacing:".06em"}}>LIVE</span>}
+                              {isUpcoming&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${subColor}15`,color:subColor,fontWeight:700}}>UPCOMING</span>}
+                              {isPast&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:d.hover,color:d.t4,fontWeight:700}}>ENDED</span>}
+                            </div>
+                            {ev.description&&<div style={{fontSize:12,color:d.t3,marginBottom:6,lineHeight:1.5}}>{ev.description}</div>}
+                            <div style={{display:"flex",gap:10,fontSize:11,color:d.t3,flexWrap:"wrap"}}>
+                              <span>by @{ev.profiles?.username||"unknown"}</span>
+                              <span>·</span>
+                              <span style={{color:subColor}}>{ev.subject}</span>
+                              <span>·</span>
+                              <span>👥 {ev.member_count} joined</span>
+                            </div>
+                          </div>
+                          {!isPast&&(
+                            <button onClick={()=>joinEvent(ev.id)}
+                              style={{padding:"8px 16px",borderRadius:6,flexShrink:0,
+                                background:joined?d.hover:d.a1,color:joined?d.t3:"#fff",
+                                border:`1px solid ${joined?d.b:d.a1}`,cursor:"pointer",
+                                fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                              {joined?"joined ✓":"join"}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{fontSize:11,color:d.t4}}>
+                          {start.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
+                          {" → "}
+                          {end.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── PROFILE ── */}
+            {tab==="profile"&&(
+              <div className="pin">
+                {/* Profile card */}
+                <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"28px 24px"}}>
+                  <div style={{width:64,height:64,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:24,margin:"0 auto 14px",overflow:"hidden"}}>
+                    {user?.avatar?<img src={user.avatar} style={{width:64,height:64,borderRadius:"50%",objectFit:"cover"}}/>:(user?.name||"S")[0].toUpperCase()}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:3}}>{user?.name||"Student"}</div>
+                  <div style={{fontSize:13,color:d.t3,marginBottom:4}}>@{profile?.username||"..."}</div>
+                  {profile?.bio&&<div style={{fontSize:12,color:d.t2,marginBottom:12,fontStyle:"italic"}}>{profile.bio}</div>}
+                  <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{jeClass}</span>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>🔥 {streak}d streak</span>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>⏱ {fmt(totalTime)} total</span>
+                  </div>
+                </div>
+
+                {/* Weekly leaderboard */}
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                    <div className="cl">Weekly Leaderboard</div>
+                    <div style={{fontSize:10,color:d.t3}}>top 50 · resets Monday</div>
+                  </div>
+                  {leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
+                  {leaderboard.slice(0,20).map((entry,i)=>{
+                    const isMe=entry.id===user?.id;
+                    const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
+                    return(
+                      <div key={entry.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 4px",borderBottom:`1px solid ${d.b}44`,background:isMe?`${d.a1}06`:"transparent"}}>
+                        <div style={{width:26,textAlign:"center",fontWeight:700,fontSize:i<3?16:12,color:i<3?d.gold:d.t4,flexShrink:0}}>
+                          {medal||`${i+1}`}
+                        </div>
+                        <div style={{width:32,height:32,borderRadius:"50%",background:d.a3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0,overflow:"hidden"}}>
+                          {entry.avatar_url?<img src={entry.avatar_url} style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>:(entry.display_name||"?")[0].toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12.5,fontWeight:isMe?700:500,color:isMe?d.a1:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {entry.display_name||entry.username}{isMe?" (you)":""}
+                          </div>
+                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {entry.je_class}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{fmt(entry.week_minutes)}</div>
+                          <div style={{fontSize:9,color:d.t3}}>this week</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Your stats */}
+                <div className="card cp">
+                  <div className="cl" style={{marginBottom:14}}>Your Stats</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
+                    {[
+                      {l:"Total Hours",v:fmt(totalTime),c:d.a1},
+                      {l:"This Week",v:fmt(weekTime),c:d.a2},
+                      {l:"Streak",v:`${streak}d`,c:d.a3},
+                      {l:"Study Days",v:new Set(sessions.map(s=>s.date)).size,c:d.gold},
+                    ].map(s=>(
+                      <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.hover,borderRadius:6,border:`1px solid ${d.b}`}}>
+                        <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif",lineHeight:1}}>{s.v}</div>
+                        <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── REVISION ── */}
+            {tab==="revision"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              // Build due list
+              const allDue=[];
+              const allUpcoming=[];
+              const allNeverScheduled=[];
+              SUBS.forEach(sub=>{
+                const chapters=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,a)=>a.indexOf(t)===i);
+                chapters.forEach(topic=>{
+                  const key=sub+"|"+topic;
+                  const entry=revisionLog[key];
+                  const wt=JEE_WEIGHTAGE[sub]?.[topic]||"M";
+                  const hrs=sessions.filter(s=>s.subject===sub&&s.topic===topic).reduce((a,s)=>a+(s.duration||0),0);
+                  if(!entry){
+                    if(hrs>0) allNeverScheduled.push({sub,topic,wt,hrs});
+                  } else if(entry.nextRevisions?.length>0){
+                    const next=entry.nextRevisions[0];
+                    const item={sub,topic,wt,next,entry,hrs};
+                    if(isOverdue(next)||isDueToday(next)) allDue.push(item);
+                    else if(isDueSoon(next)) allUpcoming.push(item);
+                  }
+                });
+              });
+              // Sort overdue by weightage then overdue-ness
+              const wtO={"H":0,"M":1,"L":2};
+              allDue.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||daysBetween(b.next,today())-daysBetween(a.next,today()));
+              allUpcoming.sort((a,b)=>a.next.localeCompare(b.next));
+              allNeverScheduled.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||b.hrs-a.hrs);
+              const totalDue=allDue.length;
+              return(
+                <div className="pin">
+                  {/* Header stats */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:24}}>
+                    {[
+                      {l:"Due Today",v:allDue.length,c:allDue.length>0?d.danger:d.a2,hint:allDue.length===0?"you're up to date 🎉":"don't skip these"},
+                      {l:"Due Soon",v:allUpcoming.length,c:d.gold,hint:"next 2 days"},
+                      {l:"Scheduled",v:Object.keys(revisionLog).length,c:d.a3,hint:"chapters tracked"},
+                      {l:"Chapters Studied",v:allNeverScheduled.length+Object.keys(revisionLog).length,c:d.t3,hint:"studied at least once"},
+                    ].map(s=>(
+                      <div key={s.l} className="card cp" style={{textAlign:"center",padding:"16px 12px"}}>
+                        <div style={{fontSize:36,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:s.c,lineHeight:1}}>{s.v}</div>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:d.t3,marginTop:4}}>{s.l}</div>
+                        <div style={{fontSize:10,color:d.t4,marginTop:2,fontStyle:"italic"}}>{s.hint}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Due now */}
+                  {allDue.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.danger}}>⚠ Due for Revision</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>{allDue.length} chapter{allDue.length!==1?"s":""}</div>
+                      </div>
+                      {allDue.map(({sub,topic,wt,next,entry,hrs})=>{
+                        const overdueDays=daysBetween(next,today());
+                        const subColor=SUBJECT_COLORS[sub];
+                        const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                        return(
+                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",marginBottom:6,background:d.card,border:`1px solid ${d.danger}30`,borderLeft:`3px solid ${d.danger}`,borderRadius:4}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
+                                <span style={{fontSize:13,fontWeight:600,color:d.t}}>{topic}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
+                              </div>
+                              <div style={{fontSize:11,color:d.t3}}>
+                                {overdueDays===0?"due today":overdueDays>0?`${overdueDays}d overdue`:"due today"} · last studied {entry.lastStudied} · {fmt(hrs)} total
+                              </div>
+                            </div>
+                            <button onClick={()=>markRevisionDone(sub,topic)}
+                              style={{padding:"7px 14px",borderRadius:4,background:d.a2,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                              ✓ done
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Due soon */}
+                  {allUpcoming.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.gold}}>⏳ Coming Up</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                      </div>
+                      {allUpcoming.map(({sub,topic,wt,next,hrs})=>{
+                        const daysLeft=daysBetween(today(),next);
+                        const subColor=SUBJECT_COLORS[sub];
+                        return(
+                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",marginBottom:4,background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${d.gold}`,borderRadius:4}}>
+                            <div style={{flex:1}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                                <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{topic}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
+                              </div>
+                              <div style={{fontSize:10,color:d.t3,marginTop:2}}>in {daysLeft} day{daysLeft!==1?"s":""} · {next}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Never scheduled — chapters studied but not in revision system */}
+                  {allNeverScheduled.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.t2}}>+ Add to Revision Schedule</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>studied but not tracked</div>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                        {allNeverScheduled.slice(0,12).map(({sub,topic,wt,hrs})=>{
+                          const subColor=SUBJECT_COLORS[sub];
+                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          return(
+                            <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderRadius:4,cursor:"pointer"}}
+                              onClick={()=>markStudied(sub,topic)}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topic}</div>
+                                <div style={{display:"flex",gap:5,marginTop:3}}>
+                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub.slice(0,4)}</span>
+                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
+                                  <span style={{fontSize:9,color:d.t3}}>{fmt(hrs)}</span>
+                                </div>
+                              </div>
+                              <span style={{fontSize:16,color:d.t3}}>+</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {Object.keys(revisionLog).length===0&&allNeverScheduled.length===0&&(
+                    <div className="card empty">
+                      <div style={{fontSize:28,marginBottom:10}}>↺</div>
+                      <div className="et">nothing to revise yet.</div>
+                      <div className="es">study a chapter, then add it here. i'll tell you when to review it.</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+
+            {/* ── RANK PREDICTOR ── */}
+            {tab==="rank"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              const totalChapters=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.length;
+              },0);
+              const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
+              const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
+              const weekDays=[...new Set(sessions.filter(s=>s.date>=weekStart).map(s=>s.date))].length;
+              const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
+              const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
+              const highWtDone=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length;
+              },0);
+              const highWtTotal=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H").length;
+              },0);
+              const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
+
+              // Score each factor 0-100
+              const factors={
+                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:`${studiedChapters}/${totalChapters} chapters`},
+                consistency:{score:Math.min(100,Math.round((streak/90)*100)),weight:25,label:"Consistency (Streak)",hint:`${streak} day streak`},
+                dailyHrs:{score:Math.min(100,Math.round((avgDailyHrs/8)*100)),weight:20,label:"Daily Study Hours",hint:`${avgDailyHrs.toFixed(1)}h avg/day`},
+                highWeight:{score:highWtPct,weight:20,label:"High-Weight Chapters",hint:`${highWtDone}/${highWtTotal} done`},
+                pyqAcc:{score:pyqAcc||0,weight:15,label:"PYQ Accuracy",hint:pyqAcc!==null?`${pyqAcc}% accuracy`:"no PYQs yet"},
+              };
+              const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
+              const overallPct=Math.round(totalScore);
+
+              // Map score to rank range
+              const getRankRange=pct=>{
+                if(pct>=90)return{range:"Top 500",color:d.a2,label:"exceptional"};
+                if(pct>=80)return{range:"500–2,000",color:d.a2,label:"strong"};
+                if(pct>=70)return{range:"2,000–5,000",color:d.a3,label:"good"};
+                if(pct>=60)return{range:"5,000–10,000",color:d.gold,label:"on track"};
+                if(pct>=50)return{range:"10,000–20,000",color:d.gold,label:"needs work"};
+                if(pct>=35)return{range:"20,000–50,000",color:d.a1,label:"at risk"};
+                return{range:"50,000+",color:d.danger,label:"critical"};
+              };
+              const rankData=getRankRange(overallPct);
+              const daysLeft=Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000));
+
+              // What moves the needle most
+              const improvements=Object.entries(factors)
+                .filter(([,f])=>f.score<80)
+                .sort((a,b)=>b[1].weight-a[1].weight)
+                .slice(0,3)
+                .map(([k,f])=>({
+                  key:k, label:f.label,
+                  gap:80-f.score,
+                  impact:`+${Math.round((80-f.score)*f.weight/100)} pts`,
+                  action:{
+                    coverage:"study at least 1 new chapter every 2 days",
+                    consistency:"don't break your streak. even 30 min counts",
+                    dailyHrs:"aim for 6h/day minimum in the final stretch",
+                    highWeight:"prioritise H-weight chapters — they appear every year",
+                    pyqAcc:"drill PYQs in your weakest chapters",
+                  }[k]
+                }));
+
+              const dataAge=sessions.length<5;
+
+              return(
+                <div className="pin">
+                  {dataAge&&(
+                    <div style={{padding:"14px 18px",borderRadius:4,background:`${d.a1}10`,border:`1px solid ${d.a1}30`,marginBottom:20,fontSize:12,color:d.t2,lineHeight:1.7}}>
+                      ⚠ <strong>Early estimate.</strong> Log at least 5 study sessions for an accurate prediction. The more data, the better.
+                    </div>
+                  )}
+
+                  {/* Main rank card */}
+                  <div className="card cp" style={{textAlign:"center",marginBottom:20,padding:"32px 24px",position:"relative",overflow:"hidden"}}>
+                    <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at 50% 0%,${rankData.color}08,transparent 70%)`,pointerEvents:"none"}}/>
+                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:12}}>Estimated JEE Advanced Rank</div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:400,color:rankData.color,lineHeight:1,letterSpacing:"-.02em",marginBottom:8}}>
+                      {rankData.range}
+                    </div>
+                    <div style={{fontSize:13,color:d.t3,marginBottom:20,fontStyle:"italic"}}>{rankData.label} · based on your current trajectory</div>
+                    {/* Score ring */}
+                    <div style={{display:"inline-flex",alignItems:"center",gap:16,padding:"12px 24px",borderRadius:40,background:d.hover,border:`1px solid ${d.b}`}}>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:rankData.color,fontFamily:"'DM Serif Display',serif"}}>{overallPct}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Prep Score</div>
+                      </div>
+                      <div style={{width:1,height:36,background:d.b}}/>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Factor breakdown */}
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div className="cl" style={{marginBottom:16}}>Score Breakdown</div>
+                    {Object.entries(factors).map(([key,f])=>(
+                      <div key={key} style={{marginBottom:14}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                          <div>
+                            <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{f.label}</span>
+                            <span style={{fontSize:10,color:d.t3,marginLeft:8,fontStyle:"italic"}}>{f.hint}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:11,color:d.t3}}>{f.weight}% weight</span>
+                            <span style={{fontSize:13,fontWeight:700,color:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,minWidth:32,textAlign:"right"}}>{f.score}</span>
+                          </div>
+                        </div>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${f.score}%`,background:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,borderRadius:3,transition:"width .6s ease"}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* What moves the needle */}
+                  {improvements.length>0&&(
+                    <div className="card cp" style={{marginBottom:20}}>
+                      <div className="cl" style={{marginBottom:12}}>What Moves Your Rank Most</div>
+                      {improvements.map((imp,i)=>(
+                        <div key={imp.key} style={{display:"flex",gap:12,padding:"12px 14px",marginBottom:6,borderRadius:4,background:d.hover,border:`1px solid ${d.b}`}}>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:`${d.a1}20`,border:`1px solid ${d.a1}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>{i+1}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                              <span style={{fontSize:12,fontWeight:600,color:d.t}}>{imp.label}</span>
+                              <span style={{fontSize:11,fontWeight:700,color:d.a2,background:`${d.a2}15`,padding:"1px 7px",borderRadius:3}}>{imp.impact}</span>
+                            </div>
+                            <div style={{fontSize:11,color:d.t3,lineHeight:1.5}}>{imp.action}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{fontSize:11,color:d.t4,textAlign:"center",fontStyle:"italic",lineHeight:1.6}}>
+                    Rank estimate is based on your study patterns, consistency, and coverage relative to JEE Advanced toppers. It updates as you log more sessions.
+                  </div>
+                </div>
+              );
+            })()}
+
+            {tab==="streaks"&&(
+              <div className="pin">
+                <div className="streak-hero mb13">
+                  <div style={{fontSize:10,color:d.t3,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>streak</div>
+                  <div className="streak-num">{streak}</div>
+                  <div style={{fontSize:13,color:d.t3,marginTop:3}}>{streak===0?"no streak. every legend starts somewhere.":streak===1?"day one. don't ghost me.":streak<7?`${streak} days. i\'ve been watching.`:`${streak} days straight.${streak>=30?" 🔥":""}`}</div>
+                  {currentMilestone&&<div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 13px",borderRadius:20,background:`${d.gold}18`,border:`1px solid ${d.gold}28`,color:d.gold,fontSize:12.5,fontWeight:600,marginTop:10}}>{currentMilestone.icon} {currentMilestone.label}</div>}
+                  {nextMilestone&&<div style={{fontSize:11,color:d.t3,marginTop:10}}>{nextMilestone.days-streak} more day{nextMilestone.days-streak!==1?"s":""} to {nextMilestone.icon} {nextMilestone.label}. keep it goingked in 🔒</div>}
+                </div>
+                <div className="g2 mb13">
+                  <div>
+                    <div className="cl mb10">milestones</div>
+                    {STREAK_MILESTONES.map(b=>{
+                      const reached=streak>=b.days;
+                      return(
+                        <div key={b.days} className={"milestone-row"+reached?" reached":""}>
+                          <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
+                            <div style={{fontSize:10.5,color:d.t4}}>{b.days} day streak</div>
+                          </div>
+                          {reached?<div className="m-check">✓</div>:<div className="m-lock">{b.days}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div>
+                    {nextMilestone&&(
+                      <div className="card cp mb12">
+                        <div className="cl mb10">next one</div>
+                        <div style={{textAlign:"center",padding:"6px 0"}}>
+                          <div style={{fontSize:28,marginBottom:5}}>{nextMilestone.icon}</div>
+                          <div style={{fontSize:13,fontWeight:600,marginBottom:2}}>{nextMilestone.label}</div>
+                          <div style={{fontSize:11,color:d.t3,marginBottom:12}}>{nextMilestone.days} day streak</div>
+                          <div className="btrack" style={{height:5,marginBottom:4}}><div className="bfill" style={{width:`${(streak/nextMilestone.days)*100}%`,background:d.a1}}/></div>
+                          <div style={{fontSize:10.5,color:d.t4}}>{streak}/{nextMilestone.days}</div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="card cp mb12">
+                      <div className="cl mb10">stats</div>
+                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:pyqHistory.length,c:d.gold}].map(s=>(
+                        <div key={s.lbl} className="rowb" style={{marginBottom:8}}>
+                          <span style={{fontSize:12,color:d.t3}}>{s.lbl}</span>
+                          <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="card cp">
+                      <div className="cl mb10">60-day history — every square is a day you showed up</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                        {Array.from({length:60},(_,i)=>{
+                          const dt=new Date();dt.setDate(dt.getDate()-59+i);
+                          const ds=dt.toISOString().split("T")[0];
+                          const mins=sessions.filter(s=>s.date===ds).reduce((a,s)=>a+s.duration,0);
+                          const op=mins===0?0:mins<60?.3:mins<120?.55:mins<240?.8:1;
+                          return <div key={ds} title={ds+": "+fmt(mins)||"No study"} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
+                        })}
+                      </div>
+                      <div style={{display:"flex",gap:5,marginTop:6,alignItems:"center",fontSize:9.5,color:d.t4}}>
+                        <span>Less</span>{[.3,.55,.8,1].map((o,i)=><div key={i} style={{width:9,height:9,borderRadius:2,background:d.a2,opacity:o}}/>)}<span>More</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
 
-// ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
-
-function Avatar({ profile, size = 36, border = false }) {
-  const initials = (profile?.full_name || profile?.handle || '?')
-    .split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
-  const bg = profile?.avatar_color || avatarBg(profile)
-  const style = {
-    width: size, height: size, borderRadius: '50%',
-    background: bg, color: '#fff',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: Math.round(size * 0.38), fontWeight: 500, flexShrink: 0,
-    overflow: 'hidden',
-    ...(border ? { border: '3px solid #fff' } : {}),
-  }
-  if (profile?.avatar_url) {
-    return <img src={profile.avatar_url} alt={initials} style={{ ...style, objectFit: 'cover' }} />
-  }
-  return <div style={style}>{initials}</div>
-}
-
-function Spinner() {
-  return <div className="spinner"><div className="spinner-inner" /></div>
-}
-
-function EmptyState({ icon, title, desc }) {
-  return (
-    <div className="empty-state">
-      <i className={`ti ti-${icon}`} aria-hidden="true" />
-      <div className="empty-title">{title}</div>
-      <div className="empty-desc">{desc}</div>
-    </div>
-  )
-}
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function formatTime(s) {
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-}
-
-function formatHours(seconds) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
-
-function timeAgo(iso) {
-  const diff = Date.now() - new Date(iso).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
-}
-
-function formatEventDate(iso) {
-  return new Date(iso).toLocaleString('en-IN', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-function durationLabel(start, end) {
-  const mins = Math.round((new Date(end) - new Date(start)) / 60000)
-  const h = Math.floor(mins / 60), m = mins % 60
-  return h > 0 ? `${h}h ${m > 0 ? m + 'm' : ''}` : `${m}m`
-}
-
-function getWeekLabel(iso) {
-  const d = new Date(iso)
-  const week = Math.floor(d.getDate() / 7)
-  return `${d.toLocaleString('default', { month: 'short' })} W${week + 1}`
-}
-
-const AVATAR_COLORS = ['#185FA5', '#0F6E56', '#993C1D', '#534AB7', '#BA7517', '#3B6D11']
-function avatarBg(profile) {
-  if (!profile) return AVATAR_COLORS[0]
-  const str = profile.handle || profile.full_name || profile.id || ''
-  let hash = 0
-  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash)
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
-}
