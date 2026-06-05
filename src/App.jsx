@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-
-// ── Config — paste your values here, OR set as Vite env vars ─────────────────
-const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
-const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const OR_KEY  = "YOUR_OPENROUTER_KEY";
-// ── Supabase Auth helpers ─────────────────────────────────────────────────────
+const SB_URL  = import.meta.env.VITE_SB_URL;
+const SB_ANON = import.meta.env.VITE_SB_ANON;
+const OR_KEY  = import.meta.env.VITE_OR_KEY;
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -245,11 +242,6 @@ function renderMath(text) {
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
-function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
-function isOverdue(dateStr){return dateStr<today();}
-function isDueToday(dateStr){return dateStr===today();}
-function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
 
 // ── Select component ──────────────────────────────────────────────────────────
@@ -331,18 +323,70 @@ const STREAK_MILESTONES = [
 
 const TABS=[
   {id:"overview",label:"Overview",icon:"⌂"},
-  {id:"coach",label:"Analytics",icon:"◈"},
+  {id:"social",label:"Social",icon:"◉"},
+  {id:"coach",label:"Analytics",icon:"👁"},
   {id:"goals",label:"today's goals",icon:"◎"},
+  {id:"pyq",label:"Practice",icon:"◈"},
   {id:"sessions",label:"Sessions",icon:"◷"},
   {id:"streaks",label:"Streaks",icon:"🔥"},
   {id:"syllabus",label:"Syllabus",icon:"📋"},
-  {id:"revision",label:"Revision",icon:"↺"},
-  {id:"rank",label:"Rank",icon:"🎯"},
-  {id:"feed",label:"Feed",icon:"◉"},
-  {id:"events",label:"Events",icon:"⚡"},
-  {id:"profile",label:"Profile",icon:"◯"},
 ];
 
+const PAPERS = [
+  // ── 2024 ─────────────────────────────────────────────────────────────────
+  {
+    id:"adv-2024-p1",
+    year:"2024", exam:"JEE Advanced", session:"Paper 1",
+    shift:"Morning (9:00 AM – 12:00 PM)", date:"26 May 2024",
+    duration:180, status:"available",
+  },
+  {
+    id:"adv-2024-p2",
+    year:"2024", exam:"JEE Advanced", session:"Paper 2",
+    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
+    duration:180, status:"available",
+  },
+  // ── 2023 ─────────────────────────────────────────────────────────────────
+  {
+    id:"adv-2023-p1",
+    year:"2023", exam:"JEE Advanced", session:"Paper 1",
+    shift:"Morning (9:00 AM – 12:00 PM)", date:"04 Jun 2023",
+    duration:180, status:"available",
+  },
+  {
+    id:"adv-2023-p2",
+    year:"2023", exam:"JEE Advanced", session:"Paper 2",
+    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
+    duration:180, status:"available",
+  },
+  // ── 2022 ─────────────────────────────────────────────────────────────────
+  {
+    id:"adv-2022-p1",
+    year:"2022", exam:"JEE Advanced", session:"Paper 1",
+    shift:"Morning (9:00 AM – 12:00 PM)", date:"28 Aug 2022",
+    duration:180, status:"available",
+  },
+  {
+    id:"adv-2022-p2",
+    year:"2022", exam:"JEE Advanced", session:"Paper 2",
+    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"28 Aug 2022",
+    duration:180, status:"available",
+  },
+  // ── 2025 ─────────────────────────────────────────────────────────────────
+  {
+    id:"adv-2025-p1",
+    year:"2025", exam:"JEE Advanced", session:"Paper 1",
+    shift:"Morning (9:00 AM – 12:00 PM)", date:"18 May 2025",
+    duration:180, status:"available",
+  },
+  {
+    id:"adv-2025-p2",
+    year:"2025", exam:"JEE Advanced", session:"Paper 2",
+    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"18 May 2025",
+    duration:180, status:"available",
+  },
+
+];
 
 // ── Placeholder questions — you'll populate these from Supabase ───────────────
 // Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
@@ -351,27 +395,2167 @@ const TABS=[
 // IMPORTANT: every real question MUST include a `topic` field (chapter name).
 // This is how the Analytics tab and AI coach know which chapter you got wrong.
 // Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
-// ─────────────────────────────────────────────────────────────────────────────const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SECTIONS = ["Physics","Chemistry","Mathematics"];
+const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
+const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
 
 // NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
 // ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
+function getNTA(dark){
+  if(!dark) return {
+    // Real NTA colours
+    bg:"#f5f5f5",
+    header:"#1a7c3e",        // NTA green
+    headerText:"#ffffff",
+    subBar:"#f47920",        // NTA orange
+    subBarText:"#ffffff",
+    subBarActive:"#ffffff",
+    subBarActiveBg:"rgba(255,255,255,.18)",
+    card:"#ffffff",
+    border:"#d0d0d0",
+    border2:"#aaaaaa",
+    text:"#1a1a1a",
+    text2:"#333333",
+    text3:"#666666",
+    text4:"#999999",
+    hover:"#f0f0f0",
+    // Palette (NTA official)
+    notVisited:"#9e9e9e",
+    notAnswered:"#e53935",
+    answered:"#43a047",
+    markedReview:"#7b1fa2",
+    answeredMarked:"#7b1fa2",
+    // Timer
+    timerNormal:"#1a7c3e",
+    timerWarn:"#e53935",
+    // Buttons
+    btnPrimary:"#1a7c3e",
+    btnSave:"#43a047",
+    btnClear:"#e53935",
+    btnMark:"#7b1fa2",
+    btnNext:"#1a7c3e",
+    btnSecondary:"#ffffff",
+    btnSecondaryText:"#333333",
+    // Result
+    scoreGood:"#1a7c3e",
+    scoreMid:"#f47920",
+    scoreBad:"#e53935",
+  };
+  // Dark mode — same identity, darker surfaces
+  return {
+    bg:"#0d0d0c",
+    header:"#1a5c2e",
+    headerText:"#ffffff",
+    subBar:"#c45e0a",
+    subBarText:"#ffffff",
+    subBarActive:"#ffffff",
+    subBarActiveBg:"rgba(255,255,255,.15)",
+    card:"#1a1a18",
+    border:"#2a2a28",
+    border2:"#3a3a38",
+    text:"#f0f0ee",
+    text2:"#ccccca",
+    text3:"#888886",
+    text4:"#555553",
+    hover:"#222220",
+    notVisited:"#555553",
+    notAnswered:"#c62828",
+    answered:"#2e7d32",
+    markedReview:"#6a1b9a",
+    answeredMarked:"#6a1b9a",
+    timerNormal:"#4caf50",
+    timerWarn:"#ef5350",
+    btnPrimary:"#1a5c2e",
+    btnSave:"#2e7d32",
+    btnClear:"#c62828",
+    btnMark:"#6a1b9a",
+    btnNext:"#1a5c2e",
+    btnSecondary:"#2a2a28",
+    btnSecondaryText:"#ccccca",
+    scoreGood:"#4caf50",
+    scoreMid:"#ff9800",
+    scoreBad:"#ef5350",
+  };
+}
 
+function fmtTime(secs) {
+  const h = Math.floor(secs/3600);
+  const m = Math.floor((secs%3600)/60);
+  const s = secs%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
 
 // ── Question Status ───────────────────────────────────────────────────────────
 // notVisited | notAnswered | answered | markedReview | answeredMarked
+function getStatus(state) {
+  if (!state.visited) return "notVisited";
+  if (state.markedReview && state.answer !== null) return "answeredMarked";
+  if (state.markedReview) return "markedReview";
+  if (state.answer !== null) return "answered";
+  return "notAnswered";
+}
 
+function statusColor(status, nta) {
+  return {
+    notVisited: nta.notVisited,
+    notAnswered: nta.notAnswered,
+    answered: nta.answered,
+    markedReview: nta.markedReview,
+    answeredMarked: nta.answeredMarked,
+  }[status] || nta.notVisited;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PAPER LIST — card view
 // ─────────────────────────────────────────────────────────────────────────────
+function PaperList({onStart,onExit,nta,completedTests,onReview}){
+  const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
+  return(
+    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
+      {/* NTA-style green header */}
+      <div style={{background:nta.header,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>🦥</span>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",letterSpacing:"-.01em"}}>sloth<span style={{color:"#f47920"}}>r</span></div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,.65)",letterSpacing:".04em",textTransform:"uppercase"}}>Mock Test Papers — JEE Advanced</div>
+          </div>
+        </div>
+        <button onClick={onExit}
+          style={{padding:"7px 16px",borderRadius:5,background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer",letterSpacing:".02em"}}>
+          ← Back to slothr
+        </button>
+      </div>
+      {/* Warning banner */}
+      <div style={{background:nta.card,borderBottom:`2px solid #f47920`,padding:"8px 20px",display:"flex",alignItems:"center",gap:8}}>
+        <span>⚠️</span>
+        <span style={{fontSize:12,color:nta.text2}}>Once you click <strong>Attempt Test</strong>, the 3-hour timer starts immediately. Do not refresh the page.</span>
+      </div>
+      <div style={{padding:"20px"}}>
+        <div style={{fontSize:16,fontWeight:700,color:nta.text,marginBottom:4}}>JEE Advanced — Mock Test Papers</div>
+        <div style={{fontSize:12,color:nta.text3,marginBottom:20}}>54 questions · 3 hours · 180 marks per paper</div>
+        {years.map(year=>(
+          <div key={year} style={{marginBottom:28}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <div style={{fontSize:15,fontWeight:700,color:nta.header}}>{year}</div>
+              <div style={{flex:1,height:1,background:nta.border}}/>
+              <div style={{fontSize:10,color:nta.text3}}>{PAPERS.filter(p=>p.year===year).length} papers</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
+              {PAPERS.filter(p=>p.year===year&&p.status==="available").map(paper=>(
+                <PaperCard key={paper.id} paper={paper} onStart={onStart} nta={nta} completedTest={completedTests?.[paper.id]} onReview={onReview}/>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PaperCard({paper,onStart,nta,completedTest,onReview}){
+  const [hov,setHov]=useState(false);
+  const avail=paper.status==="available";
+  return(
+    <div onMouseOver={()=>setHov(true)} onMouseOut={()=>setHov(false)}
+      style={{background:nta.card,borderRadius:3,border:`1.5px solid ${hov&&avail?nta.header:nta.border}`,
+        padding:"16px 18px",transition:"all .15s",boxShadow:hov&&avail?"0 4px 16px rgba(0,0,0,.12)":"0 1px 4px rgba(0,0,0,.06)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:".05em",textTransform:"uppercase",
+          color:nta.header,background:`${nta.header}12`,padding:"3px 8px",borderRadius:3}}>
+          {paper.session}
+        </div>
+        {!avail&&<div style={{fontSize:10,color:nta.text3,background:nta.hover,padding:"3px 7px",borderRadius:3,border:`1px solid ${nta.border}`}}>coming soon</div>}
+      </div>
+      <div style={{fontSize:13,fontWeight:700,color:nta.text,marginBottom:2}}>{paper.shift}</div>
+      <div style={{fontSize:11,color:nta.text3,marginBottom:12}}>{paper.date}</div>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {[["54 Qs","Qs"],["3 hrs","Time"],["180","Marks"]].map(([v,l])=>(
+          <div key={l} style={{flex:1,textAlign:"center",background:nta.hover,borderRadius:5,padding:"6px 4px",border:`1px solid ${nta.border}`}}>
+            <div style={{fontSize:12,fontWeight:700,color:nta.header}}>{v}</div>
+            <div style={{fontSize:9,color:nta.text3,textTransform:"uppercase",letterSpacing:".04em"}}>{l}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:4,marginBottom:12}}>
+        {SECTIONS.map(s=>(
+          <div key={s} style={{flex:1,textAlign:"center",fontSize:9,fontWeight:700,color:SEC_COLOR[s],
+            background:`${SEC_COLOR[s]}15`,padding:"3px 4px",borderRadius:3,border:`1px solid ${SEC_COLOR[s]}25`}}>
+            {SEC_SHORT[s]}
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:7}}>
+        <button disabled={!avail} onClick={()=>avail&&onStart(paper)}
+          style={{flex:1,padding:"10px",borderRadius:5,
+            background:avail?nta.btnPrimary:"#888",
+            color:"#fff",border:"none",fontFamily:"Arial",
+            fontSize:12,fontWeight:700,cursor:avail?"pointer":"not-allowed",letterSpacing:".02em"}}>
+          {completedTest?"try again":avail?"▶ Attempt":"soon"}
+        </button>
+        {completedTest&&(
+          <button onClick={()=>onReview(paper,completedTest)}
+            style={{padding:"10px 14px",borderRadius:5,flexShrink:0,
+              background:"transparent",color:nta.header,
+              border:`1.5px solid ${nta.header}`,fontFamily:"Arial",
+              fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+            Review ↗
+          </button>
+        )}
+      </div>
+      {completedTest&&(
+        <div style={{marginTop:8,fontSize:10,color:nta.text3,textAlign:"center",fontStyle:"italic"}}>
+          attempted {completedTest.date} · open the report card 🩻
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InstructionsScreen({paper,user,onBegin,onBack,nta}){
+  const [agreed,setAgreed]=useState(false);
+  return(
+    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
+      <NTAHeader paper={paper} user={user} timerSecs={null} nta={nta} onExit={onBack}/>
+      <div style={{maxWidth:860,margin:"0 auto",padding:"18px 16px"}}>
+        {/* Instructions card */}
+        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,overflow:"hidden",marginBottom:14}}>
+          <div style={{background:nta.header,color:"#fff",padding:"9px 16px",fontSize:13,fontWeight:700}}>General Instructions</div>
+          <div style={{padding:"14px 18px",lineHeight:1.9,color:nta.text,fontSize:12.5}}>
+            {[
+              "Total duration of JEE Advanced is 180 minutes (3 hours) per paper.",
+              "The countdown timer at the top right shows the remaining time. The paper auto-submits when it reaches 00:00:00.",
+              "There are 54 questions — 18 per section (Physics, Chemistry, Mathematics).",
+              "Question types vary by section: Single Correct MCQ (+3/−1), Multiple Correct MCQ (+4/−2 partial), Numerical (+3/0). Check the question type label before answering.",
+              "Click an option to select it. For numerical, type your integer/decimal answer in the input box.",
+              "Click flag & next to flag a question. You can come back to it later.",
+              "You can freely switch between sections and questions at any time.",
+              "Click save & next to save your response and move forward.",
+            ].map((line,i)=>(
+              <div key={i} style={{display:"flex",gap:8,marginBottom:3}}>
+                <span style={{color:nta.header,fontWeight:700,flexShrink:0}}>{i+1}.</span>
+                <span>{line}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Palette legend */}
+        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,padding:"12px 18px",marginBottom:14}}>
+          <div style={{fontWeight:700,marginBottom:10,color:nta.text,fontSize:13}}>Question Palette Legend</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
+            {[
+              {c:"notVisited",  l:"Not Visited",       d:"You have not visited the question yet"},
+              {c:"notAnswered", l:"Not Answered",       d:"Visited but no answer saved"},
+              {c:"answered",    l:"Answered",           d:"Response saved"},
+              {c:"markedReview",l:"Marked for Review",  d:"Flagged, no answer saved"},
+              {c:"answeredMarked",l:"Answered + Marked",d:"Answered and flagged for review"},
+            ].map(item=>(
+              <div key={item.l} style={{display:"flex",alignItems:"center",gap:8,minWidth:220}}>
+                <div style={{width:28,height:28,borderRadius:3,background:nta[item.c],flexShrink:0,
+                  display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:700}}>1</div>
+                <div>
+                  <div style={{fontWeight:600,fontSize:11.5,color:nta.text}}>{item.l}</div>
+                  <div style={{fontSize:10.5,color:nta.text3}}>{item.d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Agree */}
+        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,padding:"12px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+          <input type="checkbox" id="agree" checked={agreed} onChange={e=>setAgreed(e.target.checked)}
+            style={{width:15,height:15,cursor:"pointer",accentColor:nta.header}}/>
+          <label htmlFor="agree" style={{cursor:"pointer",fontSize:13,fontWeight:500,color:nta.text}}>
+            I have read all instructions carefully and I am ready to begin the test.
+          </label>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onBack}
+            style={{padding:"9px 22px",borderRadius:4,background:nta.btnSecondary,color:nta.btnSecondaryText,
+              border:`1px solid ${nta.border2}`,fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+            ← Back
+          </button>
+          <button disabled={!agreed} onClick={onBegin}
+            style={{padding:"9px 28px",borderRadius:4,background:agreed?nta.btnSave:"#888",
+              color:"#fff",border:"none",fontFamily:"Arial",fontSize:12,fontWeight:700,
+              cursor:agreed?"pointer":"not-allowed"}}>
+            i'm ready
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NTAHeader({paper,user,timerSecs,nta,onExit}){
+  const warn=timerSecs!==null&&timerSecs<=900;
+  return(
+    <div style={{background:nta.header,color:"#fff",fontFamily:"Arial,sans-serif",flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.15)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:16}}>🦥</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700}}>sloth<span style={{color:"#f47920"}}>r</span></div>
+            <div style={{fontSize:10,opacity:.7}}>{paper?.exam} — {paper?.session} · {paper?.date}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          {timerSecs!==null&&(
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:9,opacity:.7,letterSpacing:".06em",textTransform:"uppercase",marginBottom:1}}>Time Remaining</div>
+              <div style={{fontSize:20,fontWeight:700,fontFamily:"'Courier New',monospace",
+                color:warn?"#ff6b6b":"#fff",letterSpacing:".06em",
+                animation:warn&&timerSecs%2===0?"ntaPulse .8s ease":undefined}}>
+                {fmtTime(timerSecs)}
+              </div>
+            </div>
+          )}
+          {onExit&&(
+            <button onClick={onExit}
+              style={{padding:"6px 12px",borderRadius:4,background:"rgba(255,255,255,.15)",color:"#fff",
+                border:"1px solid rgba(255,255,255,.3)",fontFamily:"Arial",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+              ✕ Exit
+            </button>
+          )}
+        </div>
+      </div>
+      {/* Candidate bar */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"5px 14px",background:"rgba(0,0,0,.2)",fontSize:11}}>
+        <div style={{width:24,height:24,borderRadius:"50%",background:"rgba(255,255,255,.2)",
+          display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>
+          {(user?.name||"S")[0].toUpperCase()}
+        </div>
+        <div>
+          <span style={{fontWeight:600}}>{user?.name||"Student"}</span>
+          <span style={{opacity:.6,marginLeft:8,fontSize:10}}>{user?.email||""}</span>
+        </div>
+        <div style={{marginLeft:"auto",fontSize:10,opacity:.75}}>
+          {paper?.shift} · 54 Questions · 180 Marks
+        </div>
+      </div>
+      <style>{`@keyframes ntaPulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+    </div>
+  );
+}
+
+function ExamInterface({paper,user,questions,onSubmit,onExit,nta}){
+  const TOTAL_SECS=paper.duration*60;
+  const [timerSecs,setTimerSecs]=useState(TOTAL_SECS);
+  const timerRef=useRef(null);
+  const [section,setSection]=useState("Physics");
+  const [qIndex,setQIndex]=useState(0);
+  const [showPalette,setShowPalette]=useState(()=>typeof window!=="undefined"&&window.innerWidth>600);
+  const [showSubmitModal,setShowSubmitModal]=useState(false);
+  const [showExitModal,setShowExitModal]=useState(false);
+  const [numericalInput,setNumericalInput]=useState("");
+  const [qState,setQState]=useState(()=>{
+    const s={};
+    questions.forEach(q=>{s[q.id]={visited:false,answer:null,markedReview:false};});
+    return s;
+  });
+
+  useEffect(()=>{
+    timerRef.current=setInterval(()=>{
+      setTimerSecs(t=>{
+        if(t<=1){clearInterval(timerRef.current);onSubmit(qState);return 0;}
+        return t-1;
+      });
+    },1000);
+    return()=>clearInterval(timerRef.current);
+  },[]);
+
+  const sectionQs=questions.filter(q=>q.section===section);
+  const currentQ=sectionQs[qIndex];
+  const currentState=currentQ?qState[currentQ.id]:null;
+
+  useEffect(()=>{
+    if(!currentQ)return;
+    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],visited:true}}));
+    setNumericalInput(qState[currentQ.id]?.answer||"");
+  },[currentQ?.id]);
+
+  function setAnswer(ans){
+    if(!currentQ)return;
+    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],answer:ans,visited:true}}));
+  }
+  function clearResponse(){
+    if(!currentQ)return;
+    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],answer:null}}));
+    setNumericalInput("");
+  }
+  function markForReview(){
+    if(!currentQ)return;
+    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],markedReview:true,visited:true}}));
+    goNext();
+  }
+  function saveAndNext(){
+    if(currentQ?.type==="numerical")setAnswer(numericalInput||null);
+    goNext();
+  }
+  function goNext(){
+    if(qIndex<sectionQs.length-1)setQIndex(q=>q+1);
+    else{const ns=SECTIONS[(SECTIONS.indexOf(section)+1)%SECTIONS.length];setSection(ns);setQIndex(0);}
+  }
+  function goPrev(){if(qIndex>0)setQIndex(q=>q-1);}
+  function jumpTo(sec,idx){setSection(sec);setQIndex(idx);}
+
+  const stats=Object.values(qState);
+  const answered=stats.filter(s=>s.answer!==null).length;
+  const notAnswered=stats.filter(s=>s.visited&&s.answer===null&&!s.markedReview).length;
+  const marked=stats.filter(s=>s.markedReview&&s.answer===null).length;
+  const answeredMarked=stats.filter(s=>s.markedReview&&s.answer!==null).length;
+  const notVisited=stats.filter(s=>!s.visited).length;
+
+  return(
+    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",display:"flex",flexDirection:"column",minHeight:"80vh"}}>
+      <style>{`
+        .nta-btn{padding:7px 16px;border-radius:3px;border:none;font-family:Arial,sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.02em;transition:opacity .1s;}
+        .nta-btn:hover{opacity:.85;}
+        .nta-btn:disabled{opacity:.4;cursor:not-allowed;}
+        .nta-num-input{width:110px;padding:7px 10px;border:2px solid ${nta.border2};border-radius:3px;font-size:13px;font-family:Arial;text-align:center;outline:none;background:${nta.card};color:${nta.text};}
+        .nta-num-input:focus{border-color:${nta.header};}
+        .pal-btn{width:34px;height:34px;border-radius:3px;border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .1s;font-family:Arial;}
+        .pal-btn:hover{transform:scale(1.1);}
+        .nta-opt{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1.5px solid ${nta.border};border-radius:3px;cursor:pointer;margin-bottom:7px;transition:all .1s;background:${nta.card};}
+        .nta-opt:hover{border-color:${nta.header};background:${nta.hover};}
+        .nta-opt.sel{border-color:${nta.header};background:${nta.hover};}
+        .sec-tab-nta{padding:7px 18px;border:none;border-bottom:3px solid transparent;background:transparent;font-family:Arial;font-size:12px;font-weight:700;cursor:pointer;color:rgba(255,255,255,.7);transition:all .15s;}
+        .sec-tab-nta.active{border-bottom-color:#fff;color:#fff;background:rgba(255,255,255,.15);}
+        .sec-tab-nta:hover{color:#fff;background:rgba(255,255,255,.1);}
+      `}</style>
+
+      <NTAHeader paper={paper} user={user} timerSecs={timerSecs} nta={nta} onExit={()=>setShowExitModal(true)}/>
+
+      {/* Section tabs — NTA orange bar */}
+      <div style={{background:nta.subBar,display:"flex",alignItems:"center",flexShrink:0}}>
+        {SECTIONS.map(sec=>{
+          const secAns=questions.filter(q=>q.section===sec&&qState[q.id]?.answer!==null).length;
+          const secTotal=questions.filter(q=>q.section===sec).length;
+          return(
+            <button key={sec} className={`sec-tab-nta${section===sec?" active":""}`}
+              onClick={()=>{setSection(sec);setQIndex(0);}}>
+              {sec} <span style={{fontSize:10,opacity:.8}}>({secAns}/{secTotal})</span>
+            </button>
+          );
+        })}
+        <button onClick={()=>setShowPalette(p=>!p)}
+          style={{marginLeft:"auto",padding:"7px 14px",background:"rgba(0,0,0,.2)",border:"none",
+            color:"#fff",fontFamily:"Arial",fontSize:11,cursor:"pointer",fontWeight:700}}>
+          {showPalette?"hide":"show"}
+        </button>
+      </div>
+
+      {/* Main 2-col layout */}
+      <div style={{display:"flex",flex:1,overflow:"hidden",minHeight:0}}>
+
+        {/* ── Question area ── */}
+        <div style={{flex:1,overflow:"auto",padding:"14px 18px"}}>
+          {currentQ&&(
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontWeight:700,color:nta.header,fontSize:13}}>
+                  Question {currentQ.qno}
+                  <span style={{marginLeft:8,fontSize:10.5,fontWeight:400,color:nta.text3,
+                    padding:"2px 7px",background:nta.hover,borderRadius:3,border:`1px solid ${nta.border}`}}>
+                    {currentQ.type==="mcq"?"MCQ · +4 / −1":"Integer · +4 / 0"}
+                  </span>
+                </div>
+                <span style={{fontSize:11,color:SEC_COLOR[section],fontWeight:600}}>{section}</span>
+              </div>
+
+              {/* Question box */}
+              <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:3,
+                padding:"16px 18px",marginBottom:14,lineHeight:1.85,color:nta.text,fontSize:13.5,fontFamily:"serif"}}>
+                <MathText t={currentQ.text}/>
+              </div>
+
+              {/* MCQ options */}
+              {currentQ.type==="mcq"&&currentQ.options&&(
+                <div style={{marginBottom:14}}>
+                  {Object.entries(currentQ.options).map(([opt,text])=>(
+                    <div key={opt} className={`nta-opt${currentState?.answer===opt?" sel":""}`}
+                      onClick={()=>setAnswer(opt)}>
+                      <div style={{width:26,height:26,borderRadius:"50%",
+                        background:currentState?.answer===opt?nta.header:nta.hover,
+                        color:currentState?.answer===opt?"#fff":nta.text2,
+                        border:`1.5px solid ${currentState?.answer===opt?nta.header:nta.border2}`,
+                        display:"flex",alignItems:"center",justifyContent:"center",
+                        fontWeight:700,fontSize:12,flexShrink:0}}>
+                        {opt}
+                      </div>
+                      <span style={{fontSize:13,color:nta.text,lineHeight:1.5,fontFamily:"serif"}}><MathText t={text}/></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Numerical input */}
+              {currentQ.type==="numerical"&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:12,color:nta.text2,marginBottom:7}}>Enter your integer answer:</div>
+                  <input className="nta-num-input" type="number" placeholder="—"
+                    value={numericalInput}
+                    onChange={e=>{setNumericalInput(e.target.value);setAnswer(e.target.value||null);}}/>
+                </div>
+              )}
+
+              {/* Action buttons — exact NTA layout */}
+              <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:10,paddingTop:10,borderTop:`1px solid ${nta.border}`}}>
+                <button className="nta-btn" onClick={markForReview}
+                  style={{background:nta.btnMark,color:"#fff"}}>
+                  flag & next
+                </button>
+                <button className="nta-btn" onClick={clearResponse}
+                  style={{background:nta.btnSecondary,color:nta.btnClear,border:`1.5px solid ${nta.btnClear}`}}>
+                  Clear Response
+                </button>
+                <button className="nta-btn" onClick={saveAndNext}
+                  style={{background:nta.btnSave,color:"#fff",marginLeft:"auto"}}>
+                  save & next
+                </button>
+              </div>
+
+              {/* Prev / Next / Submit */}
+              <div style={{display:"flex",gap:7}}>
+                <button className="nta-btn" onClick={goPrev}
+                  disabled={qIndex===0&&section===SECTIONS[0]}
+                  style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`}}>
+                  ◀ Previous
+                </button>
+                <button className="nta-btn" onClick={goNext}
+                  style={{background:nta.btnNext,color:"#fff"}}>
+                  next
+                </button>
+                <button className="nta-btn" onClick={()=>setShowSubmitModal(true)}
+                  style={{marginLeft:"auto",background:nta.btnClear,color:"#fff",padding:"7px 20px"}}>
+                  Submit Paper
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Question palette ── */}
+        {showPalette&&(
+          <div style={{width:240,background:nta.card,borderLeft:`1px solid ${nta.border}`,display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
+            {/* Legend summary */}
+            <div style={{padding:"9px 11px",borderBottom:`1px solid ${nta.border}`,background:nta.hover}}>
+              <div style={{fontWeight:700,fontSize:11.5,color:nta.text,marginBottom:7}}>Question Palette</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:10}}>
+                {[
+                  {c:nta.answered,     l:"Answered",    v:answered},
+                  {c:nta.notAnswered,  l:"Not Answered",v:notAnswered},
+                  {c:nta.markedReview, l:"For Review",  v:marked},
+                  {c:nta.answeredMarked,l:"Ans+Review", v:answeredMarked},
+                  {c:nta.notVisited,   l:"Not Visited", v:notVisited},
+                ].map(s=>(
+                  <div key={s.l} style={{display:"flex",alignItems:"center",gap:5}}>
+                    <div style={{width:18,height:18,borderRadius:3,background:s.c,flexShrink:0,
+                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:"#fff"}}>{s.v}</div>
+                    <span style={{color:nta.text3,fontSize:9.5}}>{s.l}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Palette grid per section */}
+            <div style={{flex:1,overflow:"auto",padding:"9px 11px"}}>
+              {SECTIONS.map(sec=>{
+                const secQs=questions.filter(q=>q.section===sec);
+                return(
+                  <div key={sec} style={{marginBottom:14}}>
+                    <div style={{fontSize:10,fontWeight:700,color:SEC_COLOR[sec],marginBottom:7,
+                      textTransform:"uppercase",letterSpacing:".05em"}}>{sec}</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                      {secQs.map((q,idx)=>{
+                        const st=qState[q.id];
+                        const status=getStatus(st);
+                        const isActive=section===sec&&qIndex===idx;
+                        return(
+                          <button key={q.id} className="pal-btn"
+                            onClick={()=>jumpTo(sec,idx)}
+                            style={{
+                              background:statusColor(status,nta),
+                              outline:isActive?`2.5px solid ${nta.text}`:"none",
+                              outlineOffset:"2px",
+                              position:"relative",
+                            }}>
+                            {q.qno}
+                            {status==="answeredMarked"&&(
+                              <div style={{position:"absolute",top:2,right:2,width:5,height:5,borderRadius:"50%",background:"#fff"}}/>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Submit modal */}
+      {showSubmitModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999}}>
+          <div style={{background:nta.card,borderRadius:3,padding:"26px 30px",maxWidth:420,width:"90%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+            <div style={{fontSize:32,marginBottom:10}}>⚠️</div>
+            <div style={{fontSize:17,fontWeight:700,color:nta.text,marginBottom:8}}>Submit Paper?</div>
+            <div style={{fontSize:12.5,color:nta.text2,marginBottom:18,lineHeight:1.75}}>
+              Answered: <strong style={{color:nta.answered}}>{answered}</strong> ·{" "}
+              Not answered: <strong style={{color:nta.notAnswered}}>{notAnswered}</strong> ·{" "}
+              Not visited: <strong style={{color:nta.notVisited}}>{notVisited}</strong><br/>
+              This action cannot be undone.
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+              <button onClick={()=>setShowSubmitModal(false)} className="nta-btn"
+                style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`,padding:"9px 22px"}}>Cancel</button>
+              <button onClick={()=>{clearInterval(timerRef.current);onSubmit(qState);}} className="nta-btn"
+                style={{background:nta.btnClear,color:"#fff",padding:"9px 26px",fontSize:13}}>Yes, Submit</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exit mid-exam modal */}
+      {showExitModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999}}>
+          <div style={{background:nta.card,borderRadius:3,padding:"26px 30px",maxWidth:400,width:"90%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
+            <div style={{fontSize:32,marginBottom:10}}>🚪</div>
+            <div style={{fontSize:17,fontWeight:700,color:nta.text,marginBottom:8}}>Exit the exam?</div>
+            <div style={{fontSize:12.5,color:nta.text2,marginBottom:18,lineHeight:1.75}}>
+              Your progress will be lost. This test will not be counted.
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+              <button onClick={()=>setShowExitModal(false)} className="nta-btn"
+                style={{background:nta.btnSave,color:"#fff",padding:"9px 22px"}}>stay</button>
+              <button onClick={()=>{clearInterval(timerRef.current);onExit();}} className="nta-btn"
+                style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`,padding:"9px 22px"}}>leave</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultScreen({paper,questions,qState,user,onRetry,onBack,nta,dark}){
+  const [activeTab,setActiveTab]=useState("overview"); // overview | chapters | key
+  const [keySection,setKeySection]=useState("Physics");
+  const [keyFilter,setKeyFilter]=useState("all"); // all | wrong | unattempted
+  const [expandedQ,setExpandedQ]=useState(null);
+  const [fullscreenQ,setFullscreenQ]=useState(null);
+
+  function calcScore(section=null){
+    const qs=section?questions.filter(q=>q.section===section):questions;
+    let correct=0,wrong=0,unattempted=0,marks=0;
+    qs.forEach(q=>{
+      const ans=qState[q.id]?.answer;
+      if(!ans){unattempted++;}
+      else if(ans===q.correct){correct++;marks+=4;}
+      else{wrong++;if(q.type==="mcq")marks-=1;}
+    });
+    return{correct,wrong,unattempted,marks,total:qs.length};
+  }
+
+  const overall=calcScore();
+  const secScores=SECTIONS.reduce((a,s)=>({...a,[s]:calcScore(s)}),{});
+  const pct=Math.max(0,Math.round((overall.marks/180)*100));
+  const scoreColor=pct>=60?nta.scoreGood:pct>=40?nta.scoreMid:nta.scoreBad;
+
+  // ── Chapter breakdown — group wrong answers by topic ─────────────────────
+  const chapterBreakdown=SECTIONS.reduce((acc,sec)=>{
+    const secQs=questions.filter(q=>q.section===sec);
+    const byTopic={};
+    secQs.forEach(q=>{
+      const topic=q.topic||"General";
+      if(!byTopic[topic]) byTopic[topic]={topic,section:sec,correct:0,wrong:0,unattempted:0,total:0,questions:[]};
+      const ans=qState[q.id]?.answer;
+      byTopic[topic].total++;
+      byTopic[topic].questions.push(q);
+      if(!ans) byTopic[topic].unattempted++;
+      else if(ans===q.correct) byTopic[topic].correct++;
+      else byTopic[topic].wrong++;
+    });
+    acc[sec]=Object.values(byTopic).sort((a,b)=>b.wrong-a.wrong);
+    return acc;
+  },{});
+
+  // Questions for answer key with filter
+  const keyQs=questions.filter(q=>{
+    if(q.section!==keySection) return false;
+    const ans=qState[q.id]?.answer;
+    if(keyFilter==="wrong") return ans!=null && ans!==q.correct;
+    if(keyFilter==="unattempted") return !ans;
+    return true;
+  });
+
+  const tabs=[
+    {id:"overview",label:"Score Overview"},
+    {id:"chapters",label:"Chapter Analysis"},
+    {id:"key",label:"Answer Key & Solutions"},
+  ];
+
+  return(
+    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
+      <NTAHeader paper={paper} user={user} timerSecs={null} nta={nta} onExit={onBack}/>
+
+      {/* ── Score banner — always visible ── */}
+      <div style={{background:nta.header,padding:"16px 24px",display:"flex",alignItems:"center",gap:28,flexWrap:"wrap"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:11,color:"rgba(255,255,255,.65)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:2}}>Total Score</div>
+          <div style={{fontSize:44,fontWeight:800,color:"#fff",lineHeight:1}}>{overall.marks}<span style={{fontSize:18,fontWeight:400,opacity:.6}}>/180</span></div>
+        </div>
+        <div style={{width:1,height:50,background:"rgba(255,255,255,.2)"}}/>
+        {[{v:overall.correct,l:"Correct",c:"#81c784"},{v:overall.wrong,l:"Wrong",c:"#e57373"},{v:overall.unattempted,l:"Skipped",c:"rgba(255,255,255,.5)"}].map(s=>(
+          <div key={s.l} style={{textAlign:"center"}}>
+            <div style={{fontSize:24,fontWeight:700,color:s.c}}>{s.v}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
+          </div>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={onRetry} className="nta-btn"
+            style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",padding:"8px 16px"}}>
+            try again
+          </button>
+          <button onClick={onBack} className="nta-btn"
+            style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",padding:"8px 16px"}}>
+            ← All Papers
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tab bar ── */}
+      <div style={{background:nta.subBar,display:"flex",borderBottom:`1px solid ${nta.border}`}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{padding:"10px 20px",border:"none",borderBottom:`3px solid ${activeTab===t.id?"#fff":"transparent"}`,
+              background:"transparent",color:activeTab===t.id?"#fff":"rgba(255,255,255,.6)",
+              fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .15s"}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px",boxSizing:"border-box",width:"100%"}}>
+
+        {/* ── TAB: SCORE OVERVIEW ── */}
+        {activeTab==="overview"&&(
+          <div>
+            {/* Section cards */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:20}}>
+              {SECTIONS.map(sec=>{
+                const s=secScores[sec];
+                const sp=Math.max(0,(s.marks/Math.max(s.total*4,1))*100);
+                const wrongQs=questions.filter(q=>q.section===sec&&qState[q.id]?.answer&&qState[q.id].answer!==q.correct);
+                return(
+                  <div key={sec} style={{background:nta.card,border:`1px solid ${nta.border}`,borderTop:`3px solid ${SEC_COLOR[sec]}`,borderRadius:3,padding:"16px"}}>
+                    <div style={{fontSize:10,fontWeight:700,color:SEC_COLOR[sec],textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{sec}</div>
+                    <div style={{fontSize:32,fontWeight:800,color:nta.text,lineHeight:1}}>{s.marks}</div>
+                    <div style={{fontSize:10,color:nta.text3,marginBottom:10}}>out of {s.total*4} marks</div>
+                    <div style={{height:3,background:nta.border,marginBottom:10}}>
+                      <div style={{height:"100%",width:`${sp}%`,background:SEC_COLOR[sec]}}/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:10}}>
+                      <span style={{color:nta.answered}}>✓ {s.correct} correct</span>
+                      <span style={{color:nta.notAnswered}}>✗ {s.wrong} wrong</span>
+                      <span style={{color:nta.text3}}>— {s.unattempted} skipped</span>
+                    </div>
+                    {wrongQs.length>0&&(
+                      <div style={{fontSize:10,color:nta.text3,borderTop:`1px solid ${nta.border}`,paddingTop:8}}>
+                        <div style={{fontWeight:700,marginBottom:4,color:nta.notAnswered}}>Chapters with errors:</div>
+                        {[...new Set(wrongQs.map(q=>q.topic||"General"))].slice(0,3).map(t=>(
+                          <div key={t} style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                            <span>{t}</span>
+                            <span style={{color:nta.notAnswered,fontWeight:700}}>
+                              {wrongQs.filter(q=>(q.topic||"General")===t).length} wrong
+                            </span>
+                          </div>
+                        ))}
+                        {[...new Set(wrongQs.map(q=>q.topic||"General"))].length>3&&(
+                          <div style={{color:nta.text3,marginTop:2}}>+{[...new Set(wrongQs.map(q=>q.topic||"General"))].length-3} more → see Chapter Analysis</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Marks breakdown */}
+            <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:3,padding:"16px 20px"}}>
+              <div style={{fontWeight:700,fontSize:12,color:nta.text,marginBottom:12,letterSpacing:".04em",textTransform:"uppercase"}}>Marks Breakdown</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,textAlign:"center"}}>
+                {[
+                  {v:`+${overall.correct*4}`,l:"From Correct",c:nta.answered},
+                  {v:`-${questions.filter(q=>qState[q.id]?.answer&&qState[q.id].answer!==q.correct&&q.type==="mcq").length}`,l:"Negative Marks",c:nta.notAnswered},
+                  {v:`${overall.marks}`,l:"Net Score",c:scoreColor},
+                  {v:`${pct}%`,l:"Percentile Est.",c:nta.text2},
+                ].map(s=>(
+                  <div key={s.l} style={{padding:"12px",background:nta.hover,borderRadius:3}}>
+                    <div style={{fontSize:22,fontWeight:800,color:s.c}}>{s.v}</div>
+                    <div style={{fontSize:10,color:nta.text3,marginTop:3}}>{s.l}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: CHAPTER ANALYSIS ── */}
+        {activeTab==="chapters"&&(
+          <div>
+            <div style={{fontSize:12,color:nta.text3,marginBottom:16,fontStyle:"italic"}}>
+              sorted by damage. fix the red ones first.
+            </div>
+            {SECTIONS.map(sec=>{
+              const topics=chapterBreakdown[sec]||[];
+              const hasErrors=topics.some(t=>t.wrong>0);
+              return(
+                <div key={sec} style={{marginBottom:20}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,paddingBottom:8,borderBottom:`2px solid ${SEC_COLOR[sec]}`}}>
+                    <div style={{fontSize:13,fontWeight:700,color:SEC_COLOR[sec]}}>{sec}</div>
+                    <div style={{fontSize:11,color:nta.text3}}>{secScores[sec].marks}/{secScores[sec].total*4} marks · {secScores[sec].wrong} wrong</div>
+                  </div>
+                  {!hasErrors&&(
+                    <div style={{fontSize:12,color:nta.answered,padding:"10px 0",fontStyle:"italic"}}>✓ No wrong answers in {sec}. clean.</div>
+                  )}
+                  {topics.filter(t=>t.wrong>0||t.unattempted>0).map(t=>{
+                    const pctRight=t.total?Math.round((t.correct/t.total)*100):0;
+                    const statusC=t.wrong>0?nta.notAnswered:nta.text3;
+                    return(
+                      <div key={t.topic} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",
+                        marginBottom:5,background:t.wrong>0?`${nta.notAnswered}0a`:nta.card,
+                        border:"1px solid "+(t.wrong>0?nta.notAnswered+"30":nta.border),borderRadius:3}}>
+                        <div style={{width:36,height:36,borderRadius:3,background:t.wrong>0?`${nta.notAnswered}15`:nta.hover,
+                          display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <span style={{fontSize:14,fontWeight:800,color:statusC}}>{t.wrong||"—"}</span>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12.5,fontWeight:600,color:nta.text,marginBottom:3}}>{t.topic}</div>
+                          <div style={{display:"flex",gap:10,fontSize:10.5}}>
+                            <span style={{color:nta.answered}}>✓ {t.correct} correct</span>
+                            {t.wrong>0&&<span style={{color:nta.notAnswered,fontWeight:700}}>✗ {t.wrong} wrong</span>}
+                            {t.unattempted>0&&<span style={{color:nta.text3}}>— {t.unattempted} skipped</span>}
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:16,fontWeight:700,color:pctRight>=70?nta.answered:pctRight>=40?nta.scoreMid:nta.notAnswered}}>{pctRight}%</div>
+                          <div style={{fontSize:9,color:nta.text3}}>accuracy</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {topics.filter(t=>t.wrong===0&&t.unattempted===0&&t.correct>0).map(t=>(
+                    <div key={t.topic} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 14px",
+                      marginBottom:3,opacity:.5}}>
+                      <span style={{fontSize:11,color:nta.answered}}>✓</span>
+                      <span style={{fontSize:11.5,color:nta.text2}}>{t.topic}</span>
+                      <span style={{fontSize:10.5,color:nta.answered,marginLeft:"auto"}}>{t.correct}/{t.total} correct</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── TAB: ANSWER KEY ── */}
+        {activeTab==="key"&&(
+          <div>
+            {/* Section + filter bar */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {SECTIONS.map(sec=>(
+                  <button key={sec} onClick={()=>setKeySection(sec)}
+                    style={{padding:"6px 14px",borderRadius:3,border:`1px solid ${keySection===sec?SEC_COLOR[sec]:nta.border}`,
+                      background:keySection===sec?`${SEC_COLOR[sec]}15`:"transparent",
+                      color:keySection===sec?SEC_COLOR[sec]:nta.text3,
+                      fontFamily:"Arial",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    {sec}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:4,marginLeft:"auto",flexWrap:"wrap"}}>
+                {[["all","All"],["wrong","Wrong Only"],["unattempted","Skipped"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setKeyFilter(v)}
+                    style={{padding:"5px 12px",borderRadius:3,border:`1px solid ${keyFilter===v?nta.header:nta.border}`,
+                      background:keyFilter===v?`${nta.header}15`:"transparent",
+                      color:keyFilter===v?nta.header:nta.text3,
+                      fontFamily:"Arial",fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {keyQs.length===0&&(
+              <div style={{textAlign:"center",padding:"32px",color:nta.text3,fontStyle:"italic"}}>
+                okay you're actually good. don't let it go to your head. nothing to fix.
+              </div>
+            )}
+            {keyQs.map(q=>{
+              const userAns=qState[q.id]?.answer;
+              const isCorrect=userAns===q.correct;
+              const attempted=userAns!=null;
+              const statusC=!attempted?nta.text3:isCorrect?nta.answered:nta.notAnswered;
+              const statusLabel=!attempted?"skipped":isCorrect?"✓ correct":"✗ wrong";
+              const marksLabel=!attempted?"±0":isCorrect?"+4":q.type==="mcq"?"−1":"±0";
+              return(
+                <div key={q.id}
+                  onClick={()=>setFullscreenQ(q.id)}
+                  style={{marginBottom:6,border:`1px solid ${nta.border}`,borderLeft:`4px solid ${statusC}`,
+                    borderRadius:3,background:nta.card,cursor:"pointer",transition:"all .12s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=dark?"rgba(255,255,255,.03)":"rgba(0,0,0,.015)";e.currentTarget.style.borderColor=statusC+"66";}}
+                  onMouseLeave={e=>{e.currentTarget.style.background=nta.card;e.currentTarget.style.borderColor=nta.border;}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:nta.text3,flexShrink:0,width:26,textAlign:"right"}}>Q{q.qno}</span>
+                    <span style={{flex:1,fontSize:12.5,color:nta.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{q.text}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                      {q.topic&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:`${SEC_COLOR[q.section]}18`,color:SEC_COLOR[q.section],fontWeight:700,whiteSpace:"nowrap"}}>{q.topic}</span>}
+                      <span style={{fontSize:10,fontWeight:700,color:"#fff",background:statusC,padding:"2px 8px",borderRadius:3,whiteSpace:"nowrap"}}>{marksLabel}</span>
+                      <span style={{fontSize:10.5,color:statusC,fontWeight:600,whiteSpace:"nowrap",minWidth:64,textAlign:"right"}}>{statusLabel}</span>
+                      <span style={{fontSize:11,color:nta.text3,opacity:.4}}>↗</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── FULLSCREEN QUESTION MODAL ── */}
+        {(()=>{
+          if(!fullscreenQ)return null;
+          const q=questions.find(x=>x.id===fullscreenQ);
+          if(!q)return null;
+          const userAns=qState[q.id]?.answer;
+          const isCorrect=userAns===q.correct;
+          const attempted=userAns!=null;
+          const currentIdx=keyQs.findIndex(x=>x.id===fullscreenQ);
+          const goPrev=()=>{if(currentIdx>0)setFullscreenQ(keyQs[currentIdx-1].id);};
+          const goNext=()=>{if(currentIdx<keyQs.length-1)setFullscreenQ(keyQs[currentIdx+1].id);};
+          const statusC=!attempted?nta.text3:isCorrect?nta.answered:nta.notAnswered;
+          const bgC=dark?"#0e0d0b":"#f7f4ee";
+          return(
+            <div style={{position:"fixed",inset:0,zIndex:200,background:bgC,display:"flex",flexDirection:"column",overflowY:"auto"}}>
+              {/* ── Sticky header ── */}
+              <div style={{position:"sticky",top:0,zIndex:10,background:bgC,borderBottom:`1px solid ${nta.border}`,
+                display:"flex",alignItems:"center",gap:10,padding:"11px 20px",flexShrink:0,flexWrap:"wrap"}}>
+                <button onClick={()=>setFullscreenQ(null)}
+                  style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 14px",
+                    color:nta.text3,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"Arial",flexShrink:0}}>
+                  ← Back
+                </button>
+                <div style={{flex:1,display:"flex",alignItems:"center",gap:7,overflow:"hidden",flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:nta.text3,flexShrink:0}}>Q{q.qno}</span>
+                  {q.topic&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:`${SEC_COLOR[q.section]}18`,color:SEC_COLOR[q.section],fontWeight:700,flexShrink:0}}>{q.topic}</span>}
+                  <span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:nta.hover,color:nta.text3,fontWeight:600,flexShrink:0}}>{q.section}</span>
+                  <span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:nta.hover,color:nta.text3,fontWeight:600,flexShrink:0}}>{q.type==="mcq"?"MCQ":"Integer"}</span>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                  <button onClick={goPrev} disabled={currentIdx<=0}
+                    style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 12px",
+                      color:currentIdx<=0?nta.text3+"33":nta.text2,cursor:currentIdx<=0?"default":"pointer",fontSize:12,fontFamily:"Arial",transition:"all .1s"}}>
+                    ← Prev
+                  </button>
+                  <span style={{fontSize:11,color:nta.text3,minWidth:40,textAlign:"center"}}>{currentIdx+1}/{keyQs.length}</span>
+                  <button onClick={goNext} disabled={currentIdx>=keyQs.length-1}
+                    style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 12px",
+                      color:currentIdx>=keyQs.length-1?nta.text3+"33":nta.text2,cursor:currentIdx>=keyQs.length-1?"default":"pointer",fontSize:12,fontFamily:"Arial",transition:"all .1s"}}>
+                    Next →
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Body ── */}
+              <div style={{maxWidth:760,width:"100%",margin:"0 auto",padding:"32px 20px 80px",flex:1,boxSizing:"border-box"}}>
+
+                {/* Status banner */}
+                <div style={{padding:"12px 18px",borderRadius:4,marginBottom:28,
+                  background:!attempted?`${nta.text3}0e`:isCorrect?`${nta.answered}12`:`${nta.notAnswered}12`,
+                  border:`1.5px solid ${!attempted?nta.text3+"30":isCorrect?nta.answered+"60":nta.notAnswered+"60"}`,
+                  display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  <span style={{fontSize:22,lineHeight:1}}>{!attempted?"—":isCorrect?"✓":"✗"}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:statusC,flex:1}}>
+                    {!attempted?"skipped."
+                      :isCorrect?"correct."
+                      :"wrong."+(q.type==="mcq"?" −1 mark.":" no penalty.")}
+                  </span>
+                  {attempted&&!isCorrect&&(
+                    <div style={{display:"flex",gap:16,fontSize:12,flexShrink:0}}>
+                      <span style={{color:nta.text3}}>you marked: <strong style={{color:nta.notAnswered}}>{userAns}</strong></span>
+                      <span style={{color:nta.text3}}>correct: <strong style={{color:nta.answered}}>{q.correct}</strong></span>
+                    </div>
+                  )}
+                  {!attempted&&q.correct&&(
+                    <span style={{fontSize:12,color:nta.text3,flexShrink:0}}>answer: <strong style={{color:nta.answered}}>{q.correct}</strong></span>
+                  )}
+                </div>
+
+                {/* Question text */}
+                <div style={{fontSize:16,color:nta.text,lineHeight:2.1,fontWeight:400,marginBottom:28,letterSpacing:"-.01em",fontFamily:"serif"}}>
+                  <MathText t={q.text}/>
+                </div>
+
+                {/* MCQ options */}
+                {q.type==="mcq"&&q.options&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:36}}>
+                    {Object.entries(q.options).map(([key,val])=>{
+                      const isCorrectOpt=key===q.correct;
+                      const isUserOpt=key===userAns;
+                      let bdr=`1.5px solid ${nta.border}`,optBg="transparent",textC=nta.text2,keyBg="transparent",keyC=nta.text3;
+                      if(isCorrectOpt){bdr=`1.5px solid ${nta.answered}`;optBg=`${nta.answered}10`;textC=nta.answered;keyBg=nta.answered;keyC="#fff";}
+                      if(isUserOpt&&!isCorrectOpt){bdr=`1.5px solid ${nta.notAnswered}`;optBg=`${nta.notAnswered}10`;textC=nta.notAnswered;keyBg=nta.notAnswered;keyC="#fff";}
+                      return(
+                        <div key={key} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"14px 16px",borderRadius:4,border:bdr,background:optBg,transition:"none"}}>
+                          <div style={{width:32,height:32,borderRadius:4,background:keyBg,
+                            border:`1.5px solid ${isCorrectOpt?nta.answered:isUserOpt&&!isCorrectOpt?nta.notAnswered:nta.border}`,
+                            display:"flex",alignItems:"center",justifyContent:"center",
+                            fontSize:13,fontWeight:700,color:keyC,flexShrink:0,marginTop:2}}>{key}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:14,color:textC,lineHeight:1.8,fontFamily:"serif"}}><MathText t={val}/></div>
+                            {isCorrectOpt&&<div style={{fontSize:10,color:nta.answered,fontWeight:700,marginTop:5,letterSpacing:".05em",textTransform:"uppercase"}}>correct answer</div>}
+                            {isUserOpt&&!isCorrectOpt&&<div style={{fontSize:10,color:nta.notAnswered,fontWeight:700,marginTop:5,letterSpacing:".05em",textTransform:"uppercase"}}>your answer</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Integer answer */}
+                {q.type==="numerical"&&(
+                  <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:36}}>
+                    <div style={{padding:"14px 24px",borderRadius:4,border:`1.5px solid ${nta.answered}`,background:`${nta.answered}10`,minWidth:120}}>
+                      <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:nta.text3,marginBottom:6}}>Correct</div>
+                      <div style={{fontSize:24,fontWeight:700,color:nta.answered,fontVariantNumeric:"tabular-nums"}}>{q.correct}</div>
+                    </div>
+                    {attempted&&!isCorrect&&(
+                      <div style={{padding:"14px 24px",borderRadius:4,border:`1.5px solid ${nta.notAnswered}`,background:`${nta.notAnswered}10`,minWidth:120}}>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:nta.text3,marginBottom:6}}>You Entered</div>
+                        <div style={{fontSize:24,fontWeight:700,color:nta.notAnswered,fontVariantNumeric:"tabular-nums"}}>{userAns}</div>
+                      </div>
+                    )}
+                    {!attempted&&<div style={{fontSize:13,color:nta.text3,fontStyle:"italic",alignSelf:"center"}}>you didn't attempt this.</div>}
+                  </div>
+                )}
+
+                {/* Divider */}
+                <div style={{height:1,background:nta.border,marginBottom:28}}/>
+
+                {/* Solution block */}
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:nta.text3,marginBottom:16}}>Solution</div>
+                  {q.solution?(
+                    <div style={{fontSize:14,color:nta.text2,lineHeight:2.1,whiteSpace:"pre-wrap",
+                      background:nta.hover,padding:"22px 24px",borderRadius:4,
+                      borderLeft:`4px solid ${nta.header}`}}>
+                      {q.solution.split("\n").map((line,i)=><div key={i}><MathText t={line}/></div>)}
+                    </div>
+                  ):(
+                    <div style={{padding:"24px",borderRadius:4,border:`1px dashed ${nta.border}`,textAlign:"center",background:nta.hover}}>
+                      <div style={{fontSize:24,marginBottom:10,opacity:.4}}>📝</div>
+                      <div style={{fontSize:13,color:nta.text3,marginBottom:4}}>no solution yet.</div>
+                      <div style={{fontSize:11,color:nta.text3,opacity:.6}}>add it in the admin panel.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+function NTAMode({user,dark,onExit,onTestComplete,completedTests,onStoreTest}){
+  const nta=getNTA(dark);
+  const [screen,setScreen]=useState("list");
+  const [selectedPaper,setSelectedPaper]=useState(null);
+  const [finalQState,setFinalQState]=useState(null);
+  const [questions,setQuestions]=useState([]);
+  const [qLoading,setQLoading]=useState(false);
+  const [qError,setQError]=useState(null);
+
+  async function fetchQuestions(paperId){
+    setQLoading(true); setQError(null); setQuestions([]);
+    try {
+      // paperId e.g. "adv-2024-p1" — matches slug prefix in Supabase
+      // We derive year + paper from the id
+      const parts = paperId.split("-"); // ["adv","2024","p1"]
+      const year  = parseInt(parts[1]);
+      const paper = parts[2].toUpperCase(); // "P1" or "P2"
+      const shift = paper==="P1"?"Morning":"Evening";
+
+      const params = [
+        "select=*",
+        `year=eq.${year}`,
+        `shift=eq.${shift}`,
+        "exam=eq.JEE%20Advanced",
+        "is_active=eq.true",
+        "is_verified=eq.true",
+        "order=qno.asc",
+      ].join("&");
+      const r = await fetch(`${SB_URL}/rest/v1/questions?${params}`, {
+        headers:{"apikey":SB_ANON,"Authorization":"Bearer "+SB_ANON}
+      });
+      if(!r.ok) throw new Error(await r.text());
+      const raw = await r.json();
+
+      // Map Supabase columns → NTA question shape
+      const mapped = raw.map(q=>({
+        id:       q.id,
+        section:  q.subject,           // Physics / Chemistry / Mathematics
+        qno:      q.qno || 1,
+        type:     q.question_type==="SCQ"?"mcq":
+                  q.question_type==="MSQ"?"msq":
+                  q.question_type==="Integer"||q.question_type==="Decimal"?"numerical":"mcq",
+        text:     q.question_text,
+        options:  q.option_a?{A:q.option_a,B:q.option_b,C:q.option_c,D:q.option_d}:null,
+        correct:  q.correct,
+        solution: q.solution,
+        topic:    q.topic,
+        difficulty: q.difficulty,
+        diagram_url: q.diagram_url||null,
+        answer_type: q.answer_type||"text",
+        partial_marks: q.partial_marks||null,
+      }));
+
+      if(mapped.length===0) setQError("No questions found for this paper yet. Add them in the admin panel.");
+      else setQuestions(mapped);
+    } catch(e){ setQError("Failed to load questions: "+e.message); }
+    setQLoading(false);
+  }
+
+  function handleStart(p){
+    setSelectedPaper(p);
+    fetchQuestions(p.id);
+    setScreen("instructions");
+  }
+  function handleBegin(){setScreen("exam");}
+  function handleSubmit(qs){
+    setFinalQState(qs);
+    setScreen("result");
+    // Store completed test for later review
+    if(onStoreTest && selectedPaper){
+      onStoreTest(selectedPaper.id, {qState:qs, questions, date:new Date().toISOString().slice(0,10)});
+    }
+    // ── Calculate result and bubble up to App ──────────────────────────────
+    if(onTestComplete && selectedPaper){
+      const secScores={};
+      let totalCorrect=0, totalWrong=0;
+      ["Physics","Chemistry","Mathematics"].forEach(sec=>{
+        const secQs=questions.filter(q=>q.section===sec);
+        let correct=0,wrong=0,marks=0;
+        secQs.forEach(q=>{
+          const ans=qs[q.id]?.answer;
+          if(!ans){}
+          else if(ans===q.correct){correct++;marks+=4;totalCorrect++;}
+          else{wrong++;totalWrong++;if(q.type==="mcq")marks-=1;}
+        });
+        secScores[sec]={correct,wrong,marks,outOf:secQs.length*4};
+      });
+      // Score out of 100 per section (for coach analysis compat)
+      const toHundred=(sec)=>Math.max(0,Math.round((secScores[sec].marks/Math.max(1,secScores[sec].outOf))*100));
+      onTestComplete({
+        paper: selectedPaper,
+        qState: qs,
+        questions,
+        secScores,
+        // mock-compatible shape for coach
+        mockEntry:{
+          id: Date.now(),
+          date: new Date().toISOString().slice(0,10),
+          name: `${selectedPaper.exam} — ${selectedPaper.session} (${selectedPaper.shift.split(" ")[0]})`,
+          physics: toHundred("Physics"),
+          chemistry: toHundred("Chemistry"),
+          math: toHundred("Mathematics"),
+          source: "slothr_practice",
+        },
+        // pyqHistory entries — one per answered question
+        pyqEntries: questions
+          .filter(q=>qs[q.id]?.answer!=null)
+          .map(q=>({
+            qid: q.id,
+            subject: q.section,
+            topic: q.topic||"General",
+            correct: qs[q.id].answer===q.correct,
+            date: new Date().toISOString().slice(0,10),
+            source: "nta_sim",
+          })),
+      });
+    }
+  }
+  function handleRetry(){setFinalQState(null);setScreen("instructions");}
+  function handleBack(){setSelectedPaper(null);setFinalQState(null);setScreen("list");}
+
+  if(screen==="list")         return <PaperList onStart={handleStart} onExit={onExit} nta={nta} completedTests={completedTests} onReview={(paper,result)=>{setSelectedPaper(paper);setFinalQState(result.qState);if(result.questions?.length)setQuestions(result.questions);setScreen("result");}}/>;
+  if(screen==="instructions"){
+    if(qLoading) return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:nta.bg}}>
+        <div style={{fontSize:22,animation:"pulse 1.2s infinite",color:nta.text1}}>loading questions...</div>
+        <div style={{fontSize:12,color:nta.text3}}>fetching from database</div>
+      </div>
+    );
+    if(qError) return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:nta.bg,padding:32,textAlign:"center"}}>
+        <div style={{fontSize:32}}>😶</div>
+        <div style={{fontSize:15,color:nta.text1,fontWeight:600}}>couldn't load questions</div>
+        <div style={{fontSize:13,color:nta.text3,maxWidth:400}}>{qError}</div>
+        <button onClick={()=>{fetchQuestions(selectedPaper.id);}} style={{padding:"10px 24px",background:nta.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,cursor:"pointer",marginTop:8}}>retry</button>
+        <button onClick={handleBack} style={{padding:"8px 20px",background:"transparent",color:nta.text3,border:`1px solid ${nta.border}`,borderRadius:8,fontSize:13,cursor:"pointer"}}>← back</button>
+      </div>
+    );
+    return <InstructionsScreen paper={selectedPaper} user={user} onBegin={handleBegin} onBack={handleBack} nta={nta}/>;
+  }
+  if(screen==="exam")         return <ExamInterface paper={selectedPaper} user={user} questions={questions} onSubmit={handleSubmit} onExit={handleBack} nta={nta}/>;
+  if(screen==="result")       return <ResultScreen paper={selectedPaper} user={user} questions={questions} qState={finalQState} onRetry={handleRetry} onBack={handleBack} nta={nta} dark={dark}/>;
+  return null;
+}
 
 
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SOCIAL TAB — Strava-style feed, follows, kudos, leaderboard, events, profiles
+// Uses raw fetch to Supabase REST (same pattern as the rest of the app)
+// ─────────────────────────────────────────────────────────────────────────────
 
+function sbFetch(SB_URL, SB_ANON, path, opts={}) {
+  return fetch(`${SB_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      "apikey": SB_ANON,
+      "Authorization": `Bearer ${SB_ANON}`,
+      "Content-Type": "application/json",
+      "Prefer": opts.prefer || "",
+      ...(opts.headers || {}),
+    },
+  });
+}
 
+// ── Avatar initials helper ──────────────────────────────────────────────────
+const AV_COLORS = ["#e8845c","#5eaa8a","#7b8ec8","#c47d96","#8a9e5c","#7b92c2"];
+function avColor(str) {
+  if (!str) return AV_COLORS[0];
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AV_COLORS[Math.abs(h) % AV_COLORS.length];
+}
+function initials(name) {
+  if (!name) return "?";
+  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+function socialTimeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+function fmtDurSec(s) {
+  if (!s) return "—";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m > 0 ? m + "m" : ""}` : `${m}m`;
+}
 
+// ── Small Avatar ─────────────────────────────────────────────────────────────
+function SAvatar({ name, avatarUrl, size = 32, d }) {
+  const bg = avColor(name);
+  const style = {
+    width: size, height: size, borderRadius: "50%",
+    background: bg, color: "#fff",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: Math.round(size * 0.38), fontWeight: 700, flexShrink: 0,
+    overflow: "hidden", border: `1.5px solid ${d.b}`,
+  };
+  if (avatarUrl) return <img src={avatarUrl} alt={name} style={{ ...style, objectFit: "cover" }} />;
+  return <div style={style}>{initials(name)}</div>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN SOCIAL TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialTab({ user, d, dark, SB_URL, SB_ANON, sessions, streak, fmt, today }) {
+  const [socialView, setSocialView] = useState("feed"); // feed | leaderboard | events | profile
+  const [viewingUserId, setViewingUserId] = useState(null);
+
+  function openProfile(uid) { setViewingUserId(uid); setSocialView("profile"); }
+  function goFeed() { setSocialView("feed"); setViewingUserId(null); }
+
+  const subviewStyle = { animation: "pin .18s ease" };
+
+  return (
+    <div className="pin" style={{ maxWidth: 860, margin: "0 auto" }}>
+      {/* Sub-nav */}
+      <div style={{
+        display: "flex", gap: 4, marginBottom: 22,
+        borderBottom: `1px solid ${d.b}`, paddingBottom: 0,
+      }}>
+        {[
+          { id: "feed", label: "Feed" },
+          { id: "leaderboard", label: "Leaderboard" },
+          { id: "events", label: "Events" },
+          { id: "profile", label: "My Profile" },
+        ].map(v => (
+          <button key={v.id}
+            onClick={() => { setSocialView(v.id); if (v.id !== "profile") setViewingUserId(null); }}
+            style={{
+              padding: "8px 14px", border: "none", background: "transparent",
+              fontFamily: "inherit", fontSize: 12, fontWeight: socialView === v.id ? 600 : 400,
+              color: socialView === v.id ? d.t : d.t3, cursor: "pointer",
+              borderBottom: `2px solid ${socialView === v.id ? d.a1 : "transparent"}`,
+              marginBottom: -1, transition: "color .12s",
+            }}>{v.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={subviewStyle}>
+        {socialView === "feed" && (
+          <SocialFeed user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+            sessions={sessions} streak={streak} fmt={fmt} today={today}
+            onOpenProfile={openProfile} />
+        )}
+        {socialView === "leaderboard" && (
+          <SocialLeaderboard user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+            onOpenProfile={openProfile} />
+        )}
+        {socialView === "events" && (
+          <SocialEvents user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} />
+        )}
+        {socialView === "profile" && (
+          <SocialProfile
+            user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+            viewingUserId={viewingUserId || user?.id}
+            isOwn={!viewingUserId || viewingUserId === user?.id}
+            onOpenProfile={openProfile} onBack={goFeed}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FEED
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialFeed({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, onOpenProfile }) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showLog, setShowLog] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [followingSet, setFollowingSet] = useState(new Set());
+
+  useEffect(() => { fetchFeed(); fetchSuggestions(); }, []);
+
+  async function fetchFeed() {
+    setLoading(true);
+    if (!user?.id) { setLoading(false); return; }
+    // Get follows
+    const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
+    const follows = fr.ok ? await fr.json() : [];
+    const followIds = follows.map(f => f.following_id);
+    const feedIds = [user.id, ...followIds];
+    setFollowingSet(new Set(followIds));
+
+    // Fetch posts
+    const ids = feedIds.map(id => `user_id=eq.${id}`).join(",");
+    const pr = await sbFetch(SB_URL, SB_ANON,
+      `social_posts?or=(${ids})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,avatar_url)&order=created_at.desc&limit=40`
+    );
+    const raw = pr.ok ? await pr.json() : [];
+    setPosts(raw.map(p => ({
+      ...p,
+      kudos_count: (p.social_kudos || []).length,
+      kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
+    })));
+    setLoading(false);
+  }
+
+  async function fetchSuggestions() {
+    if (!user?.id) return;
+    const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
+    const follows = fr.ok ? await fr.json() : [];
+    const followIds = follows.map(f => f.following_id);
+    const exclude = [user.id, ...followIds];
+    const excStr = exclude.map(id => `id.neq.${id}`).join(",");
+    const pr = await sbFetch(SB_URL, SB_ANON,
+      `profiles?and=(${excStr})&select=id,display_name,avatar_url&limit=4&order=created_at.desc`
+    );
+    setSuggestions(pr.ok ? await pr.json() : []);
+  }
+
+  async function toggleKudos(post) {
+    if (!user?.id || post.user_id === user.id) return;
+    if (post.kudos_given) {
+      await sbFetch(SB_URL, SB_ANON,
+        `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`,
+        { method: "DELETE" }
+      );
+    } else {
+      await sbFetch(SB_URL, SB_ANON, `social_kudos`, {
+        method: "POST",
+        body: JSON.stringify({ post_id: post.id, user_id: user.id }),
+        prefer: "return=minimal",
+      });
+    }
+    setPosts(prev => prev.map(p => p.id === post.id ? {
+      ...p,
+      kudos_given: !p.kudos_given,
+      kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
+    } : p));
+  }
+
+  async function followUser(uid) {
+    if (!user?.id) return;
+    await sbFetch(SB_URL, SB_ANON, `social_follows`, {
+      method: "POST",
+      body: JSON.stringify({ follower_id: user.id, following_id: uid }),
+      prefer: "return=minimal",
+    });
+    setFollowingSet(prev => new Set([...prev, uid]));
+    setSuggestions(prev => prev.filter(s => s.id !== uid));
+    fetchFeed();
+  }
+
+  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8" };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16, alignItems: "start" }}>
+      {/* Main feed column */}
+      <div>
+        {/* Log session card */}
+        <div className="card cp" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: showLog ? 14 : 0 }}>
+            <SAvatar name={user?.name} avatarUrl={user?.avatar} size={36} d={d} />
+            <button
+              onClick={() => setShowLog(v => !v)}
+              style={{
+                flex: 1, padding: "9px 14px", background: d.hover,
+                border: `1px solid ${d.b}`, borderRadius: 3,
+                color: d.t3, fontSize: 13, fontFamily: "inherit",
+                cursor: "pointer", textAlign: "left", transition: "all .12s",
+              }}
+            >
+              {showLog ? "▲ close" : "post a study session…"}
+            </button>
+          </div>
+          {showLog && (
+            <LogPostForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+              onPosted={() => { setShowLog(false); fetchFeed(); }} />
+          )}
+        </div>
+
+        {loading ? (
+          <div style={{ padding: "32px 0", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>
+            loading feed…
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="card cp" style={{ textAlign: "center", padding: "36px 24px" }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>👋</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: 6 }}>feed's empty.</div>
+            <div style={{ fontSize: 12, color: d.t3, lineHeight: 1.7 }}>
+              follow some students or post your first session to get started.
+            </div>
+          </div>
+        ) : posts.map(post => {
+          const profile = post.profiles || {};
+          const sc = SUB_C[post.subject] || d.a3;
+          return (
+            <div key={post.id} className="card" style={{ marginBottom: 10, overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
+                <button onClick={() => onOpenProfile(post.user_id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
+                  <SAvatar name={profile.display_name} avatarUrl={profile.avatar_url} size={34} d={d} />
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                    <button onClick={() => onOpenProfile(post.user_id)}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, color: d.t, fontFamily: "inherit", padding: 0 }}>
+                      {profile.display_name || "Student"}
+                    </button>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}18`, color: sc, letterSpacing: ".03em" }}>
+                      {post.subject}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: d.t3, marginTop: 1 }}>{socialTimeAgo(post.created_at)}</div>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div style={{ padding: "0 16px 12px" }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: post.notes ? 6 : 10 }}>
+                  {post.title}
+                </div>
+                {post.notes && (
+                  <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.7, marginBottom: 10 }}>{post.notes}</div>
+                )}
+
+                {/* Stats strip */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                  {[
+                    { label: "Duration", val: fmtDurSec(post.duration_seconds) },
+                    { label: "Problems", val: post.problems_solved ?? "—" },
+                    { label: "Accuracy", val: post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
+                  ].map(s => (
+                    <div key={s.label} style={{
+                      flex: 1, textAlign: "center", background: d.hover,
+                      borderRadius: 3, padding: "7px 4px",
+                      border: `1px solid ${d.b}`,
+                    }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: d.t, letterSpacing: "-.01em" }}>{s.val}</div>
+                      <div style={{ fontSize: 9, color: d.t4, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 2 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div style={{
+                padding: "9px 16px", borderTop: `1px solid ${d.b}`,
+                display: "flex", gap: 4, background: d.hover,
+              }}>
+                {[
+                  {
+                    label: `${post.kudos_count} Kudos`,
+                    icon: post.kudos_given ? "♥" : "♡",
+                    active: post.kudos_given,
+                    color: post.kudos_given ? "#d4604a" : d.t3,
+                    disabled: post.user_id === user?.id,
+                    onClick: () => toggleKudos(post),
+                  },
+                  { label: "Comment", icon: "◎", color: d.t3, onClick: () => {} },
+                  { label: "Share", icon: "↗", color: d.t3, style: { marginLeft: "auto" }, onClick: () => {} },
+                ].map(a => (
+                  <button key={a.label}
+                    onClick={a.onClick} disabled={a.disabled}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 5,
+                      padding: "5px 8px", border: "none", background: "transparent",
+                      fontFamily: "inherit", fontSize: 12, color: a.color,
+                      cursor: a.disabled ? "default" : "pointer", opacity: a.disabled ? 0.4 : 1,
+                      borderRadius: 3, transition: "background .1s",
+                      ...(a.style || {}),
+                    }}>
+                    <span style={{ fontSize: 14 }}>{a.icon}</span>{a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Right sidebar */}
+      <div>
+        {/* Your stats mini */}
+        <div className="card cp" style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 12 }}>your week</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {[
+              { label: "streak", val: `${streak}d` },
+              { label: "today", val: fmt(sessions.filter(s => s.date === today()).reduce((a, s) => a + s.duration, 0)) || "0m" },
+            ].map(s => (
+              <div key={s.label} style={{ textAlign: "center", padding: "8px", background: d.hover, borderRadius: 3 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: d.a1 }}>{s.val}</div>
+                <div style={{ fontSize: 9, color: d.t4, marginTop: 2, textTransform: "uppercase", letterSpacing: ".06em" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Suggestions */}
+        {suggestions.length > 0 && (
+          <div className="card cp" style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 10 }}>who to follow</div>
+            {suggestions.map(s => (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <button onClick={() => onOpenProfile(s.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                  <SAvatar name={s.display_name} avatarUrl={s.avatar_url} size={28} d={d} />
+                </button>
+                <button onClick={() => onOpenProfile(s.id)}
+                  style={{ flex: 1, background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 500, color: d.t, fontFamily: "inherit", padding: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.display_name || "Student"}
+                </button>
+                {!followingSet.has(s.id) && (
+                  <button onClick={() => followUser(s.id)}
+                    style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 2, background: `${d.a1}15`, color: d.a1, border: `1px solid ${d.a1}30`, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                    follow
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOG POST FORM
+// ─────────────────────────────────────────────────────────────────────────────
+function LogPostForm({ user, d, SB_URL, SB_ANON, onPosted }) {
+  const [form, setForm] = useState({ title: "", subject: "Physics", duration_seconds: "", problems_solved: "", accuracy_pct: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!form.title.trim() || !user?.id) return;
+    setSaving(true);
+    // Upsert profile first (display_name, avatar)
+    await sbFetch(SB_URL, SB_ANON, "profiles", {
+      method: "POST",
+      body: JSON.stringify({ id: user.id, display_name: user.name, avatar_url: user.avatar || null }),
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
+    await sbFetch(SB_URL, SB_ANON, "social_posts", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: JSON.stringify({
+        user_id: user.id,
+        title: form.title.trim(),
+        subject: form.subject,
+        duration_seconds: form.duration_seconds ? parseInt(form.duration_seconds) * 60 : null,
+        problems_solved: form.problems_solved ? parseInt(form.problems_solved) : null,
+        accuracy_pct: form.accuracy_pct ? parseInt(form.accuracy_pct) : null,
+        notes: form.notes.trim() || null,
+      }),
+    });
+    setSaving(false);
+    onPosted();
+  }
+
+  const inp = {
+    padding: "8px 11px", border: `1px solid ${d.b}`, borderRadius: 3,
+    background: d.inp, color: d.t, fontFamily: "inherit", fontSize: 13, outline: "none",
+  };
+  const sel = {
+    ...inp, cursor: "pointer",
+  };
+
+  return (
+    <div style={{ animation: "selIn .18s ease" }}>
+      <div style={{ marginBottom: 9 }}>
+        <input style={{ ...inp, width: "100%", boxSizing: "border-box" }}
+          placeholder="Session title — e.g. Electrostatics deep dive"
+          value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 7, marginBottom: 9 }}>
+        <select style={sel} value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}>
+          <option>Physics</option><option>Chemistry</option><option>Mathematics</option>
+        </select>
+        <input style={inp} type="number" min="1" placeholder="Duration (min)" value={form.duration_seconds}
+          onChange={e => setForm(f => ({ ...f, duration_seconds: e.target.value }))} />
+        <input style={inp} type="number" min="0" placeholder="Problems" value={form.problems_solved}
+          onChange={e => setForm(f => ({ ...f, problems_solved: e.target.value }))} />
+        <input style={inp} type="number" min="0" max="100" placeholder="Accuracy %" value={form.accuracy_pct}
+          onChange={e => setForm(f => ({ ...f, accuracy_pct: e.target.value }))} />
+      </div>
+      <div style={{ marginBottom: 9 }}>
+        <textarea style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical", minHeight: 60 }}
+          placeholder="Notes — what did you cover? any breakthroughs?"
+          value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+      </div>
+      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end" }}>
+        <button className="btn btn-d" onClick={submit} disabled={saving || !form.title.trim()}
+          style={{ padding: "8px 18px", fontSize: 12, opacity: saving || !form.title.trim() ? 0.4 : 1 }}>
+          {saving ? "posting…" : "post to feed"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEADERBOARD
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialLeaderboard({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
+  const [board, setBoard] = useState([]);
+  const [period, setPeriod] = useState("all");
+  const [subject, setSubject] = useState("All");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchBoard(); }, [period, subject]);
+
+  async function fetchBoard() {
+    setLoading(true);
+    let q = `social_posts?select=user_id,duration_seconds,subject,created_at,profiles:user_id(id,display_name,avatar_url)`;
+    if (subject !== "All") q += `&subject=eq.${subject}`;
+    if (period === "week") {
+      const since = new Date(); since.setDate(since.getDate() - 7);
+      q += `&created_at=gte.${since.toISOString()}`;
+    } else if (period === "month") {
+      const since = new Date(); since.setMonth(since.getMonth() - 1);
+      q += `&created_at=gte.${since.toISOString()}`;
+    }
+    q += `&limit=500`;
+    const r = await sbFetch(SB_URL, SB_ANON, q);
+    const data = r.ok ? await r.json() : [];
+
+    const map = {};
+    data.forEach(s => {
+      if (!s.profiles) return;
+      const uid = s.user_id;
+      if (!map[uid]) map[uid] = { profile: s.profiles, total_seconds: 0 };
+      map[uid].total_seconds += (s.duration_seconds || 0);
+    });
+
+    setBoard(Object.values(map).filter(e => e.profile).sort((a, b) => b.total_seconds - a.total_seconds).slice(0, 50));
+    setLoading(false);
+  }
+
+  const myRank = board.findIndex(e => e.profile.id === user?.id) + 1;
+  const MEDAL = ["🥇", "🥈", "🥉"];
+
+  const pillBtn = (label, active, onClick) => (
+    <button key={label} onClick={onClick} style={{
+      padding: "5px 12px", border: `1px solid ${active ? d.a1 : d.b}`,
+      borderRadius: 3, background: active ? `${d.a1}18` : "transparent",
+      color: active ? d.a1 : d.t3, fontFamily: "inherit", fontSize: 11,
+      fontWeight: active ? 700 : 400, cursor: "pointer", transition: "all .12s",
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 16, alignItems: "start" }}>
+      <div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+          {[["all", "All time"], ["week", "This week"], ["month", "This month"]].map(([v, l]) =>
+            pillBtn(l, period === v, () => setPeriod(v))
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 14 }}>
+          {["All", "Physics", "Chemistry", "Mathematics"].map(s =>
+            pillBtn(s, subject === s, () => setSubject(s))
+          )}
+        </div>
+
+        <div className="card">
+          {loading ? (
+            <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading…</div>
+          ) : board.length === 0 ? (
+            <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>no data yet. be the first.</div>
+          ) : board.map((entry, i) => {
+            const isMe = entry.profile.id === user?.id;
+            return (
+              <div key={entry.profile.id} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 16px",
+                borderBottom: `1px solid ${d.b}`,
+                background: isMe ? `${d.a1}08` : "transparent",
+              }}>
+                <span style={{ fontSize: i < 3 ? 18 : 13, fontWeight: 700, width: 28, textAlign: "center", color: i < 3 ? "inherit" : d.t3 }}>
+                  {i < 3 ? MEDAL[i] : i + 1}
+                </span>
+                <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
+                  <SAvatar name={entry.profile.display_name} avatarUrl={entry.profile.avatar_url} size={30} d={d} />
+                </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <button onClick={() => onOpenProfile(entry.profile.id)}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: isMe ? 700 : 500, color: isMe ? d.a1 : d.t, padding: 0 }}>
+                    {entry.profile.display_name}{isMe && <span style={{ fontSize: 9, marginLeft: 5, background: `${d.a1}18`, color: d.a1, padding: "1px 5px", borderRadius: 2 }}>you</span>}
+                  </button>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: d.a1 }}>{fmtDurSec(entry.total_seconds)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="card cp">
+          <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 10 }}>your rank</div>
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <div style={{ fontSize: 44, fontWeight: 700, color: d.a1, letterSpacing: "-.04em", lineHeight: 1 }}>
+              {myRank > 0 ? `#${myRank}` : "—"}
+            </div>
+            <div style={{ fontSize: 11, color: d.t3, marginTop: 4 }}>out of {board.length} students</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENTS
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialEvents({ user, d, SB_URL, SB_ANON }) {
+  const [events, setEvents] = useState([]);
+  const [registered, setRegistered] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchEvents(); }, []);
+
+  async function fetchEvents() {
+    setLoading(true);
+    const now = new Date().toISOString();
+    const er = await sbFetch(SB_URL, SB_ANON,
+      `study_events?ends_at=gte.${now}&select=*,study_event_registrations(count)&order=starts_at.asc`
+    );
+    const evts = er.ok ? await er.json() : [];
+    setEvents(evts);
+
+    if (user?.id) {
+      const rr = await sbFetch(SB_URL, SB_ANON,
+        `study_event_registrations?user_id=eq.${user.id}&select=event_id`
+      );
+      const regs = rr.ok ? await rr.json() : [];
+      setRegistered(new Set(regs.map(r => r.event_id)));
+    }
+    setLoading(false);
+  }
+
+  async function toggleReg(evtId) {
+    if (!user?.id) return;
+    if (registered.has(evtId)) {
+      await sbFetch(SB_URL, SB_ANON,
+        `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`,
+        { method: "DELETE" }
+      );
+      setRegistered(prev => { const s = new Set(prev); s.delete(evtId); return s; });
+    } else {
+      await sbFetch(SB_URL, SB_ANON, "study_event_registrations", {
+        method: "POST", prefer: "return=minimal",
+        body: JSON.stringify({ event_id: evtId, user_id: user.id }),
+      });
+      setRegistered(prev => new Set([...prev, evtId]));
+    }
+  }
+
+  const isLive = e => {
+    const now = new Date();
+    return new Date(e.starts_at) <= now && new Date(e.ends_at) >= now;
+  };
+
+  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8", "All Subjects": "#7b8ec8" };
+
+  return loading ? (
+    <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading…</div>
+  ) : events.length === 0 ? (
+    <div className="card cp" style={{ textAlign: "center", padding: "40px" }}>
+      <div style={{ fontSize: 28, marginBottom: 10 }}>🗓</div>
+      <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: 6 }}>no upcoming events.</div>
+      <div style={{ fontSize: 12, color: d.t3 }}>check back soon. events are added weekly.</div>
+    </div>
+  ) : (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {events.map(evt => {
+        const live = isLive(evt);
+        const sc = SUB_C[evt.subject] || d.a3;
+        const count = evt.study_event_registrations?.[0]?.count || 0;
+        const reg = registered.has(evt.id);
+
+        return (
+          <div key={evt.id} className="card" style={{ overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px 12px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: d.t }}>{evt.name}</span>
+                    {live
+                      ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 2, background: "#d4604a18", color: "#d4604a" }}>🔴 Live</span>
+                      : <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 2, background: `${d.a3}18`, color: d.a3 }}>Upcoming</span>}
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}15`, color: sc }}>{evt.subject}</span>
+                </div>
+              </div>
+
+              {evt.description && (
+                <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.7, marginBottom: 10 }}>{evt.description}</div>
+              )}
+
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+                {[
+                  { icon: "📅", val: new Date(evt.starts_at).toLocaleString("en-IN", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) },
+                  { icon: "⏱", val: (() => { const mins = Math.round((new Date(evt.ends_at) - new Date(evt.starts_at)) / 60000); const h = Math.floor(mins / 60); return h > 0 ? `${h}h ${mins % 60 > 0 ? (mins % 60) + "m" : ""}` : `${mins}m`; })() },
+                  { icon: "👥", val: `${count} registered` },
+                ].map((m, i) => (
+                  <span key={i} style={{ fontSize: 11, color: d.t3 }}>{m.icon} {m.val}</span>
+                ))}
+              </div>
+
+              <button onClick={() => toggleReg(evt.id)} style={{
+                padding: "9px 20px", border: "none", borderRadius: 3,
+                background: reg ? d.hover : live ? "#d4604a" : d.a1,
+                color: reg ? d.t3 : "#fff",
+                border: reg ? `1px solid ${d.b}` : "none",
+                fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+                cursor: "pointer", transition: "all .12s",
+              }}>
+                {reg ? (live ? "✓ Joined" : "✓ Registered — cancel?") : (live ? "Join live session" : "Register")}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILE PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenProfile, onBack }) {
+  const [profile, setProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [stats, setStats] = useState({ totalSecs: 0, followers: 0, following: 0 });
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => { loadProfile(); }, [viewingUserId]);
+
+  async function loadProfile() {
+    setLoading(true);
+    // Profile
+    const pr = await sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${viewingUserId}&select=*`);
+    const profiles = pr.ok ? await pr.json() : [];
+    let prof = profiles[0];
+    if (!prof && isOwn) {
+      // auto-create profile
+      await sbFetch(SB_URL, SB_ANON, "profiles", {
+        method: "POST", prefer: "return=minimal",
+        body: JSON.stringify({ id: user.id, display_name: user.name, avatar_url: user.avatar || null }),
+      });
+      prof = { id: user.id, display_name: user.name, avatar_url: user.avatar, bio: null, target_college: null };
+    }
+    setProfile(prof || { id: viewingUserId, display_name: "Student", avatar_url: null });
+
+    // Posts
+    const postr = await sbFetch(SB_URL, SB_ANON,
+      `social_posts?user_id=eq.${viewingUserId}&select=*,social_kudos(user_id)&order=created_at.desc&limit=20`
+    );
+    const rawPosts = postr.ok ? await postr.json() : [];
+    const totalSecs = rawPosts.reduce((a, p) => a + (p.duration_seconds || 0), 0);
+    setPosts(rawPosts.map(p => ({
+      ...p, profiles: prof || { display_name: user.name, avatar_url: user.avatar },
+      kudos_count: (p.social_kudos || []).length,
+      kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
+    })));
+
+    // Follower counts
+    const [folr, folgi] = await Promise.all([
+      sbFetch(SB_URL, SB_ANON, `social_follows?following_id=eq.${viewingUserId}&select=follower_id`),
+      sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${viewingUserId}&select=following_id`),
+    ]);
+    const followers = folr.ok ? (await folr.json()).length : 0;
+    const following = folgi.ok ? (await folgi.json()).length : 0;
+    setStats({ totalSecs, followers, following });
+
+    // Am I following?
+    if (!isOwn && user?.id) {
+      const cr = await sbFetch(SB_URL, SB_ANON,
+        `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUserId}&select=follower_id`
+      );
+      const chk = cr.ok ? await cr.json() : [];
+      setIsFollowing(chk.length > 0);
+    }
+
+    setLoading(false);
+  }
+
+  async function toggleFollow() {
+    if (!user?.id) return;
+    if (isFollowing) {
+      await sbFetch(SB_URL, SB_ANON,
+        `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUserId}`,
+        { method: "DELETE" }
+      );
+      setIsFollowing(false);
+      setStats(s => ({ ...s, followers: s.followers - 1 }));
+    } else {
+      await sbFetch(SB_URL, SB_ANON, "social_follows", {
+        method: "POST", prefer: "return=minimal",
+        body: JSON.stringify({ follower_id: user.id, following_id: viewingUserId }),
+      });
+      setIsFollowing(true);
+      setStats(s => ({ ...s, followers: s.followers + 1 }));
+    }
+  }
+
+  async function toggleKudos(post) {
+    if (!user?.id || post.user_id === user.id) return;
+    if (post.kudos_given) {
+      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method: "DELETE" });
+    } else {
+      await sbFetch(SB_URL, SB_ANON, "social_kudos", {
+        method: "POST", prefer: "return=minimal",
+        body: JSON.stringify({ post_id: post.id, user_id: user.id }),
+      });
+    }
+    setPosts(prev => prev.map(p => p.id === post.id ? {
+      ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
+    } : p));
+  }
+
+  if (loading) return <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading profile…</div>;
+
+  const bannerColor = avColor(profile?.display_name);
+  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8" };
+
+  return (
+    <div>
+      {/* Profile card */}
+      <div className="card" style={{ overflow: "hidden", marginBottom: 12 }}>
+        <div style={{ height: 70, background: `linear-gradient(135deg, ${bannerColor}60, ${bannerColor}20)` }} />
+        <div style={{ padding: "0 20px 18px" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: -20, marginBottom: 10 }}>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%",
+              background: bannerColor, color: "#fff",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 20, fontWeight: 700,
+              border: `3px solid ${d.card}`,
+              overflow: "hidden", flexShrink: 0,
+            }}>
+              {profile?.avatar_url
+                ? <img src={profile.avatar_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                : initials(profile?.display_name)}
+            </div>
+            {isOwn ? (
+              <button onClick={() => setEditing(v => !v)} style={{
+                padding: "6px 14px", border: `1px solid ${d.b}`, borderRadius: 3,
+                background: "transparent", color: d.t3, fontFamily: "inherit",
+                fontSize: 11, fontWeight: 600, cursor: "pointer",
+              }}>
+                {editing ? "cancel" : "edit profile"}
+              </button>
+            ) : (
+              <button onClick={toggleFollow} style={{
+                padding: "6px 16px", border: `1px solid ${isFollowing ? d.b : d.a1}`,
+                borderRadius: 3, background: isFollowing ? "transparent" : d.a1,
+                color: isFollowing ? d.t3 : "#fff",
+                fontFamily: "inherit", fontSize: 11, fontWeight: 700, cursor: "pointer",
+              }}>
+                {isFollowing ? "following" : "follow"}
+              </button>
+            )}
+          </div>
+
+          {editing ? (
+            <EditProfileInline user={user} profile={profile} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+              onSaved={(updated) => { setProfile(updated); setEditing(false); }} />
+          ) : (
+            <>
+              <div style={{ fontSize: 16, fontWeight: 700, color: d.t, marginBottom: 2 }}>{profile?.display_name || "Student"}</div>
+              {profile?.bio && <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.6, marginBottom: 5 }}>{profile.bio}</div>}
+              {profile?.target_college && <div style={{ fontSize: 12, color: d.t3, marginBottom: 10 }}>🎯 {profile.target_college}</div>}
+              <div style={{ display: "flex", gap: 20 }}>
+                {[
+                  { val: fmtDurSec(stats.totalSecs), lbl: "studied" },
+                  { val: stats.followers, lbl: "followers" },
+                  { val: stats.following, lbl: "following" },
+                  { val: posts.length, lbl: "sessions" },
+                ].map(s => (
+                  <div key={s.lbl}>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: d.t }}>{s.val}</div>
+                    <div style={{ fontSize: 10, color: d.t3 }}>{s.lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Posts */}
+      {posts.length === 0 ? (
+        <div className="card cp" style={{ textAlign: "center", padding: "32px" }}>
+          <div style={{ fontSize: 13, color: d.t3, fontStyle: "italic" }}>no sessions posted yet.</div>
+        </div>
+      ) : posts.map(post => {
+        const sc = SUB_C[post.subject] || d.a3;
+        return (
+          <div key={post.id} className="card" style={{ marginBottom: 10, overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px 10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: d.t }}>{post.title}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}18`, color: sc }}>{post.subject}</span>
+              </div>
+              {post.notes && <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.6, marginBottom: 8 }}>{post.notes}</div>}
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { label: "Duration", val: fmtDurSec(post.duration_seconds) },
+                  { label: "Problems", val: post.problems_solved ?? "—" },
+                  { label: "Accuracy", val: post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
+                ].map(s => (
+                  <div key={s.label} style={{ flex: 1, textAlign: "center", background: d.hover, borderRadius: 3, padding: "6px 4px", border: `1px solid ${d.b}` }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: d.t }}>{s.val}</div>
+                    <div style={{ fontSize: 9, color: d.t4, textTransform: "uppercase", letterSpacing: ".05em", marginTop: 1 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ padding: "8px 16px", borderTop: `1px solid ${d.b}`, display: "flex", gap: 4, background: d.hover, alignItems: "center" }}>
+              <button onClick={() => toggleKudos(post)} disabled={post.user_id === user?.id}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "4px 8px", border: "none", background: "transparent",
+                  fontFamily: "inherit", fontSize: 12,
+                  color: post.kudos_given ? "#d4604a" : d.t3,
+                  cursor: post.user_id === user?.id ? "default" : "pointer",
+                  opacity: post.user_id === user?.id ? 0.4 : 1,
+                }}>
+                <span style={{ fontSize: 14 }}>{post.kudos_given ? "♥" : "♡"}</span>
+                {post.kudos_count} Kudos
+              </button>
+              <span style={{ marginLeft: "auto", fontSize: 11, color: d.t4 }}>{socialTimeAgo(post.created_at)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Edit profile inline ───────────────────────────────────────────────────────
+function EditProfileInline({ user, profile, d, SB_URL, SB_ANON, onSaved }) {
+  const [form, setForm] = useState({
+    display_name: profile?.display_name || user?.name || "",
+    bio: profile?.bio || "",
+    target_college: profile?.target_college || "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    await sbFetch(SB_URL, SB_ANON, "profiles", {
+      method: "POST", prefer: "resolution=merge-duplicates,return=representation",
+      body: JSON.stringify({ id: user.id, ...form, avatar_url: user.avatar || null }),
+    });
+    setSaving(false);
+    onSaved({ ...profile, ...form });
+  }
+
+  const inp = {
+    padding: "8px 11px", border: `1px solid ${d.b}`, borderRadius: 3,
+    background: d.inp, color: d.t, fontFamily: "inherit", fontSize: 13,
+    outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8,
+  };
+
+  return (
+    <div style={{ animation: "selIn .15s ease" }}>
+      <input style={inp} placeholder="Display name" value={form.display_name}
+        onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
+      <input style={inp} placeholder="Target college — e.g. IIT Bombay" value={form.target_college}
+        onChange={e => setForm(f => ({ ...f, target_college: e.target.value }))} />
+      <textarea style={{ ...inp, minHeight: 56, resize: "vertical" }} placeholder="Bio"
+        value={form.bio} onChange={e => setForm(f => ({ ...f, bio: e.target.value }))} />
+      <button className="btn btn-d" onClick={save} disabled={saving}
+        style={{ padding: "7px 16px", fontSize: 12 }}>
+        {saving ? "saving…" : "save changes"}
+      </button>
+    </div>
+  );
+}
 
 
 // ── Auth Screen ───────────────────────────────────────────────────────────────
@@ -469,131 +2653,6 @@ function AuthScreen({onAuth}) {
 }
 
 
-function buildCSS(d,dark,sideOpen,SW,subColor,sT,sW6,sOD,sOO,sOP,tBg,fsB,fsDo,sIP,sIJ){
-// sT=sideTranslate, sW6=sideW600, sOD=sbOverlayDisplay, sOO=sbOverlayOp, sOP=sbOverlayPE
-// tBg=topbarBg, fsB=fsOverlayBg, fsDo=fsDoneBg, sIP=sItemPad, sIJ=sItemJust
-var c=[];
-c.push("@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');");
-c.push("html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}");
-c.push("*{box-sizing:border-box;}");
-c.push("*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}");
-c.push("body{background:"+d.bg+";font-family:'DM Sans',sans-serif;color:"+d.t+";-webkit-font-smoothing:antialiased;}");
-c.push("*{transition:background-color .18s,border-color .18s,color .12s;}");
-c.push("::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:"+d.b+";border-radius:1px;}");
-c.push(".layout{display:block;min-height:100vh;width:100%;background:"+d.bg+";}");
-c.push(".sidebar{width:"+SW+"px;min-height:100vh;background:"+d.sb+";border-right:1px solid "+d.b+";position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}");
-c.push(".content{margin-left:"+SW+"px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - "+SW+"px);}");
-c.push(".inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;overflow-x:hidden;}");
-c.push("@media(min-width:1400px){.inner{padding:36px 60px;}.topbar{padding:0 60px;}}");
-c.push("@media(max-width:1100px){.inner{padding:28px 32px;}.topbar{padding:0 32px;}}");
-c.push("@media(max-width:900px){.content{margin-left:0!important;width:100%!important;}.inner{padding:20px 18px;}.topbar{padding:0 18px!important;}.g3{grid-template-columns:1fr 1fr!important;}.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr 1fr!important;}.stat-num{font-size:26px!important;}.sidebar{transform:translateX("+sT+");width:260px!important;}}");
-c.push("@media(max-width:600px){.content{margin-left:0!important;width:100%!important;}.inner{padding:14px 14px!important;}.topbar{padding:0 14px!important;min-height:52px;}.g2{grid-template-columns:1fr 1fr!important;}.g3,.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr!important;}.stat-num{font-size:20px!important;}.ptitle{font-size:15px!important;}.psub{display:none!important;}.section-head{font-size:16px!important;}.snotes{display:none;}.sidebar{transform:translateX("+sT+");width:80vw!important;max-width:280px!important;}}");
-c.push("@media(max-width:380px){.g2,.g3,.g4{grid-template-columns:1fr!important;}.inner{padding:12px 10px!important;}}");
-c.push(".sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;opacity:"+sOO+";pointer-events:"+sOP+";transition:opacity .25s;}");
-c.push("@media(min-width:901px){.sb-overlay{display:none;}}");
-c.push(".mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:"+d.hover+";border:1px solid "+d.b+";cursor:pointer;align-items:center;justify-content:center;color:"+d.t+";font-size:18px;flex-shrink:0;}");
-c.push("@media(max-width:900px){.mob-btn{display:flex;}}");
-c.push(".s-logo{padding:18px 16px 14px;border-bottom:1px solid "+d.b+";display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}");
-c.push(".s-brand{font-size:16px;font-weight:700;color:"+d.t+";letter-spacing:-.05em;white-space:nowrap;line-height:1;font-family:'DM Serif Display',serif;}");
-c.push(".s-toggle{width:26px;height:26px;border-radius:4px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;color:"+d.t3+";font-size:11px;flex-shrink:0;}");
-c.push(".s-toggle:hover{color:"+d.t+";border-color:"+d.bs+";}");
-c.push(".s-nav{padding:10px 8px;flex:1;overflow-y:auto;overflow-x:hidden;}");
-c.push(".s-sec{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:"+d.t4+";padding:0 8px;margin:14px 0 4px;font-family:'DM Sans',sans-serif;font-weight:600;}");
-c.push(".s-item{display:flex;align-items:center;gap:9px;padding:"+sIP+";border-radius:3px;cursor:pointer;color:"+d.t3+";font-size:12px;margin-bottom:1px;border:1px solid transparent;user-select:none;justify-content:"+sIJ+";font-weight:500;letter-spacing:.01em;}");
-c.push(".s-item:hover{color:"+d.t+";background:"+d.hover+";}");
-c.push(".s-item.active{color:"+d.t+";background:"+d.hover+";font-weight:600;}");
-c.push(".s-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center;opacity:.6;}");
-c.push(".s-item.active .s-icon{opacity:1;}");
-c.push(".s-label{white-space:nowrap;overflow:hidden;}");
-c.push(".s-footer{padding:12px 14px;border-top:1px solid "+d.b+";flex-shrink:0;}");
-c.push(".s-av{width:26px;height:26px;border-radius:2px;background:"+d.a1+";display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;}");
-c.push(".s-uinfo{overflow:hidden;}");
-c.push(".topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid "+d.b+";background:"+tBg+";position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;width:100%;box-sizing:border-box;}");
-c.push(".ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}");
-c.push(".psub{font-size:11px;color:"+d.t3+";margin-top:3px;letter-spacing:.01em;font-style:italic;}");
-c.push(".tbr{display:flex;align-items:center;gap:7px;}");
-c.push(".icon-btn{width:30px;height:30px;border-radius:3px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:"+d.t3+";}");
-c.push(".icon-btn:hover{border-color:"+d.bs+";color:"+d.t+";}");
-c.push(".ghost-sm{background:transparent;color:"+d.t3+";border:1px solid "+d.b+";border-radius:3px;padding:5px 12px;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;font-weight:500;}");
-c.push(".ghost-sm:hover{color:"+d.t+";border-color:"+d.bs+";}");
-c.push(".card{background:"+d.card+";border:1px solid "+d.b+";border-radius:2px;}");
-c.push(".cp{padding:20px 22px;}");
-c.push(".cl{font-size:8.5px;color:"+d.t3+";font-weight:700;letter-spacing:.16em;text-transform:uppercase;font-family:'DM Sans',sans-serif;}");
-c.push(".g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}");
-c.push(".g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}");
-c.push(".g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}");
-c.push(".mb12{margin-bottom:12px;}.mb16{margin-bottom:16px;}");
-c.push(".field{margin-bottom:11px;}");
-c.push(".fl{display:block;font-size:10px;color:"+d.t3+";margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}");
-c.push("input.inp,textarea.inp{width:100%;padding:9px 13px;border:1px solid "+d.b+";border-radius:3px;background:"+d.inp+";font-family:'DM Sans',sans-serif;font-size:13px;color:"+d.t+";outline:none;}");
-c.push("input.inp:focus,textarea.inp:focus{border-color:"+d.a1+"66;}");
-c.push("input.inp::placeholder{color:"+d.t4+";}");
-c.push(".btn{border:none;border-radius:3px;padding:9px 18px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.02em;}");
-c.push(".btn-d{background:"+d.t+";color:"+d.bg+";}");
-c.push(".btn-d:hover{opacity:.84;}.btn-d:disabled{opacity:.25;cursor:not-allowed;}");
-c.push(".btn-full{width:100%;padding:11px;}.btn-danger{background:"+d.danger+";color:#fff;}");
-c.push(".btrack{height:2px;background:"+d.b+";border-radius:1px;overflow:hidden;}");
-c.push(".bfill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.16,1,.3,1);}");
-c.push(".dot{width:5px;height:5px;border-radius:50%;}.row{display:flex;align-items:center;}.rowb{display:flex;align-items:center;justify-content:space-between;}.f1{flex:1;}");
-c.push(".pin{animation:pin .2s ease;}@keyframes pin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}");
-c.push(".shim{border-radius:2px;height:10px;background:linear-gradient(90deg,"+d.b+" 25%,"+d.hover+" 50%,"+d.b+" 75%);background-size:200%;animation:sh 1.5s infinite;margin-bottom:8px;}@keyframes sh{0%{background-position:200%}100%{background-position:-200%}}");
-c.push(".empty{text-align:center;padding:44px 20px;}");
-c.push(".et{font-size:13px;font-weight:500;color:"+d.t3+";margin-bottom:3px;font-style:italic;font-family:'DM Serif Display',serif;}");
-c.push(".es{font-size:11px;color:"+d.t4+";}");
-c.push("hr{border:none;border-top:1px solid "+d.b+";margin:14px 0;}");
-c.push(".rec-dot{display:inline-block;width:4px;height:4px;background:"+subColor+";border-radius:50%;margin-right:5px;animation:blink 1.2s infinite;}@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}");
-c.push("@keyframes ring-pulse{0%,100%{opacity:1}50%{opacity:.3}}.ring-alert{animation:ring-pulse .75s infinite;}");
-c.push(".stat-num{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1;letter-spacing:-.02em;}");
-c.push(".stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:"+d.t3+";margin-top:5px;}");
-c.push(".stat-hint{font-size:11px;color:"+d.t3+";margin-top:4px;font-style:italic;}");
-c.push(".sec-rule{display:flex;align-items:center;gap:10px;margin-bottom:16px;}.sec-rule-line{flex:1;height:1px;background:"+d.b+";}.sec-rule-label{font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:"+d.t4+";}");
-c.push(".section-head{font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;letter-spacing:-.02em;color:"+d.t+";line-height:1.2;margin-bottom:4px;}");
-c.push(".section-sub{font-size:11px;color:"+d.t3+";margin-bottom:20px;font-style:italic;}");
-c.push(".mode-tab{display:flex;background:"+d.inp+";border:1px solid "+d.b+";border-radius:10px;padding:3px;gap:3px;margin-bottom:16px;}");
-c.push(".mode-opt{flex:1;padding:7px;border-radius:7px;border:none;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;cursor:pointer;background:none;color:"+d.t3+";}");
-c.push(".mode-opt.active{background:"+d.card+";color:"+d.t+";box-shadow:0 1px 4px rgba(0,0,0,.2);}");
-c.push(".ring-wrap{position:relative;width:200px;height:200px;margin:0 auto;}");
-c.push(".ring-svg{position:absolute;inset:0;width:100%;height:100%;}");
-c.push(".ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}");
-c.push(".ring-time{font-size:42px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}");
-c.push(".ring-sub{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:"+d.t4+";margin-top:4px;}");
-c.push(".fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:"+fsB+";}");
-c.push(".fs-exit{position:absolute;top:20px;right:22px;background:"+d.hover+";border:1px solid "+d.b+";border-radius:8px;padding:7px 13px;font-family:'DM Sans',sans-serif;font-size:12px;color:"+d.t3+";cursor:pointer;}");
-c.push(".fs-exit:hover{color:"+d.t+";}.fs-sub{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:"+subColor+";margin-bottom:6px;}");
-c.push(".fs-topic{font-size:14px;color:"+d.t2+";margin-bottom:32px;}.fs-time{font-size:100px;font-weight:200;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:"+d.t+";}");
-c.push(".fs-actions{display:flex;gap:12px;margin-top:36px;}.fs-btn{padding:12px 28px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}");
-c.push(".fs-btn-stop{background:"+d.danger+";color:#fff;}.fs-btn-pause{background:"+d.hover+";color:"+d.t+";border:1px solid "+d.b+";}.fs-done{text-align:center;}");
-c.push(".fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}");
-c.push(".coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:16px;width:100%;}");
-c.push(".coach-card{padding:17px;border-radius:12px;border:1px solid "+d.b+";background:"+d.card+";position:relative;overflow:hidden;}");
-c.push(".coach-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}");
-c.push(".coach-card.danger::before{background:"+d.danger+";}.coach-card.success::before{background:"+d.a2+";}.coach-card.warning::before{background:"+d.gold+";}.coach-card.info::before{background:"+d.a3+";}.coach-card.primary::before{background:"+d.a1+";}");
-c.push(".cc-icon{font-size:19px;margin-bottom:9px;}.cc-title{font-size:12px;font-weight:600;color:"+d.t+";margin-bottom:7px;}");
-c.push(".cc-insight{font-size:11.5px;color:"+d.t2+";line-height:1.7;margin-bottom:9px;}");
-c.push(".cc-topics{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;}.cc-topic{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;}");
-c.push(".cc-action{font-size:11px;color:"+d.t3+";padding:8px 10px;background:"+d.hover+";border-radius:7px;line-height:1.5;border-left:2px solid "+d.a1+";}");
-c.push(".goal-item{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border-radius:9px;margin-bottom:6px;border:1px solid "+d.b+";background:"+d.card+";}");
-c.push(".goal-item.achieved{border-color:"+d.a2+"30;background:"+d.a2+"05;}");
-c.push(".goal-check{width:19px;height:19px;border-radius:50%;border:1.5px solid "+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px;cursor:pointer;}");
-c.push(".goal-check.done{background:"+d.a2+";border-color:"+d.a2+";color:white;}");
-c.push(".goal-text{font-size:13px;flex:1;line-height:1.4;}.goal-text.done{text-decoration:line-through;color:"+d.t3+";}");
-c.push(".goal-meta{font-size:10.5px;color:"+d.t3+";margin-top:2px;}");
-c.push(".goal-ai-badge{font-size:9px;padding:1px 6px;border-radius:20px;background:"+d.a3+"18;color:"+d.a3+";font-weight:500;flex-shrink:0;}");
-c.push(".goal-prog{height:2px;background:"+d.b+";border-radius:2px;overflow:hidden;margin-top:5px;}.goal-prog-fill{height:100%;border-radius:2px;background:"+d.a2+";}");
-c.push(".streak-hero{text-align:center;padding:24px 20px;border-radius:14px;background:linear-gradient(135deg,"+d.a1+"10,"+d.a3+"10);border:1px solid "+d.b+";margin-bottom:13px;}");
-c.push(".streak-num{font-size:60px;font-weight:700;letter-spacing:-.04em;line-height:1;color:"+d.a1+";}");
-c.push(".milestone-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:9px;margin-bottom:3px;border:1px solid transparent;}");
-c.push(".milestone-row.reached{background:"+d.hover+";border-color:"+d.b+";}.milestone-row:not(.reached){opacity:.38;}");
-c.push(".m-check{width:18px;height:18px;border-radius:50%;background:"+d.a2+";display:flex;align-items:center;justify-content:center;font-size:9px;color:white;flex-shrink:0;}");
-c.push(".m-lock{width:18px;height:18px;border-radius:50%;background:"+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;color:"+d.t4+";flex-shrink:0;}");
-c.push(".srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid "+d.b+";margin-bottom:0;}");
-c.push(".srow:hover{background:transparent;}.ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}");
-c.push(".stopic{font-size:13px;flex:1;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
-c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid "+d.b+";}.sdate{font-size:10px;color:"+d.t4+";flex-shrink:0;}");
-return c.join("\n");
-}
-
-
 export default function App(){
   // Tab switch — also closes sidebar on mobile
   function switchTab(newTab){
@@ -621,7 +2680,7 @@ export default function App(){
     const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
     const p=prev();
     if(p?.user?.id&&p.user.id!==stored?.user?.id){
-      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
     localStorage.setItem("slothr_auth",JSON.stringify(stored));
     setAuthSession(stored);
@@ -630,7 +2689,7 @@ export default function App(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
     setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
-    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
   // OAuth redirect handler
   const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
@@ -671,10 +2730,22 @@ export default function App(){
   const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
   const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [completedTests,setCompletedTests]=useState(()=>{try{const c=localStorage.getItem("slothr_completed");if(!c)return {};const a=JSON.parse(c);return Object.fromEntries(Object.entries(a).slice(-2));}catch(e){return {};}});
 
-  // ── Receive completed practice test result ──────────────────────────────────
+  // ── Receive completed practice test result ────────────────────────────────
+  function handleStoreTest(paperId,result){
+    setCompletedTests(prev=>{
+      const entries=Object.entries({...prev,[paperId]:result});
+      const last2=Object.fromEntries(entries.slice(-2));
+      try{localStorage.setItem("slothr_completed",JSON.stringify(last2));}catch(e){}
+      return last2;
+    });
+    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_completed`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,paper_id:paperId,data:result})}).catch(()=>{});
+  }
   function handleTestComplete({mockEntry, pyqEntries}){
+    // Add to mocks (for coach analysis)
     setMocks(prev=>[...prev, mockEntry]);
+    // Add all answered questions to pyqHistory
     setPyqHistory(prev=>[...prev, ...pyqEntries]);
   }
 
@@ -688,62 +2759,18 @@ export default function App(){
   const [goalLoading,setGoalLoading]=useState(false);
 
   // PYQ
+  const [pyqSubject,setPyqSubject]=useState("Physics");
+  const [pyqTopic,setPyqTopic]=useState("");
+  const [pyqDiff,setPyqDiff]=useState("All");
+  const [currentPyq,setCurrentPyq]=useState(null);
+  const [revealed,setRevealed]=useState(false);
+  const [pyqResult,setPyqResult]=useState(null);
   const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [selectedOpt,setSelectedOpt]=useState(null);
 
   // Coach
   const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
-  // Revision scheduler state
-  const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
-  useEffect(()=>{try{localStorage.setItem("slothr_revision",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
-  function markStudied(sub,topic){
-    const now=today();
-    setRevisionLog(prev=>({...prev,[sub+"|"+topic]:{
-      lastStudied:now,
-      nextRevisions:[
-        addDays(now,3),
-        addDays(now,7),
-        addDays(now,14),
-        addDays(now,30),
-      ],
-      doneRevisions:[],
-    }}));
-  }
-  function markRevisionDone(sub,topic){
-    setRevisionLog(prev=>{
-      const key=sub+"|"+topic;
-      const entry=prev[key];
-      if(!entry)return prev;
-      const [next,...rest]=entry.nextRevisions;
-      return {...prev,[key]:{
-        ...entry,
-        doneRevisions:[...(entry.doneRevisions||[]),{date:today(),scheduled:next}],
-        nextRevisions:rest,
-        lastRevised:today(),
-      }};
-    });
-  }
   const [coachCards,setCoachCards]=useState(null);
-  // ── Social state ──────────────────────────────────────────────────────────
-  const [feed,setFeed]=useState([]);
-  const [feedLoading,setFeedLoading]=useState(false);
-  const [profile,setProfile]=useState(null);
-  const [profileLoading,setProfileLoading]=useState(false);
-  const [follows,setFollows]=useState(new Set()); // set of user_ids we follow
-  const [events,setEvents]=useState([]);
-  const [eventsLoading,setEventsLoading]=useState(false);
-  const [joinedEvents,setJoinedEvents]=useState(new Set());
-  const [showCreateEvent,setShowCreateEvent]=useState(false);
-  const [eventForm,setEventForm]=useState({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
-  const [postCapture,setPostCapture]=useState(null); // base64 image from camera
-  const [postText,setPostText]=useState("");
-  const [postLoading,setPostLoading]=useState(false);
-  const [cameraStream,setCameraStream]=useState(null);
-  const [showCamera,setShowCamera]=useState(false);
-  const [leaderboard,setLeaderboard]=useState([]);
-  const [feedTab,setFeedTab]=useState("following"); // following | discover
-  const [viewProfile,setViewProfile]=useState(null); // userId to view
-  const videoRef=useRef(null);
-  const canvasRef=useRef(null);
   function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
   const [coachLoading,setCoachLoading]=useState(false);
 
@@ -766,25 +2793,8 @@ export default function App(){
   const [toast,setToast]=useState(null);
   function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
   const d=(dark?THEME.dark:THEME.light)||THEME.dark;
-  const SW=sideOpen?220:56;
-  const sideTranslate=sideOpen?"0":"-100%";
-  const sideW600=sideOpen?"80vw":"0px";
-  const sbOverlayDisplay=sideOpen?"block":"none";
-  const sbOverlayOp=sideOpen?1:0;
-  const sbOverlayPE=sideOpen?"auto":"none";
-  const topbarBg=dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)";
-  const fsOverlayBg=dark?"#0e0d0b":"#f7f4ee";
-  const fsDoneBg=dark?"#0d0d0c":"#f8f8f6";
-  const sItemPad=sideOpen?"7px 10px":"7px";
-  const sItemJust=sideOpen?"flex-start":"center";
-  const subColor=SUBJECT_COLORS[timerSub]||d.a1;
-  const css=buildCSS(d,dark,sideOpen,SW,subColor,sideTranslate,sideW600,sbOverlayDisplay,sbOverlayOp,sbOverlayPE,topbarBg,fsOverlayBg,fsDoneBg,sItemPad,sItemJust);
-  useEffect(()=>{
-    let el=document.getElementById("slothr-css");
-    if(!el){el=document.createElement("style");el.id="slothr-css";document.head.appendChild(el);}
-    el.textContent=css;
-  },[css]);
   const classTopics=sub=>TOPICS[sub][jeClass]||TOPICS[sub].dropper;
+  const subColor=SUBJECT_COLORS[timerSub]||d.a1;
 
   // ── Wake Lock ─────────────────────────────────────────────────────────────
   const acquireWakeLock=useCallback(async()=>{
@@ -803,61 +2813,34 @@ export default function App(){
     else{releaseWakeLock();}
     return()=>releaseWakeLock();
   },[timerOn]);
-  // Reacquire wake lock when page becomes visible again
+  // Reacquire if page becomes visible again while timer is running
   useEffect(()=>{
     const fn=async()=>{if(document.visibilityState==="visible"&&timerOn){await acquireWakeLock();}};
     document.addEventListener("visibilitychange",fn);
     return()=>document.removeEventListener("visibilitychange",fn);
   },[timerOn]);
 
-  // ── Timer tick — Date-based so it works in background ───────────────────
-  const timerStartRef=useRef(null);   // wall-clock ms when timer last started
-  const timerBaseRef=useRef(0);       // seconds already accumulated before last start
+  // ── Timer tick ────────────────────────────────────────────────────────────
   useEffect(()=>{
     if(timerOn){
-      // Record wall-clock start + base
-      timerStartRef.current=Date.now();
-      timerBaseRef.current=timerMode==="stopwatch"?timerSecRef.current:null;
-      const cdBase=timerMode==="countdown"?countdownSec:null;
-
       timerRef.current=setInterval(()=>{
-        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
         if(timerMode==="stopwatch"){
-          const next=(timerBaseRef.current||0)+elapsed;
-          timerSecRef.current=next;
-          setTimerSec(next);
+          setTimerSec(s=>{timerSecRef.current=s+1;return s+1;});
         } else {
-          const next=Math.max(0,(cdBase||0)-elapsed);
-          setCountdownSec(next);
-          if(next<=0){
-            clearInterval(timerRef.current);
-            setTimerOn(false);
-            setTimerDone(true);
-            setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
-          }
+          setCountdownSec(s=>{
+            if(s<=1){
+              clearInterval(timerRef.current);
+              setTimerOn(false);
+              setTimerDone(true);
+              setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
+              return 0;
+            }
+            return s-1;
+          });
         }
-      },500); // 500ms for smoother but still accurate
-    } else {
-      clearInterval(timerRef.current);
-    }
+      },1000);
+    } else clearInterval(timerRef.current);
     return()=>clearInterval(timerRef.current);
-  },[timerOn,timerMode]);
-
-  // Resync timer when app comes back to foreground
-  useEffect(()=>{
-    const fn=()=>{
-      if(document.visibilityState==="visible"&&timerOn&&timerStartRef.current){
-        // Force immediate tick to resync display
-        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
-        if(timerMode==="stopwatch"){
-          const next=(timerBaseRef.current||0)+elapsed;
-          timerSecRef.current=next;
-          setTimerSec(next);
-        }
-      }
-    };
-    document.addEventListener("visibilitychange",fn);
-    return()=>document.removeEventListener("visibilitychange",fn);
   },[timerOn,timerMode]);
 
   useEffect(()=>{const fn=e=>{if(e.key==="Escape")setFullscreen(false);};window.addEventListener("keydown",fn);return()=>window.removeEventListener("keydown",fn);},[]);
@@ -922,10 +2905,7 @@ export default function App(){
   }
   function stopTimer(){
     setTimerOn(false);
-    // Calculate accurate elapsed from wall clock
-    const elapsed=timerStartRef.current?Math.floor((Date.now()-timerStartRef.current)/1000):0;
-    const rawSec=(timerBaseRef.current||0)+elapsed;
-    timerSecRef.current=rawSec;
+    const rawSec=timerSecRef.current;
     const m=Math.max(1,Math.round(rawSec/60));
     // Only save if at least 30 seconds elapsed — prevents 0-minute ghost sessions
     if(rawSec>=30){
@@ -951,173 +2931,6 @@ export default function App(){
     if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
     return txt;
   }
-  // ── Social API helpers ────────────────────────────────────────────────────
-  async function fetchProfile(uid){
-    const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${uid}&select=*`,{
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-    });
-    const d=await r.json();
-    return d?.[0]||null;
-  }
-  async function fetchFeed(type="following"){
-    if(!user?.id)return;
-    setFeedLoading(true);
-    try{
-      let url;
-      if(type==="following"){
-        // Posts from people we follow + our own
-        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
-      } else {
-        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
-      }
-      const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}});
-      const d=await r.json();
-      setFeed(Array.isArray(d)?d:[]);
-    }catch(e){}
-    setFeedLoading(false);
-  }
-  async function fetchFollows(){
-    if(!user?.id)return;
-    const r=await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&select=following_id`,{
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-    });
-    const d=await r.json();
-    if(Array.isArray(d))setFollows(new Set(d.map(x=>x.following_id)));
-  }
-  async function toggleFollow(targetId){
-    if(!user?.id)return;
-    const following=follows.has(targetId);
-    if(following){
-      await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&following_id=eq.${targetId}`,{
-        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-      });
-      setFollows(prev=>{const s=new Set(prev);s.delete(targetId);return s;});
-    } else {
-      await fetch(`${SB_URL}/rest/v1/follows`,{
-        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({follower_id:user.id,following_id:targetId})
-      });
-      setFollows(prev=>new Set([...prev,targetId]));
-    }
-  }
-  async function likePost(postId,liked){
-    if(!user?.id)return;
-    if(liked){
-      await fetch(`${SB_URL}/rest/v1/post_likes?post_id=eq.${postId}&user_id=eq.${user.id}`,{
-        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-      });
-    } else {
-      await fetch(`${SB_URL}/rest/v1/post_likes`,{
-        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({post_id:postId,user_id:user.id})
-      });
-    }
-    setFeed(prev=>prev.map(p=>p.id===postId?{...p,like_count:liked?Math.max(0,p.like_count-1):p.like_count+1,_liked:!liked}:p));
-  }
-  async function submitPost(){
-    if(!postText.trim()&&!postCapture)return;
-    setPostLoading(true);
-    try{
-      let image_url=null;
-      if(postCapture){
-        // Upload to Supabase Storage
-        const blob=await(await fetch(postCapture)).blob();
-        const fname=`${user.id}/${Date.now()}.jpg`;
-        const up=await fetch(`${SB_URL}/storage/v1/object/post-images/${fname}`,{
-          method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"image/jpeg","x-upsert":"true"},
-          body:blob
-        });
-        if(up.ok)image_url=`${SB_URL}/storage/v1/object/public/post-images/${fname}`;
-      }
-      const meta={subject:timerSub,topic:timerTopic,duration:todayTime,streak};
-      await fetch(`${SB_URL}/rest/v1/posts`,{
-        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({user_id:user.id,type:"manual",content:postText,image_url,metadata:meta,is_public:true})
-      });
-      setPostText("");setPostCapture(null);
-      fetchFeed(feedTab);
-    }catch(e){}
-    setPostLoading(false);
-  }
-  async function fetchEvents(){
-    setEventsLoading(true);
-    const r=await fetch(`${SB_URL}/rest/v1/events?select=*,profiles!events_host_id_fkey(username,display_name)&is_public=eq.true&order=starts_at.asc&limit=20`,{
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-    });
-    const d=await r.json();
-    if(Array.isArray(d))setEvents(d);
-    // Fetch joined events
-    if(user?.id){
-      const jr=await fetch(`${SB_URL}/rest/v1/event_members?user_id=eq.${user.id}&select=event_id`,{
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-      });
-      const jd=await jr.json();
-      if(Array.isArray(jd))setJoinedEvents(new Set(jd.map(x=>x.event_id)));
-    }
-    setEventsLoading(false);
-  }
-  async function joinEvent(eventId){
-    if(!user?.id)return;
-    const joined=joinedEvents.has(eventId);
-    if(joined){
-      await fetch(`${SB_URL}/rest/v1/event_members?event_id=eq.${eventId}&user_id=eq.${user.id}`,{
-        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-      });
-      setJoinedEvents(prev=>{const s=new Set(prev);s.delete(eventId);return s;});
-    } else {
-      await fetch(`${SB_URL}/rest/v1/event_members`,{
-        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
-        body:JSON.stringify({event_id:eventId,user_id:user.id})
-      });
-      setJoinedEvents(prev=>new Set([...prev,eventId]));
-    }
-    setEvents(prev=>prev.map(e=>e.id===eventId?{...e,member_count:joined?e.member_count-1:e.member_count+1}:e));
-  }
-  async function createEvent(){
-    if(!eventForm.title||!eventForm.starts_at||!eventForm.ends_at)return;
-    await fetch(`${SB_URL}/rest/v1/events`,{
-      method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
-      body:JSON.stringify({...eventForm,host_id:user.id})
-    });
-    setShowCreateEvent(false);setEventForm({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
-    fetchEvents();
-  }
-  async function openCamera(){
-    try{
-      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
-      setCameraStream(stream);setShowCamera(true);
-      setTimeout(()=>{if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();}},100);
-    }catch(e){showToast("camera access denied. check browser settings.");}
-  }
-  function capturePhoto(){
-    if(!videoRef.current||!canvasRef.current)return;
-    const v=videoRef.current,c=canvasRef.current;
-    c.width=v.videoWidth;c.height=v.videoHeight;
-    c.getContext("2d").drawImage(v,0,0);
-    setPostCapture(c.toDataURL("image/jpeg",0.85));
-    closeCamera();
-  }
-  function closeCamera(){
-    cameraStream?.getTracks().forEach(t=>t.stop());
-    setCameraStream(null);setShowCamera(false);
-  }
-  async function fetchLeaderboard(){
-    const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-    });
-    const d=await r.json();
-    if(Array.isArray(d))setLeaderboard(d.slice(0,50));
-  }
-  // Load social data when feed/events/profile tab opened
-  useEffect(()=>{
-    if(tab==="feed"){fetchFeed(feedTab);fetchFollows();}
-    if(tab==="events"){fetchEvents();}
-    if(tab==="profile"){
-      fetchProfile(user.id).then(p=>setProfile(p));
-      fetchLeaderboard();
-    }
-  },[tab]);
-
   async function runCoach(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
     if(uniqueDays<3){setCoachCards({locked:true,msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});return;}
@@ -1254,8 +3067,360 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     }catch(e){console.error(e);}
     setGoalLoading(false);
   }
+  async function generatePYQ(){
+    setCurrentPyq({loading:true});
+    try {
+      let params=[
+        "select=id,subject,topic,question_text,option_a,option_b,option_c,option_d,correct,solution,difficulty,diagram_url,answer_type",
+        "subject=eq."+pyqSubject,
+        "exam=eq.JEE%20Advanced",
+        "is_active=eq.true",
+        "is_verified=eq.true",
+        "limit=50",
+      ];
+      if(pyqTopic) params.push("topic=eq."+encodeURIComponent(pyqTopic));
+      if(pyqDiff!=="All") params.push("difficulty=eq."+pyqDiff);
+      const r=await fetch(`${SB_URL}/rest/v1/questions?${params.join("&")}`,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+SB_ANON}});
+      if(!r.ok) throw new Error(await r.text());
+      let pool=await r.json();
+      if(pool.length===0){
+        setCurrentPyq({error:true,msg:`No questions yet for ${pyqSubject}${pyqTopic?" — "+pyqTopic:""}. Add them in the admin panel.`});
+        return;
+      }
+      // Avoid recently seen questions
+      const recent=pyqHistory.slice(-5).map(p=>p.qid).filter(Boolean);
+      const fresh=pool.filter(q=>!recent.includes(q.id));
+      const candidates=fresh.length>0?fresh:pool;
+      const raw=candidates[Math.floor(Math.random()*candidates.length)];
+      // Map to slothr question shape
+      const q={
+        id:raw.id, subject:raw.subject, topic:raw.topic,
+        text:raw.question_text, difficulty:raw.difficulty,
+        options:raw.option_a?{A:raw.option_a,B:raw.option_b,C:raw.option_c,D:raw.option_d}:null,
+        correct:raw.correct, solution:raw.solution,
+        diagram_url:raw.diagram_url||null, answer_type:raw.answer_type||"text",
+      };
+      setCurrentPyq(q);
+      setRevealed(false);
+      setPyqResult(null);
+      setSelectedOpt(null);
+    } catch(e){
+      setCurrentPyq({error:true,msg:"Failed to load question. Check your connection."});
+    }
+  }
+  function submitPYQAnswer(opt){
+    if(!currentPyq||revealed) return;
+    setSelectedOpt(opt);
+    const correct=opt===currentPyq.correct;
+    setPyqResult(correct?"correct":"incorrect");
+    setRevealed(true);
+    setPyqHistory(p=>[...p,{qid:currentPyq.id,subject:currentPyq.subject,topic:currentPyq.topic,correct,date:today(),difficulty:currentPyq.difficulty,year:currentPyq.year}]);
+  }
 
   // ── CSS ───────────────────────────────────────────────────────────────────
+  const SW=sideOpen?220:56;
+  const css=`
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
+    html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}
+    *{box-sizing:border-box;}
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    body{background:${d.bg};font-family:'DM Sans',sans-serif;color:${d.t};-webkit-font-smoothing:antialiased;}
+    *{transition:background-color .18s,border-color .18s,color .12s;}
+    ::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:${d.b};border-radius:1px;}
+
+    /* ── LAYOUT ── */
+    .layout{display:block;min-height:100vh;width:100%;background:${d.bg};}
+    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}
+    .content{margin-left:${SW}px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - ${SW}px);}
+    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
+    /* ── RESPONSIVE ── */
+    @media(min-width:1400px){
+      .inner{padding:36px 60px;}
+      .topbar{padding:0 60px;}
+    }
+    @media(max-width:1100px){
+      .inner{padding:28px 32px;}
+      .topbar{padding:0 32px;}
+    }
+    /* Tablet & mobile: sidebar floats over content, content is full width */
+    @media(max-width:900px){
+      .content{margin-left:0 !important;width:100% !important;}
+      .inner{padding:20px 18px;}
+      .topbar{padding:0 18px !important;}
+      .g3{grid-template-columns:1fr 1fr !important;}
+      .g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr 1fr !important;}
+      .stat-num{font-size:26px !important;}
+      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:260px !important;}
+    }
+    @media(max-width:600px){
+      .content{margin-left:0 !important;width:100% !important;}
+      .inner{padding:14px 14px !important;}
+      .topbar{padding:0 14px !important;min-height:52px;}
+      .g2{grid-template-columns:1fr 1fr !important;}
+      .g3,.g4{grid-template-columns:1fr 1fr !important;}
+      .coach-grid{grid-template-columns:1fr !important;}
+      .stat-num{font-size:20px !important;}
+      .ptitle{font-size:15px !important;}
+      .psub{display:none !important;}
+      .section-head{font-size:16px !important;}
+      .snotes{display:none;}
+      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:80vw !important;max-width:280px !important;}
+    }
+    @media(max-width:380px){
+      .g2,.g3,.g4{grid-template-columns:1fr !important;}
+      .inner{padding:12px 10px !important;}
+    }
+    /* Overlay behind sidebar on mobile */
+    .sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;
+      opacity:${sideOpen?1:0};pointer-events:${sideOpen?"auto":"none"};transition:opacity .25s;}
+    @media(min-width:901px){.sb-overlay{display:none;}}
+    /* Hamburger — only on mobile/tablet */
+    .mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:${d.hover};border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;}
+    @media(max-width:900px){.mob-btn{display:flex;}}
+
+    /* ── SIDEBAR ── */
+    .s-logo{padding:18px 16px 14px;border-bottom:1px solid ${d.b};display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}
+    .s-brand{font-size:16px;font-weight:700;color:${d.t};letter-spacing:-.05em;white-space:nowrap;opacity:${sideOpen?1:0};transition:opacity .18s;line-height:1;font-family:'DM Serif Display',serif;}
+    .s-toggle{width:26px;height:26px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;display:flex;align-items:center;justify-content:center;color:${d.t3};font-size:11px;flex-shrink:0;}
+    .s-toggle:hover{color:${d.t};border-color:${d.bs};}
+    .s-nav{padding:10px 8px;flex:1;overflow-y:auto;overflow-x:hidden;}
+    .s-sec{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:${d.t4};padding:0 8px;margin:14px 0 4px;opacity:${sideOpen?1:0};transition:opacity .15s;font-family:'DM Sans',sans-serif;font-weight:600;}
+    .s-item{display:flex;align-items:center;gap:9px;padding:${sideOpen?"7px 10px":"7px"};border-radius:3px;cursor:pointer;color:${d.sm};font-size:12px;margin-bottom:1px;border:1px solid transparent;user-select:none;justify-content:${sideOpen?"flex-start":"center"};font-weight:500;letter-spacing:.01em;}
+    .s-item:hover{color:${d.t};background:${d.sa};}
+    .s-item.active{color:${d.t};background:${d.sa};border-color:${d.sab};font-weight:600;}
+    .s-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center;opacity:.6;}
+    .s-item.active .s-icon{opacity:1;}
+    .s-label{white-space:nowrap;overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
+    .s-footer{padding:12px 14px;border-top:1px solid ${d.b};flex-shrink:0;}
+    .s-av{width:26px;height:26px;border-radius:2px;background:${d.a1};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;letter-spacing:.02em;}
+    .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
+
+    /* ── TOPBAR ── */
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;width:100%;box-sizing:border-box;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
+    .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
+    .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
+    .tbr{display:flex;align-items:center;gap:7px;}
+    .icon-btn{width:30px;height:30px;border-radius:3px;background:transparent;border:1px solid ${d.b};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:${d.t3};}
+    .icon-btn:hover{border-color:${d.bs};color:${d.t};}
+    .ghost-sm{background:transparent;color:${d.t3};border:1px solid ${d.b};border-radius:3px;padding:5px 12px;font-family:'DM Sans',inherit;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:.02em;}
+    .ghost-sm:hover{color:${d.t};border-color:${d.bs};}
+
+    /* ── CARDS ── */
+    .card{background:${d.card};border:1px solid ${d.b};border-radius:2px;}
+    .cp{padding:20px 22px;}
+    .cl{font-size:8.5px;color:${d.t3};font-weight:700;letter-spacing:.16em;text-transform:uppercase;font-family:'DM Sans',sans-serif;}
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+    .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+    .mb12{margin-bottom:12px;}.mb16{margin-bottom:16px;}
+    .field{margin-bottom:11px;}
+    .fl{display:block;font-size:10px;color:${d.t3};margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}
+
+    /* ── INPUTS ── */
+    input.inp,textarea.inp{width:100%;padding:9px 13px;border:1px solid ${d.inpb};border-radius:3px;background:${d.inp};font-family:'DM Sans',sans-serif;font-size:13px;color:${d.t};outline:none;}
+    input.inp:focus,textarea.inp:focus{border-color:${d.a1}66;}
+    input.inp::placeholder{color:${d.t4};}
+
+    /* ── BUTTONS ── */
+    .btn{border:none;border-radius:3px;padding:9px 18px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.02em;}
+    .btn-d{background:${d.t};color:${d.bg};}
+    .btn-d:hover{opacity:.84;}
+    .btn-d:disabled{opacity:.25;cursor:not-allowed;}
+    .btn-full{width:100%;padding:11px;}
+    .btn-danger{background:${d.danger};color:#fff;}
+
+    /* ── MISC ── */
+    .btrack{height:2px;background:${d.b};border-radius:1px;overflow:hidden;}
+    .bfill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.16,1,.3,1);}
+    .dot{width:5px;height:5px;border-radius:50%;}
+    .row{display:flex;align-items:center;}
+    .rowb{display:flex;align-items:center;justify-content:space-between;}
+    .f1{flex:1;}
+    .pin{animation:pin .2s ease;}
+    @keyframes pin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes selIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+    .shim{border-radius:2px;height:10px;background:linear-gradient(90deg,${d.sh1} 25%,${d.sh2} 50%,${d.sh1} 75%);background-size:200%;animation:sh 1.5s infinite;margin-bottom:8px;}
+    @keyframes sh{0%{background-position:200%}100%{background-position:-200%}}
+    .empty{text-align:center;padding:44px 20px;}
+    .et{font-size:13px;font-weight:500;color:${d.t3};margin-bottom:3px;font-style:italic;font-family:'DM Serif Display',serif;}
+    .es{font-size:11px;color:${d.t4};}
+    hr{border:none;border-top:1px solid ${d.div};margin:14px 0;}
+    .rec-dot{display:inline-block;width:4px;height:4px;background:${subColor};border-radius:50%;margin-right:5px;animation:blink 1.2s infinite;}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
+    @keyframes ring-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .ring-alert{animation:ring-pulse .75s infinite;}
+
+    /* ── STAT CARDS — editorial number treatment ── */
+    .stat-num{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1;letter-spacing:-.02em;}
+    .stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${d.t3};margin-top:5px;}
+    .stat-hint{font-size:11px;color:${d.t3};margin-top:4px;font-style:italic;}
+
+    /* ── SECTION DIVIDER — magazine rule ── */
+    .sec-rule{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+    .sec-rule-line{flex:1;height:1px;background:${d.b};}
+    .sec-rule-label{font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${d.t4};}
+
+    /* ── SECTION heading style ── */
+    .section-head{font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;letter-spacing:-.02em;color:${d.t};line-height:1.2;margin-bottom:4px;}
+    .section-sub{font-size:11px;color:${d.t3};margin-bottom:20px;font-style:italic;}
+
+    /* ── Mode toggle ── */
+    .mode-tab{display:flex;background:${d.inp};border:1px solid ${d.inpb};border-radius:3px;padding:2px;gap:2px;margin-bottom:16px;}
+    .mode-opt{flex:1;padding:7px;border-radius:2px;border:none;font-family:'DM Sans',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;background:none;color:${d.t3};letter-spacing:.02em;}
+    .mode-opt.active{background:${d.card};color:${d.t};font-weight:600;}
+
+    /* ── Ring wrap ── */
+    .ring-wrap{position:relative;width:190px;height:190px;margin:0 auto;}
+    .ring-svg{position:absolute;inset:0;width:100%;height:100%;}
+    .ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+    .ring-time{font-family:'DM Serif Display',serif;font-size:40px;font-weight:400;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;}
+    .ring-sub{font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:${d.t4};margin-top:5px;font-weight:700;}
+
+    /* ── Fullscreen timer ── */
+    .fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${dark?"#0e0d0b":"#f7f4ee"};}
+    .fs-exit{position:absolute;top:22px;right:24px;background:transparent;border:1px solid ${d.b};border-radius:3px;padding:7px 14px;font-family:'DM Sans',sans-serif;font-size:11px;color:${d.t3};cursor:pointer;font-weight:600;letter-spacing:.04em;}
+    .fs-exit:hover{color:${d.t};border-color:${d.bs};}
+    .fs-sub{font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:${subColor};margin-bottom:8px;}
+    .fs-topic{font-size:13px;color:${d.t2};margin-bottom:40px;font-style:italic;}
+    .fs-time{font-family:'DM Serif Display',serif;font-size:104px;font-weight:400;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:${d.t};}
+    .fs-actions{display:flex;gap:12px;margin-top:38px;}
+
+    /* ── PYQ ── */
+    .pyq-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:4px;background:${d.card};border:1px solid ${d.b};}
+    .pyq-q-top{padding:16px 20px;border-bottom:1px solid ${d.b};background:${d.hover};}
+    .pyq-tag{font-size:9px;padding:2px 7px;border-radius:2px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+    .pyq-opts{padding:16px 20px;display:flex;flex-direction:column;gap:7px;}
+    .pyq-opt{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:3px;border:1px solid ${d.b};cursor:pointer;background:${d.card};transition:all .12s;}
+    .pyq-opt:hover{border-color:${d.bs};background:${d.hover};}
+    .pyq-opt.sel{border-color:${d.a1};background:${d.a1}0e;}
+    .pyq-result-banner{margin:0 20px 14px;padding:11px 15px;border-radius:3px;display:flex;align-items:center;gap:10px;}
+    .pyq-solution{margin:0 20px 20px;padding:14px;border-radius:3px;background:${d.hover};border:1px solid ${d.b};}
+    .pyq-nav{padding:14px 20px;border-top:1px solid ${d.b};display:flex;align-items:center;gap:9px;background:${d.hover};}
+
+    /* ── Coach card ── */
+    .coach-card{position:relative;overflow:hidden;border-radius:4px;background:${d.card};border:1px solid ${d.b};padding:18px 20px;margin-bottom:12px;}
+    .coach-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
+
+    /* Session rows */
+    .srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-radius:0;border:none;border-bottom:1px solid ${d.div};margin-bottom:0;}
+    .srow:hover{background:transparent;}
+    .ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}
+    .stopic{font-size:13px;flex:1;}
+    .snotes{font-size:11px;color:${d.t3};flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .sdur{font-size:10.5px;color:${d.t3};background:${d.tag};padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid ${d.b};}
+    .sdate{font-size:10px;color:${d.t4};flex-shrink:0;}
+
+    /* Mode toggle */
+    .mode-tab{display:flex;background:${d.inp};border:1px solid ${d.inpb};border-radius:10px;padding:3px;gap:3px;margin-bottom:16px;}
+    .mode-opt{flex:1;padding:7px;border-radius:7px;border:none;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;background:none;color:${d.t3};}
+    .mode-opt.active{background:${d.card};color:${d.t};box-shadow:0 1px 4px rgba(0,0,0,.2);}
+
+    /* Ring wrap */
+    .ring-wrap{position:relative;width:200px;height:200px;margin:0 auto;}
+    .ring-svg{position:absolute;inset:0;width:100%;height:100%;}
+    .ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+    .ring-time{font-size:42px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}
+    .ring-sub{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${d.t4};margin-top:4px;}
+
+    /* Fullscreen */
+    .fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${dark?"#0d0d0c":"#f8f8f6"};}
+    .fs-exit{position:absolute;top:20px;right:22px;background:${d.tag};border:1px solid ${d.b};border-radius:8px;padding:7px 13px;font-family:inherit;font-size:12px;color:${d.t3};cursor:pointer;}
+    .fs-exit:hover{color:${d.t};}
+    .fs-sub{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:${subColor};margin-bottom:6px;}
+    .fs-topic{font-size:14px;color:${d.t2};margin-bottom:32px;}
+    .fs-time{font-size:100px;font-weight:200;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:${d.t};}
+    .fs-actions{display:flex;gap:12px;margin-top:36px;}
+    .fs-btn{padding:12px 28px;border-radius:10px;border:none;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+    .fs-btn-stop{background:${d.danger};color:#fff;}
+    .fs-btn-pause{background:${d.tag};color:${d.t};border:1px solid ${d.b};}
+    .fs-done{text-align:center;}
+    .fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}
+
+    /* Coach */
+    .coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:13px;margin-bottom:16px;}
+    .coach-card{padding:17px;border-radius:12px;border:1px solid ${d.b};background:${d.card};position:relative;overflow:hidden;}
+    .coach-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
+    .coach-card.danger::before{background:${d.danger};}
+    .coach-card.success::before{background:${d.a2};}
+    .coach-card.warning::before{background:${d.gold};}
+    .coach-card.info::before{background:${d.a3};}
+    .coach-card.primary::before{background:${d.a1};}
+    .cc-icon{font-size:19px;margin-bottom:9px;}
+    .cc-title{font-size:12px;font-weight:600;color:${d.t};margin-bottom:7px;}
+    .cc-insight{font-size:11.5px;color:${d.t2};line-height:1.7;margin-bottom:9px;}
+    .cc-topics{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;}
+    .cc-topic{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;}
+    .cc-action{font-size:11px;color:${d.t3};padding:8px 10px;background:${d.hover};border-radius:7px;line-height:1.5;border-left:2px solid ${d.a1};}
+
+    /* Goals */
+    .goal-item{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border-radius:9px;margin-bottom:6px;border:1px solid ${d.b};background:${d.card};}
+    .goal-item.achieved{border-color:${d.a2}30;background:${d.a2}05;}
+    .goal-check{width:19px;height:19px;border-radius:50%;border:1.5px solid ${d.b};display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px;cursor:pointer;}
+    .goal-check.done{background:${d.a2};border-color:${d.a2};color:white;}
+    .goal-text{font-size:13px;flex:1;line-height:1.4;}
+    .goal-text.done{text-decoration:line-through;color:${d.t3};}
+    .goal-meta{font-size:10.5px;color:${d.t3};margin-top:2px;}
+    .goal-ai-badge{font-size:9px;padding:1px 6px;border-radius:20px;background:${d.a3}18;color:${d.a3};font-weight:500;flex-shrink:0;}
+    .goal-prog{height:2px;background:${d.b};border-radius:2px;overflow:hidden;margin-top:5px;}
+    .goal-prog-fill{height:100%;border-radius:2px;background:${d.a2};}
+
+    /* ── Streak ── */
+    .streak-hero{text-align:center;padding:24px 20px;border-radius:14px;background:linear-gradient(135deg,${d.a1}10,${d.a3}10);border:1px solid ${d.b};margin-bottom:13px;}
+    .streak-num{font-size:60px;font-weight:700;letter-spacing:-.04em;line-height:1;color:${d.a1};}
+    .milestone-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:9px;margin-bottom:3px;border:1px solid transparent;}
+    .milestone-row.reached{background:${d.hover};border-color:${d.b};}
+    .milestone-row:not(.reached){opacity:.38;}
+    .m-check{width:18px;height:18px;border-radius:50%;background:${d.a2};display:flex;align-items:center;justify-content:center;font-size:9px;color:white;flex-shrink:0;}
+    .m-lock{width:18px;height:18px;border-radius:50%;background:${d.b};display:flex;align-items:center;justify-content:center;font-size:9px;color:${d.t4};flex-shrink:0;}
+
+    /* ── PYQ Examgoal style ── */
+    .pyq-shell{display:flex;flex-direction:column;gap:13px;}
+    .pyq-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:12px;background:${d.card};border:1px solid ${d.b};}
+    .pyq-q-card{background:${d.card};border:1px solid ${d.b};border-radius:12px;overflow:hidden;}
+    .pyq-q-top{padding:16px 20px;border-bottom:1px solid ${d.b};background:${d.hover};}
+    .pyq-q-meta{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .pyq-tag{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;letter-spacing:.03em;}
+    .pyq-q-text{font-size:15px;line-height:1.85;color:${d.t};font-weight:400;}
+    .pyq-opts{padding:16px 20px;display:flex;flex-direction:column;gap:8px;}
+    .pyq-opt{display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:10px;border:1.5px solid ${d.b};cursor:pointer;background:${d.card};transition:all .14s;}
+    .pyq-opt:hover:not(.disabled){border-color:${d.a3};background:${d.a3}09;}
+    .pyq-opt.disabled{cursor:default;}
+    .pyq-opt.opt-correct{border-color:${d.a2};background:${d.a2}0d;}
+    .pyq-opt.opt-wrong{border-color:${d.danger};background:${d.danger}0d;}
+    .pyq-opt.opt-reveal{border-color:${d.a2}60;background:${d.a2}07;}
+    .pyq-opt-key{width:30px;height:30px;border-radius:50%;border:1.5px solid ${d.b};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;color:${d.t3};}
+    .pyq-opt.opt-correct .pyq-opt-key{border-color:${d.a2};background:${d.a2};color:white;}
+    .pyq-opt.opt-wrong .pyq-opt-key{border-color:${d.danger};background:${d.danger};color:white;}
+    .pyq-opt.opt-reveal .pyq-opt-key{border-color:${d.a2};color:${d.a2};}
+    .pyq-opt-text{font-size:13.5px;color:${d.t};flex:1;line-height:1.5;}
+    .pyq-opt.opt-correct .pyq-opt-text{color:${d.a2};font-weight:500;}
+    .pyq-opt.opt-wrong .pyq-opt-text{color:${d.danger};}
+    .pyq-result-banner{margin:0 20px 16px;padding:12px 16px;border-radius:10px;display:flex;align-items:center;gap:10px;}
+    .pyq-result-banner.correct{background:${d.a2}10;border:1px solid ${d.a2}30;}
+    .pyq-result-banner.incorrect{background:${d.danger}10;border:1px solid ${d.danger}30;}
+    .pyq-solution{margin:0 20px 20px;padding:16px;border-radius:10px;background:${d.hover};border:1px solid ${d.b};}
+    .pyq-sol-title{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${d.t3};margin-bottom:10px;}
+    .pyq-sol-text{font-size:13px;line-height:1.85;color:${d.t2};white-space:pre-wrap;}
+    .pyq-tip{margin:0 20px 20px;padding:11px 14px;border-radius:9px;background:${d.gold}0a;border:1px solid ${d.gold}22;font-size:12.5px;color:${d.t2};line-height:1.6;}
+    .pyq-nav{padding:16px 20px;border-top:1px solid ${d.b};display:flex;align-items:center;gap:10px;background:${d.hover};}
+    .pyq-stat-row{display:flex;gap:6px;}
+    .pyq-stat-pill{display:flex;flex-direction:column;align-items:center;padding:10px 14px;border-radius:9px;border:1px solid ${d.b};background:${d.card};min-width:64px;}
+    .pyq-stat-v{font-size:20px;font-weight:600;letter-spacing:-.02em;line-height:1;}
+    .pyq-stat-l{font-size:9.5px;color:${d.t3};margin-top:2px;text-transform:uppercase;letter-spacing:.04em;}
+
+    /* Onboarding */
+    .onboard{min-height:100vh;background:${d.bg};display:flex;align-items:center;justify-content:center;padding:40px;}
+    .ob-box{width:100%;max-width:400px;}
+    .ob-logo{font-size:28px;font-weight:900;color:${d.t};margin-bottom:28px;letter-spacing:-.05em;line-height:1;}
+    .ob-title{font-size:22px;font-weight:600;letter-spacing:-.03em;margin-bottom:4px;}
+    .ob-sub{font-size:13px;color:${d.t3};margin-bottom:24px;line-height:1.5;}
+    .class-opt{display:flex;align-items:center;gap:13px;padding:13px 15px;border:1.5px solid ${d.b};border-radius:11px;cursor:pointer;margin-bottom:8px;background:${d.card};}
+    .class-opt:hover{border-color:${d.bs};}
+    .class-opt.sel{border-color:${d.a1};background:${d.a1}07;}
+    .co-icon{width:32px;height:32px;border-radius:8px;background:${d.tag};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+  `;
+
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
 
@@ -1294,7 +3459,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     const isCD=timerMode==="countdown";
     const FS_R=120,FS_C=2*Math.PI*FS_R;
     return(
-      <div className="fs-overlay">  <button className="fs-exit" onClick={()=>setFullscreen(false)}>✕ back  <span style={{opacity:.4,fontSize:9}}>ESC</span></button>
+      <div className="fs-overlay"><style>{css}</style>
+        <button className="fs-exit" onClick={()=>setFullscreen(false)}>✕ back  <span style={{opacity:.4,fontSize:9}}>ESC</span></button>
         {timerDone?(
           <div className="fs-done">
             
@@ -1310,7 +3476,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {isCD?(
               <div className="fs-ring-wrap">
                 <svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 300 300">
-                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={subColor+"18"} strokeWidth="10"/>
+                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={`${subColor}18`} strokeWidth="10"/>
                   <circle cx="150" cy="150" r={FS_R} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="10"
                     strokeDasharray={FS_C} strokeDashoffset={FS_C*(1-cdPct)}
                     strokeLinecap="round" transform="rotate(-90 150 150)"
@@ -1352,8 +3518,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     return(
       <div className="card cp">
         <div className="mode-tab">
-          <button className={"mode-opt"+timerMode==="stopwatch"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
-          <button className={"mode-opt"+timerMode==="countdown"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("countdown");resetTimer();}}}>⏳ Countdown</button>
+          <button className={`mode-opt${timerMode==="stopwatch"?" active":""}`} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
+          <button className={`mode-opt${timerMode==="countdown"?" active":""}`} onClick={()=>{if(!timerOn){setTimerMode("countdown");resetTimer();}}}>⏳ Countdown</button>
         </div>
         <div className="field">
           <label className="fl">subject</label>
@@ -1388,7 +3554,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         <div style={{margin:"10px 0 8px"}}>
           <div className="ring-wrap">
             <svg className="ring-svg" viewBox="0 0 200 200">
-              <circle cx="100" cy="100" r={RING} fill="none" stroke={subColor+"12"} strokeWidth="7"/>
+              <circle cx="100" cy="100" r={RING} fill="none" stroke={`${subColor}12`} strokeWidth="7"/>
               {isCD?(
                 <circle cx="100" cy="100" r={RING} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="7"
                   strokeDasharray={CIRC} strokeDashoffset={CIRC*(1-cdPct)}
@@ -1436,6 +3602,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       {/* ── Ad Modals ── */}
 
       {fullscreen&&renderFS()}
+      <style>{css}</style>
       <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}>
       {/* ── Sticky Banner Ad ── */}
 
@@ -1450,7 +3617,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           <nav className="s-nav">
             <div className="s-sec" style={{marginTop:6}}>navigation</div>
             {TABS.map(t=>(
-              <div key={t.id} className={"s-item"+tab===t.id?" active":""} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
+              <div key={t.id} className={`s-item${tab===t.id?" active":""}`} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
                 <span className="s-icon">{t.icon}</span>
                 <span className="s-label">{t.label}</span>
               </div>
@@ -1503,14 +3670,11 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. days left. tick tock.`}
                   {tab==="coach"&&"your smartest situationship. i know things about you."}
                   {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
+                  {tab==="pyq"&&"3 hours. 54 questions. no one to save you."}
+                  {tab==="social"&&"study. compete. flex on the rankers above you."}
                   {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
                   {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
                   {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
-                  {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
-                  {tab==="rank"&&"where are you tracking. be honest."}
-                  {tab==="feed"&&"what's everyone up to."}
-                  {tab==="events"&&"compete. suffer. grow."}
-                  {tab==="profile"&&`@${profile?.username||"..."}`}
                 </div>
               </div>
             </div>
@@ -1520,15 +3684,20 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             </div>
           </div>}
 
+          {/* ── PRACTICE ── */}
+          {tab==="pyq"&&(
+            <div style={{width:"100%",minHeight:"100vh"}}>
+              <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
+            </div>
+          )}
 
-
-          <div className="inner">
+          <div className="inner" style={{display:tab==="pyq"?"none":"block"}}>
 
             {/* ── OVERVIEW ── */}
             {tab==="overview"&&(
               <div className="pin">
                 {/* ── Hero stats — editorial wide layout ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:24,background:d.b,width:"100%"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
                   {[
                     {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
                     {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
@@ -1542,7 +3711,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   ))}
                 </div>
-                <div className="g2" style={{gap:14,marginBottom:24,minWidth:0}}>
+                <div className="g2" style={{gap:14,marginBottom:32}}>
                   <div className="card cp" style={{padding:"24px 26px"}}>
                     <div className="cl" style={{marginBottom:18,letterSpacing:".14em"}}>Subject Time</div>
                     {Object.entries(SUBJECT_COLORS).map(([sub,color])=>(
@@ -1559,10 +3728,10 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div className="cl mb12">Today's Goals</div>
                     {todayGoals.length===0?(<div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>)
                     :todayGoals.slice(0,5).map(g=>(
-                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""} style={{padding:"9px 11px"}}>
-                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                      <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`} style={{padding:"9px 11px"}}>
+                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div style={{flex:1}}>
-                          <div className={"goal-text"+g.achieved?" done":""} style={{fontSize:12.5}}>{g.text}</div>
+                          <div className={`goal-text${g.achieved?" done":""}`} style={{fontSize:12.5}}>{g.text}</div>
                           <div className="goal-meta">{g.subject}{g.topic?` · ${g.topic}`:""}</div>
                         </div>
                         {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
@@ -1589,13 +3758,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card" style={{padding:"22px 24px"}}>
                     <div className="rowb" style={{marginBottom:16}}>
                       <div className="cl" style={{letterSpacing:".14em"}}>recent practice tests</div>
-                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>{}}>take a test →</button>}
+                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>switchTab("pyq")}>take a test →</button>}
                     </div>
                     {mocks.length===0?(
                       <div className="empty" style={{padding:"14px 0"}}>
                         <div className="et">zero attempts. bold. i like the confidence.</div>
                         <div className="es">uncharted territory. take the test.</div>
-                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>{}}>→ go to practice</button>
+                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>switchTab("pyq")}>→ go to practice</button>
                       </div>
                     ):[...mocks].reverse().slice(0,4).map(m=>{
                       const total=m.physics+m.chemistry+m.math;
@@ -1666,7 +3835,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 {coachCards&&(
                   <div className="coach-grid">
                     {coachCards.map((card,i)=>(
-                      <div key={i} className={"coach-card "+card.color}>
+                      <div key={i} className={`coach-card ${card.color}`}>
                         <div className="cc-icon">{card.icon}</div>
                         <div className="cc-title">{card.title}</div>
                         <div className="cc-insight">{card.insight}</div>
@@ -1747,11 +3916,11 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
                     const pct=Math.min((prog/g.target)*100,100);
                     return(
-                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""}>
-                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                      <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`}>
+                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div className="f1">
                           <div className="rowb">
-                            <div className={"goal-text"+g.achieved?" done":""}>{g.text}</div>
+                            <div className={`goal-text${g.achieved?" done":""}`}>{g.text}</div>
                             {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
                           </div>
                           <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
@@ -1920,624 +4089,10 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               );
             })()}
 
-
-
-            {/* ── FEED ── */}
-            {tab==="feed"&&(
-              <div className="pin">
-                {/* Camera modal */}
-                {showCamera&&(
-                  <div style={{position:"fixed",inset:0,zIndex:200,background:"#000",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                    <video ref={videoRef} style={{width:"100%",maxWidth:500,borderRadius:8}} playsInline muted/>
-                    <canvas ref={canvasRef} style={{display:"none"}}/>
-                    <div style={{display:"flex",gap:12,marginTop:20}}>
-                      <button onClick={capturePhoto} style={{padding:"14px 32px",borderRadius:40,background:d.t,color:d.bg,border:"none",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📸 capture</button>
-                      <button onClick={closeCamera} style={{padding:"14px 24px",borderRadius:40,background:"transparent",color:"#fff",border:"1px solid #fff",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>cancel</button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Compose box */}
-                <div className="card cp" style={{marginBottom:20}}>
-                  <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"flex-start"}}>
-                    <div style={{width:36,height:36,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",flexShrink:0,fontSize:14}}>
-                      {(user?.name||"S")[0].toUpperCase()}
-                    </div>
-                    <textarea
-                      value={postText} onChange={e=>setPostText(e.target.value)}
-                      placeholder={"what are you grinding today, @"+profile?.username||"..."+"?"}
-                      style={{flex:1,background:d.hover,border:`1px solid ${d.b}`,borderRadius:8,padding:"10px 14px",
-                        color:d.t,fontFamily:"'DM Sans',sans-serif",fontSize:13,resize:"none",outline:"none",minHeight:72,lineHeight:1.6}}
-                    />
-                  </div>
-                  {postCapture&&(
-                    <div style={{position:"relative",marginBottom:12,borderRadius:8,overflow:"hidden",maxHeight:240}}>
-                      <img src={postCapture} style={{width:"100%",objectFit:"cover",borderRadius:8,maxHeight:240}}/>
-                      <button onClick={()=>setPostCapture(null)}
-                        style={{position:"absolute",top:8,right:8,width:28,height:28,borderRadius:"50%",background:"rgba(0,0,0,.7)",color:"#fff",border:"none",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
-                    </div>
-                  )}
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <button onClick={openCamera}
-                      style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
-                      📷 camera
-                    </button>
-                    <button onClick={submitPost} disabled={postLoading||(!postText.trim()&&!postCapture)}
-                      style={{padding:"8px 20px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",opacity:postLoading||(!postText.trim()&&!postCapture)?.4:1}}>
-                      {postLoading?"posting...":"post"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Feed / Discover tabs */}
-                <div style={{display:"flex",gap:4,marginBottom:16}}>
-                  {[["following","Following"],["discover","Discover"]].map(([v,l])=>(
-                    <button key={v} onClick={()=>{setFeedTab(v);fetchFeed(v);}}
-                      style={{padding:"7px 18px",borderRadius:6,border:`1px solid ${feedTab===v?d.a1:d.b}`,
-                        background:feedTab===v?`${d.a1}12`:"transparent",color:feedTab===v?d.a1:d.t3,
-                        cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
-                      {l}
-                    </button>
-                  ))}
-                </div>
-
-                {feedLoading&&[1,2,3].map(i=>(
-                  <div key={i} className="card cp" style={{marginBottom:12}}>
-                    <div className="shim" style={{width:"40%",height:12}}/>
-                    <div className="shim" style={{width:"80%",height:10}}/>
-                    <div className="shim" style={{width:"60%",height:10}}/>
-                  </div>
-                ))}
-
-                {!feedLoading&&feed.length===0&&(
-                  <div className="card empty">
-                    <div style={{fontSize:28,marginBottom:10}}>◉</div>
-                    <div className="et">{feedTab==="following"?"follow some people first.":"no posts yet. be the first."}</div>
-                    <div className="es">find people in discover → follow → see their grind</div>
-                  </div>
-                )}
-
-                {feed.map(post=>{
-                  const p=post.profiles||{};
-                  const meta=post.metadata||{};
-                  const liked=post._liked||false;
-                  const timeAgo=t=>{const s=Math.floor((Date.now()-new Date(t))/1000);if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";if(s<86400)return Math.floor(s/3600)+"h";return Math.floor(s/86400)+"d";};
-
-                  return(
-                    <div key={post.id} className="card" style={{marginBottom:12,overflow:"hidden"}}>
-                      {/* Post header */}
-                      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px 10px"}}>
-                        <div style={{width:36,height:36,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",flexShrink:0,fontSize:14}}>
-                          {p.avatar_url?<img src={p.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(p.display_name||"?")[0].toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{p.display_name||p.username}</div>
-                          <div style={{fontSize:11,color:d.t3}}>@{p.username} · {timeAgo(post.created_at)}</div>
-                        </div>
-                        {meta.subject&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:`${SUBJECT_COLORS[meta.subject]||d.a3}18`,color:SUBJECT_COLORS[meta.subject]||d.a3,fontWeight:700}}>{meta.subject}</span>}
-                      </div>
-
-                      {/* Content */}
-                      {post.content&&<div style={{padding:"0 16px 10px",fontSize:13.5,color:d.t,lineHeight:1.7}}>{post.content}</div>}
-
-                      {/* Photo */}
-                      {post.image_url&&(
-                        <div style={{width:"100%",maxHeight:320,overflow:"hidden",marginBottom:2}}>
-                          <img src={post.image_url} style={{width:"100%",objectFit:"cover",maxHeight:320,display:"block"}}/>
-                        </div>
-                      )}
-
-                      {/* Session metadata chip */}
-                      {meta.duration&&(
-                        <div style={{margin:"0 16px 10px",display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t2}}>⏱ {fmt(meta.duration)}</span>
-                          {meta.topic&&<span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t2}}>{meta.topic}</span>}
-                          {meta.streak&&<span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1}}>🔥 {meta.streak}d streak</span>}
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      <div style={{display:"flex",gap:4,padding:"8px 12px",borderTop:`1px solid ${d.b}`}}>
-                        <button onClick={()=>likePost(post.id,liked)}
-                          style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${liked?d.danger+"60":d.b}`,color:liked?d.danger:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit",transition:"all .15s"}}>
-                          {liked?"♥":"♡"} {post.like_count||0}
-                        </button>
-                        <button style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
-                          ◌ {post.comment_count||0}
-                        </button>
-                        {post.user_id!==user?.id&&(
-                          <button onClick={()=>toggleFollow(post.user_id)}
-                            style={{marginLeft:"auto",padding:"6px 14px",borderRadius:6,
-                              background:follows.has(post.user_id)?d.hover:d.a1,
-                              color:follows.has(post.user_id)?d.t3:"#fff",
-                              border:`1px solid ${follows.has(post.user_id)?d.b:d.a1}`,
-                              cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>
-                            {follows.has(post.user_id)?"following":"+ follow"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {/* ── SOCIAL ── */}
+            {tab==="social"&&(
+              <SocialTab user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} sessions={sessions} streak={streak} fmt={fmt} today={today}/>
             )}
-
-            {/* ── EVENTS ── */}
-            {tab==="events"&&(
-              <div className="pin">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-                  <div>
-                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em"}}>Events</div>
-                    <div style={{fontSize:12,color:d.t3,fontStyle:"italic",marginTop:2}}>compete. suffer. grow.</div>
-                  </div>
-                  <button onClick={()=>setShowCreateEvent(p=>!p)}
-                    style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                    + Host Event
-                  </button>
-                </div>
-
-                {/* Create event form */}
-                {showCreateEvent&&(
-                  <div className="card cp" style={{marginBottom:20}}>
-                    <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:14}}>Host a New Event</div>
-                    <div className="field"><label className="fl">Title</label>
-                      <input className="inp" placeholder="e.g. Physics PYQ Marathon" value={eventForm.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}/>
-                    </div>
-                    <div className="field"><label className="fl">Description</label>
-                      <input className="inp" placeholder="what's the challenge?" value={eventForm.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}/>
-                    </div>
-                    <div className="g2" style={{gap:10,marginBottom:10}}>
-                      <div className="field">
-                        <label className="fl">Subject</label>
-                        <Select value={eventForm.subject} onChange={v=>setEventForm(p=>({...p,subject:v}))} options={["Physics","Chemistry","Mathematics","All"]} d={d}/>
-                      </div>
-                      <div className="field">
-                        <label className="fl">Type</label>
-                        <Select value={eventForm.type} onChange={v=>setEventForm(p=>({...p,type:v}))} options={["marathon","challenge","sprint"]} d={d}/>
-                      </div>
-                    </div>
-                    <div className="g2" style={{gap:10,marginBottom:14}}>
-                      <div className="field"><label className="fl">Starts At</label>
-                        <input className="inp" type="datetime-local" value={eventForm.starts_at} onChange={e=>setEventForm(p=>({...p,starts_at:e.target.value}))}/>
-                      </div>
-                      <div className="field"><label className="fl">Ends At</label>
-                        <input className="inp" type="datetime-local" value={eventForm.ends_at} onChange={e=>setEventForm(p=>({...p,ends_at:e.target.value}))}/>
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={createEvent} style={{padding:"9px 20px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>Create Event</button>
-                      <button onClick={()=>setShowCreateEvent(false)} style={{padding:"9px 16px",borderRadius:6,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>cancel</button>
-                    </div>
-                  </div>
-                )}
-
-                {eventsLoading&&[1,2].map(i=><div key={i} className="card cp" style={{marginBottom:12}}><div className="shim" style={{width:"60%"}}/><div className="shim" style={{width:"40%"}}/></div>)}
-
-                {!eventsLoading&&events.length===0&&(
-                  <div className="card empty">
-                    <div style={{fontSize:28,marginBottom:10}}>⚡</div>
-                    <div className="et">no events yet.</div>
-                    <div className="es">host the first one. be that person.</div>
-                  </div>
-                )}
-
-                {events.map(ev=>{
-                  const joined=joinedEvents.has(ev.id);
-                  const now=new Date();
-                  const start=new Date(ev.starts_at);
-                  const end=new Date(ev.ends_at);
-                  const isLive=now>=start&&now<=end;
-                  const isUpcoming=now<start;
-                  const isPast=now>end;
-                  const subColor=SUBJECT_COLORS[ev.subject]||d.a3;
-                  const typeEmoji={marathon:"🏃",challenge:"⚡",sprint:"🎯"}[ev.type]||"◎";
-                  return(
-                    <div key={ev.id} className="card" style={{marginBottom:12,overflow:"hidden",border:`1px solid ${isLive?d.a1+"60":d.b}`,borderTop:`3px solid ${isLive?d.a1:isPast?d.t4:subColor}`}}>
-                      <div style={{padding:"14px 16px"}}>
-                        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:8}}>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4,flexWrap:"wrap"}}>
-                              <span style={{fontSize:14}}>{typeEmoji}</span>
-                              <span style={{fontSize:14,fontWeight:700,color:d.t}}>{ev.title}</span>
-                              {isLive&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${d.a1}20`,color:d.a1,fontWeight:700,letterSpacing:".06em"}}>LIVE</span>}
-                              {isUpcoming&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${subColor}15`,color:subColor,fontWeight:700}}>UPCOMING</span>}
-                              {isPast&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:d.hover,color:d.t4,fontWeight:700}}>ENDED</span>}
-                            </div>
-                            {ev.description&&<div style={{fontSize:12,color:d.t3,marginBottom:6,lineHeight:1.5}}>{ev.description}</div>}
-                            <div style={{display:"flex",gap:10,fontSize:11,color:d.t3,flexWrap:"wrap"}}>
-                              <span>by @{ev.profiles?.username||"unknown"}</span>
-                              <span>·</span>
-                              <span style={{color:subColor}}>{ev.subject}</span>
-                              <span>·</span>
-                              <span>👥 {ev.member_count} joined</span>
-                            </div>
-                          </div>
-                          {!isPast&&(
-                            <button onClick={()=>joinEvent(ev.id)}
-                              style={{padding:"8px 16px",borderRadius:6,flexShrink:0,
-                                background:joined?d.hover:d.a1,color:joined?d.t3:"#fff",
-                                border:`1px solid ${joined?d.b:d.a1}`,cursor:"pointer",
-                                fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                              {joined?"joined ✓":"join"}
-                            </button>
-                          )}
-                        </div>
-                        <div style={{fontSize:11,color:d.t4}}>
-                          {start.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
-                          {" → "}
-                          {end.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── PROFILE ── */}
-            {tab==="profile"&&(
-              <div className="pin">
-                {/* Profile card */}
-                <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"28px 24px"}}>
-                  <div style={{width:64,height:64,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:24,margin:"0 auto 14px",overflow:"hidden"}}>
-                    {user?.avatar?<img src={user.avatar} style={{width:64,height:64,borderRadius:"50%",objectFit:"cover"}}/>:(user?.name||"S")[0].toUpperCase()}
-                  </div>
-                  <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:3}}>{user?.name||"Student"}</div>
-                  <div style={{fontSize:13,color:d.t3,marginBottom:4}}>@{profile?.username||"..."}</div>
-                  {profile?.bio&&<div style={{fontSize:12,color:d.t2,marginBottom:12,fontStyle:"italic"}}>{profile.bio}</div>}
-                  <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{jeClass}</span>
-                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>🔥 {streak}d streak</span>
-                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>⏱ {fmt(totalTime)} total</span>
-                  </div>
-                </div>
-
-                {/* Weekly leaderboard */}
-                <div className="card cp" style={{marginBottom:20}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                    <div className="cl">Weekly Leaderboard</div>
-                    <div style={{fontSize:10,color:d.t3}}>top 50 · resets Monday</div>
-                  </div>
-                  {leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
-                  {leaderboard.slice(0,20).map((entry,i)=>{
-                    const isMe=entry.id===user?.id;
-                    const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
-                    return(
-                      <div key={entry.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 4px",borderBottom:`1px solid ${d.b}44`,background:isMe?`${d.a1}06`:"transparent"}}>
-                        <div style={{width:26,textAlign:"center",fontWeight:700,fontSize:i<3?16:12,color:i<3?d.gold:d.t4,flexShrink:0}}>
-                          {medal||`${i+1}`}
-                        </div>
-                        <div style={{width:32,height:32,borderRadius:"50%",background:d.a3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0,overflow:"hidden"}}>
-                          {entry.avatar_url?<img src={entry.avatar_url} style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>:(entry.display_name||"?")[0].toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:12.5,fontWeight:isMe?700:500,color:isMe?d.a1:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {entry.display_name||entry.username}{isMe?" (you)":""}
-                          </div>
-                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {entry.je_class}</div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{fmt(entry.week_minutes)}</div>
-                          <div style={{fontSize:9,color:d.t3}}>this week</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Your stats */}
-                <div className="card cp">
-                  <div className="cl" style={{marginBottom:14}}>Your Stats</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
-                    {[
-                      {l:"Total Hours",v:fmt(totalTime),c:d.a1},
-                      {l:"This Week",v:fmt(weekTime),c:d.a2},
-                      {l:"Streak",v:`${streak}d`,c:d.a3},
-                      {l:"Study Days",v:new Set(sessions.map(s=>s.date)).size,c:d.gold},
-                    ].map(s=>(
-                      <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.hover,borderRadius:6,border:`1px solid ${d.b}`}}>
-                        <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif",lineHeight:1}}>{s.v}</div>
-                        <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── REVISION ── */}
-            {tab==="revision"&&(()=>{
-              const SUBS=["Physics","Chemistry","Mathematics"];
-              // Build due list
-              const allDue=[];
-              const allUpcoming=[];
-              const allNeverScheduled=[];
-              SUBS.forEach(sub=>{
-                const chapters=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,a)=>a.indexOf(t)===i);
-                chapters.forEach(topic=>{
-                  const key=sub+"|"+topic;
-                  const entry=revisionLog[key];
-                  const wt=JEE_WEIGHTAGE[sub]?.[topic]||"M";
-                  const hrs=sessions.filter(s=>s.subject===sub&&s.topic===topic).reduce((a,s)=>a+(s.duration||0),0);
-                  if(!entry){
-                    if(hrs>0) allNeverScheduled.push({sub,topic,wt,hrs});
-                  } else if(entry.nextRevisions?.length>0){
-                    const next=entry.nextRevisions[0];
-                    const item={sub,topic,wt,next,entry,hrs};
-                    if(isOverdue(next)||isDueToday(next)) allDue.push(item);
-                    else if(isDueSoon(next)) allUpcoming.push(item);
-                  }
-                });
-              });
-              // Sort overdue by weightage then overdue-ness
-              const wtO={"H":0,"M":1,"L":2};
-              allDue.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||daysBetween(b.next,today())-daysBetween(a.next,today()));
-              allUpcoming.sort((a,b)=>a.next.localeCompare(b.next));
-              allNeverScheduled.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||b.hrs-a.hrs);
-              const totalDue=allDue.length;
-              return(
-                <div className="pin">
-                  {/* Header stats */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:24}}>
-                    {[
-                      {l:"Due Today",v:allDue.length,c:allDue.length>0?d.danger:d.a2,hint:allDue.length===0?"you're up to date 🎉":"don't skip these"},
-                      {l:"Due Soon",v:allUpcoming.length,c:d.gold,hint:"next 2 days"},
-                      {l:"Scheduled",v:Object.keys(revisionLog).length,c:d.a3,hint:"chapters tracked"},
-                      {l:"Chapters Studied",v:allNeverScheduled.length+Object.keys(revisionLog).length,c:d.t3,hint:"studied at least once"},
-                    ].map(s=>(
-                      <div key={s.l} className="card cp" style={{textAlign:"center",padding:"16px 12px"}}>
-                        <div style={{fontSize:36,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:s.c,lineHeight:1}}>{s.v}</div>
-                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:d.t3,marginTop:4}}>{s.l}</div>
-                        <div style={{fontSize:10,color:d.t4,marginTop:2,fontStyle:"italic"}}>{s.hint}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Due now */}
-                  {allDue.length>0&&(
-                    <div style={{marginBottom:24}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-                        <div style={{fontSize:13,fontWeight:700,color:d.danger}}>⚠ Due for Revision</div>
-                        <div style={{flex:1,height:1,background:d.b}}/>
-                        <div style={{fontSize:10,color:d.t3}}>{allDue.length} chapter{allDue.length!==1?"s":""}</div>
-                      </div>
-                      {allDue.map(({sub,topic,wt,next,entry,hrs})=>{
-                        const overdueDays=daysBetween(next,today());
-                        const subColor=SUBJECT_COLORS[sub];
-                        const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
-                        return(
-                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",marginBottom:6,background:d.card,border:`1px solid ${d.danger}30`,borderLeft:`3px solid ${d.danger}`,borderRadius:4}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
-                                <span style={{fontSize:13,fontWeight:600,color:d.t}}>{topic}</span>
-                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
-                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
-                              </div>
-                              <div style={{fontSize:11,color:d.t3}}>
-                                {overdueDays===0?"due today":overdueDays>0?`${overdueDays}d overdue`:"due today"} · last studied {entry.lastStudied} · {fmt(hrs)} total
-                              </div>
-                            </div>
-                            <button onClick={()=>markRevisionDone(sub,topic)}
-                              style={{padding:"7px 14px",borderRadius:4,background:d.a2,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
-                              ✓ done
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Due soon */}
-                  {allUpcoming.length>0&&(
-                    <div style={{marginBottom:24}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-                        <div style={{fontSize:13,fontWeight:700,color:d.gold}}>⏳ Coming Up</div>
-                        <div style={{flex:1,height:1,background:d.b}}/>
-                      </div>
-                      {allUpcoming.map(({sub,topic,wt,next,hrs})=>{
-                        const daysLeft=daysBetween(today(),next);
-                        const subColor=SUBJECT_COLORS[sub];
-                        return(
-                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",marginBottom:4,background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${d.gold}`,borderRadius:4}}>
-                            <div style={{flex:1}}>
-                              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-                                <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{topic}</span>
-                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
-                              </div>
-                              <div style={{fontSize:10,color:d.t3,marginTop:2}}>in {daysLeft} day{daysLeft!==1?"s":""} · {next}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Never scheduled — chapters studied but not in revision system */}
-                  {allNeverScheduled.length>0&&(
-                    <div style={{marginBottom:24}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-                        <div style={{fontSize:13,fontWeight:700,color:d.t2}}>+ Add to Revision Schedule</div>
-                        <div style={{flex:1,height:1,background:d.b}}/>
-                        <div style={{fontSize:10,color:d.t3}}>studied but not tracked</div>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
-                        {allNeverScheduled.slice(0,12).map(({sub,topic,wt,hrs})=>{
-                          const subColor=SUBJECT_COLORS[sub];
-                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
-                          return(
-                            <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderRadius:4,cursor:"pointer"}}
-                              onClick={()=>markStudied(sub,topic)}>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topic}</div>
-                                <div style={{display:"flex",gap:5,marginTop:3}}>
-                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub.slice(0,4)}</span>
-                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
-                                  <span style={{fontSize:9,color:d.t3}}>{fmt(hrs)}</span>
-                                </div>
-                              </div>
-                              <span style={{fontSize:16,color:d.t3}}>+</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {Object.keys(revisionLog).length===0&&allNeverScheduled.length===0&&(
-                    <div className="card empty">
-                      <div style={{fontSize:28,marginBottom:10}}>↺</div>
-                      <div className="et">nothing to revise yet.</div>
-                      <div className="es">study a chapter, then add it here. i'll tell you when to review it.</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-
-            {/* ── RANK PREDICTOR ── */}
-            {tab==="rank"&&(()=>{
-              const SUBS=["Physics","Chemistry","Mathematics"];
-              const totalChapters=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.length;
-              },0);
-              const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
-              const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
-              const weekDays=[...new Set(sessions.filter(s=>s.date>=weekStart).map(s=>s.date))].length;
-              const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
-              const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
-              const highWtDone=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length;
-              },0);
-              const highWtTotal=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H").length;
-              },0);
-              const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
-
-              // Score each factor 0-100
-              const factors={
-                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:`${studiedChapters}/${totalChapters} chapters`},
-                consistency:{score:Math.min(100,Math.round((streak/90)*100)),weight:25,label:"Consistency (Streak)",hint:`${streak} day streak`},
-                dailyHrs:{score:Math.min(100,Math.round((avgDailyHrs/8)*100)),weight:20,label:"Daily Study Hours",hint:`${avgDailyHrs.toFixed(1)}h avg/day`},
-                highWeight:{score:highWtPct,weight:20,label:"High-Weight Chapters",hint:`${highWtDone}/${highWtTotal} done`},
-                pyqAcc:{score:pyqAcc||0,weight:15,label:"PYQ Accuracy",hint:pyqAcc!==null?`${pyqAcc}% accuracy`:"no PYQs yet"},
-              };
-              const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
-              const overallPct=Math.round(totalScore);
-
-              // Map score to rank range
-              const getRankRange=pct=>{
-                if(pct>=90)return{range:"Top 500",color:d.a2,label:"exceptional"};
-                if(pct>=80)return{range:"500–2,000",color:d.a2,label:"strong"};
-                if(pct>=70)return{range:"2,000–5,000",color:d.a3,label:"good"};
-                if(pct>=60)return{range:"5,000–10,000",color:d.gold,label:"on track"};
-                if(pct>=50)return{range:"10,000–20,000",color:d.gold,label:"needs work"};
-                if(pct>=35)return{range:"20,000–50,000",color:d.a1,label:"at risk"};
-                return{range:"50,000+",color:d.danger,label:"critical"};
-              };
-              const rankData=getRankRange(overallPct);
-              const daysLeft=Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000));
-
-              // What moves the needle most
-              const improvements=Object.entries(factors)
-                .filter(([,f])=>f.score<80)
-                .sort((a,b)=>b[1].weight-a[1].weight)
-                .slice(0,3)
-                .map(([k,f])=>({
-                  key:k, label:f.label,
-                  gap:80-f.score,
-                  impact:`+${Math.round((80-f.score)*f.weight/100)} pts`,
-                  action:{
-                    coverage:"study at least 1 new chapter every 2 days",
-                    consistency:"don't break your streak. even 30 min counts",
-                    dailyHrs:"aim for 6h/day minimum in the final stretch",
-                    highWeight:"prioritise H-weight chapters — they appear every year",
-                    pyqAcc:"drill PYQs in your weakest chapters",
-                  }[k]
-                }));
-
-              const dataAge=sessions.length<5;
-
-              return(
-                <div className="pin">
-                  {dataAge&&(
-                    <div style={{padding:"14px 18px",borderRadius:4,background:`${d.a1}10`,border:`1px solid ${d.a1}30`,marginBottom:20,fontSize:12,color:d.t2,lineHeight:1.7}}>
-                      ⚠ <strong>Early estimate.</strong> Log at least 5 study sessions for an accurate prediction. The more data, the better.
-                    </div>
-                  )}
-
-                  {/* Main rank card */}
-                  <div className="card cp" style={{textAlign:"center",marginBottom:20,padding:"32px 24px",position:"relative",overflow:"hidden"}}>
-                    <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at 50% 0%,${rankData.color}08,transparent 70%)`,pointerEvents:"none"}}/>
-                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:12}}>Estimated JEE Advanced Rank</div>
-                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:400,color:rankData.color,lineHeight:1,letterSpacing:"-.02em",marginBottom:8}}>
-                      {rankData.range}
-                    </div>
-                    <div style={{fontSize:13,color:d.t3,marginBottom:20,fontStyle:"italic"}}>{rankData.label} · based on your current trajectory</div>
-                    {/* Score ring */}
-                    <div style={{display:"inline-flex",alignItems:"center",gap:16,padding:"12px 24px",borderRadius:40,background:d.hover,border:`1px solid ${d.b}`}}>
-                      <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:700,color:rankData.color,fontFamily:"'DM Serif Display',serif"}}>{overallPct}</div>
-                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Prep Score</div>
-                      </div>
-                      <div style={{width:1,height:36,background:d.b}}/>
-                      <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft}</div>
-                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Factor breakdown */}
-                  <div className="card cp" style={{marginBottom:20}}>
-                    <div className="cl" style={{marginBottom:16}}>Score Breakdown</div>
-                    {Object.entries(factors).map(([key,f])=>(
-                      <div key={key} style={{marginBottom:14}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                          <div>
-                            <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{f.label}</span>
-                            <span style={{fontSize:10,color:d.t3,marginLeft:8,fontStyle:"italic"}}>{f.hint}</span>
-                          </div>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:11,color:d.t3}}>{f.weight}% weight</span>
-                            <span style={{fontSize:13,fontWeight:700,color:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,minWidth:32,textAlign:"right"}}>{f.score}</span>
-                          </div>
-                        </div>
-                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${f.score}%`,background:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,borderRadius:3,transition:"width .6s ease"}}/>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* What moves the needle */}
-                  {improvements.length>0&&(
-                    <div className="card cp" style={{marginBottom:20}}>
-                      <div className="cl" style={{marginBottom:12}}>What Moves Your Rank Most</div>
-                      {improvements.map((imp,i)=>(
-                        <div key={imp.key} style={{display:"flex",gap:12,padding:"12px 14px",marginBottom:6,borderRadius:4,background:d.hover,border:`1px solid ${d.b}`}}>
-                          <div style={{width:24,height:24,borderRadius:"50%",background:`${d.a1}20`,border:`1px solid ${d.a1}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>{i+1}</div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                              <span style={{fontSize:12,fontWeight:600,color:d.t}}>{imp.label}</span>
-                              <span style={{fontSize:11,fontWeight:700,color:d.a2,background:`${d.a2}15`,padding:"1px 7px",borderRadius:3}}>{imp.impact}</span>
-                            </div>
-                            <div style={{fontSize:11,color:d.t3,lineHeight:1.5}}>{imp.action}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{fontSize:11,color:d.t4,textAlign:"center",fontStyle:"italic",lineHeight:1.6}}>
-                    Rank estimate is based on your study patterns, consistency, and coverage relative to JEE Advanced toppers. It updates as you log more sessions.
-                  </div>
-                </div>
-              );
-            })()}
 
             {tab==="streaks"&&(
               <div className="pin">
@@ -2554,7 +4109,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     {STREAK_MILESTONES.map(b=>{
                       const reached=streak>=b.days;
                       return(
-                        <div key={b.days} className={"milestone-row"+reached?" reached":""}>
+                        <div key={b.days} className={`milestone-row${reached?" reached":""}`}>
                           <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
                           <div style={{flex:1}}>
                             <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
@@ -2595,7 +4150,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           const ds=dt.toISOString().split("T")[0];
                           const mins=sessions.filter(s=>s.date===ds).reduce((a,s)=>a+s.duration,0);
                           const op=mins===0?0:mins<60?.3:mins<120?.55:mins<240?.8:1;
-                          return <div key={ds} title={ds+": "+fmt(mins)||"No study"} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
+                          return <div key={ds} title={`${ds}: ${fmt(mins)||"No study"}`} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
                         })}
                       </div>
                       <div style={{display:"flex",gap:5,marginTop:6,alignItems:"center",fontSize:9.5,color:d.t4}}>
@@ -2610,6 +4165,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           </div>
         </div>
       </div>
+      {/* Mobile bottom tabs */}
+
     </>
   );
 }
