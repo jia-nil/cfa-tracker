@@ -1619,9 +1619,9 @@ function NTAMode({user,dark,onExit,onTestComplete,completedTests,onStoreTest}){
 
 
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SOCIAL TAB — Strava-style feed, follows, kudos, leaderboard, events, profiles
-// Uses raw fetch to Supabase REST (same pattern as the rest of the app)
+// SOCIAL TAB — username search, follow, kudos, feed, leaderboard, events, profiles
 // ─────────────────────────────────────────────────────────────────────────────
 
 function sbFetch(SB_URL, SB_ANON, path, opts={}) {
@@ -1637,8 +1637,8 @@ function sbFetch(SB_URL, SB_ANON, path, opts={}) {
   });
 }
 
-// ── Avatar initials helper ──────────────────────────────────────────────────
-const AV_COLORS = ["#e8845c","#5eaa8a","#7b8ec8","#c47d96","#8a9e5c","#7b92c2"];
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const AV_COLORS = ["#e8845c","#5eaa8a","#7b8ec8","#c47d96","#8a9e5c","#b08ec2"];
 function avColor(str) {
   if (!str) return AV_COLORS[0];
   let h = 0;
@@ -1656,88 +1656,217 @@ function socialTimeAgo(iso) {
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-IN", { day:"numeric", month:"short" });
 }
 function fmtDurSec(s) {
-  if (!s) return "—";
+  if (!s || s <= 0) return "—";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-  return h > 0 ? `${h}h ${m > 0 ? m + "m" : ""}` : `${m}m`;
+  return h > 0 ? `${h}h ${m > 0 ? m + "m" : ""}`.trim() : `${m}m`;
 }
+const SUB_C = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
 
-// ── Small Avatar ─────────────────────────────────────────────────────────────
-function SAvatar({ name, avatarUrl, size = 32, d }) {
+function SAvatar({ name, avatarUrl, size = 32, d, onClick }) {
   const bg = avColor(name);
   const style = {
     width: size, height: size, borderRadius: "50%",
     background: bg, color: "#fff",
     display: "flex", alignItems: "center", justifyContent: "center",
     fontSize: Math.round(size * 0.38), fontWeight: 700, flexShrink: 0,
-    overflow: "hidden", border: `1.5px solid ${d.b}`,
+    overflow: "hidden", cursor: onClick ? "pointer" : "default",
+    border: `2px solid ${d.b}`,
   };
-  if (avatarUrl) return <img src={avatarUrl} alt={name} style={{ ...style, objectFit: "cover" }} />;
-  return <div style={style}>{initials(name)}</div>;
+  const el = avatarUrl
+    ? <img src={avatarUrl} alt={name} style={{ ...style, objectFit:"cover", border:"none" }} />
+    : <div style={style}>{initials(name)}</div>;
+  if (onClick) return <button onClick={onClick} style={{ background:"none", border:"none", padding:0, cursor:"pointer", flexShrink:0, display:"inline-flex" }}>{el}</button>;
+  return el;
+}
+
+// ── Username setup modal — shown if user has no handle ────────────────────────
+function UsernameSetupModal({ user, d, SB_URL, SB_ANON, onDone }) {
+  const [handle, setHandle] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+
+  async function checkHandle(v) {
+    const clean = v.toLowerCase().replace(/[^a-z0-9_.]/g, "");
+    setHandle(clean);
+    setOk(false); setError("");
+    if (clean.length < 3) return;
+    setChecking(true);
+    const r = await sbFetch(SB_URL, SB_ANON, `profiles?handle=eq.${clean}&select=id`);
+    const rows = r.ok ? await r.json() : [];
+    if (rows.length > 0) setError("taken.");
+    else setOk(true);
+    setChecking(false);
+  }
+
+  async function save() {
+    if (!ok || handle.length < 3) return;
+    await sbFetch(SB_URL, SB_ANON, "profiles", {
+      method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify({ id: user.id, display_name: user.name, handle, avatar_url: user.avatar || null }),
+    });
+    onDone(handle);
+  }
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:999,
+      background:"rgba(0,0,0,.72)", display:"flex", alignItems:"center", justifyContent:"center", padding:16,
+    }}>
+      <div style={{
+        background: d.card, border:`1px solid ${d.b}`, borderRadius:6,
+        padding:"28px 28px 24px", width:"100%", maxWidth:380, textAlign:"center",
+      }}>
+        <div style={{ fontSize:28, marginBottom:10 }}>🦥</div>
+        <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:22, fontWeight:400, color:d.t, marginBottom:6 }}>
+          pick your handle.
+        </div>
+        <div style={{ fontSize:12, color:d.t3, marginBottom:20, lineHeight:1.6 }}>
+          people search you by this. make it yours.
+        </div>
+        <div style={{ position:"relative", marginBottom:14 }}>
+          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:13, color:d.t3, pointerEvents:"none" }}>@</span>
+          <input
+            value={handle}
+            onChange={e => checkHandle(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && ok && save()}
+            placeholder="your_handle"
+            maxLength={24}
+            style={{
+              width:"100%", boxSizing:"border-box",
+              padding:"10px 12px 10px 28px",
+              border:`1.5px solid ${error ? d.danger : ok ? d.a2 : d.b}`,
+              borderRadius:4, background:d.inp, color:d.t,
+              fontFamily:"inherit", fontSize:14, outline:"none",
+              transition:"border-color .15s",
+            }}
+          />
+          {checking && <span style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", fontSize:10, color:d.t3 }}>…</span>}
+          {ok && <span style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", fontSize:13, color:d.a2 }}>✓</span>}
+        </div>
+        {error && <div style={{ fontSize:11, color:d.danger, marginBottom:10 }}>@{handle} is {error}</div>}
+        <div style={{ fontSize:10.5, color:d.t4, marginBottom:16 }}>3–24 chars · letters, numbers, _ and . only</div>
+        <button
+          onClick={save} disabled={!ok}
+          style={{
+            width:"100%", padding:"11px", borderRadius:4,
+            background: ok ? d.a1 : d.t4, color:"#fff", border:"none",
+            fontFamily:"inherit", fontSize:13, fontWeight:700, cursor: ok ? "pointer" : "not-allowed",
+            opacity: ok ? 1 : 0.5, transition:"all .15s",
+          }}
+        >
+          lock it in →
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN SOCIAL TAB
 // ─────────────────────────────────────────────────────────────────────────────
 function SocialTab({ user, d, dark, SB_URL, SB_ANON, sessions, streak, fmt, today }) {
-  const [socialView, setSocialView] = useState("feed"); // feed | leaderboard | events | profile
+  const [socialView, setSocialView] = useState("feed");
   const [viewingUserId, setViewingUserId] = useState(null);
+  const [myHandle, setMyHandle] = useState(null);
+  const [handleChecked, setHandleChecked] = useState(false);
+  const [notifCount, setNotifCount] = useState(0);
+
+  // Check if user has a handle
+  useEffect(() => {
+    if (!user?.id) return;
+    sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${user.id}&select=handle`)
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        setMyHandle(rows[0]?.handle || null);
+        setHandleChecked(true);
+      });
+  }, [user?.id]);
+
+  // Notification count (kudos received in last 24h)
+  useEffect(() => {
+    if (!user?.id) return;
+    const since = new Date(Date.now() - 86400000).toISOString();
+    sbFetch(SB_URL, SB_ANON,
+      `social_kudos?select=post_id,social_posts!inner(user_id)&social_posts.user_id=eq.${user.id}&created_at=gte.${since}`
+    ).then(r => r.ok ? r.json() : []).then(rows => setNotifCount(rows.length));
+  }, [user?.id]);
 
   function openProfile(uid) { setViewingUserId(uid); setSocialView("profile"); }
   function goFeed() { setSocialView("feed"); setViewingUserId(null); }
 
-  const subviewStyle = { animation: "pin .18s ease" };
+  if (!handleChecked) return (
+    <div style={{ padding:"40px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>
+  );
+
+  if (handleChecked && !myHandle) return (
+    <UsernameSetupModal user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+      onDone={h => setMyHandle(h)} />
+  );
+
+  const NAV = [
+    { id:"feed",        label:"Feed" },
+    { id:"leaderboard", label:"Leaderboard" },
+    { id:"events",      label:"Events" },
+    { id:"explore",     label:"Explore" },
+    { id:"profile",     label:"Profile" },
+  ];
 
   return (
-    <div className="pin" style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div className="pin" style={{ maxWidth:900, margin:"0 auto" }}>
       {/* Sub-nav */}
-      <div style={{
-        display: "flex", gap: 4, marginBottom: 22,
-        borderBottom: `1px solid ${d.b}`, paddingBottom: 0,
-      }}>
-        {[
-          { id: "feed", label: "Feed" },
-          { id: "leaderboard", label: "Leaderboard" },
-          { id: "events", label: "Events" },
-          { id: "profile", label: "My Profile" },
-        ].map(v => (
+      <div style={{ display:"flex", gap:0, marginBottom:20, borderBottom:`1px solid ${d.b}` }}>
+        {NAV.map(v => (
           <button key={v.id}
             onClick={() => { setSocialView(v.id); if (v.id !== "profile") setViewingUserId(null); }}
             style={{
-              padding: "8px 14px", border: "none", background: "transparent",
-              fontFamily: "inherit", fontSize: 12, fontWeight: socialView === v.id ? 600 : 400,
-              color: socialView === v.id ? d.t : d.t3, cursor: "pointer",
-              borderBottom: `2px solid ${socialView === v.id ? d.a1 : "transparent"}`,
-              marginBottom: -1, transition: "color .12s",
-            }}>{v.label}
+              padding:"8px 14px", border:"none", background:"transparent",
+              fontFamily:"inherit", fontSize:12,
+              fontWeight: socialView === v.id ? 700 : 400,
+              color: socialView === v.id ? d.t : d.t3,
+              cursor:"pointer", position:"relative",
+              borderBottom:`2px solid ${socialView === v.id ? d.a1 : "transparent"}`,
+              marginBottom:-1, transition:"color .12s",
+            }}>
+            {v.label}
+            {v.id === "feed" && notifCount > 0 && (
+              <span style={{
+                position:"absolute", top:4, right:4,
+                width:6, height:6, borderRadius:"50%",
+                background:d.danger, display:"block",
+              }}/>
+            )}
           </button>
         ))}
       </div>
 
-      <div style={subviewStyle}>
-        {socialView === "feed" && (
-          <SocialFeed user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-            sessions={sessions} streak={streak} fmt={fmt} today={today}
-            onOpenProfile={openProfile} />
-        )}
-        {socialView === "leaderboard" && (
-          <SocialLeaderboard user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-            onOpenProfile={openProfile} />
-        )}
-        {socialView === "events" && (
-          <SocialEvents user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} />
-        )}
-        {socialView === "profile" && (
-          <SocialProfile
-            user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-            viewingUserId={viewingUserId || user?.id}
-            isOwn={!viewingUserId || viewingUserId === user?.id}
-            onOpenProfile={openProfile} onBack={goFeed}
-          />
-        )}
-      </div>
+      {socialView === "feed" && (
+        <SocialFeed user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+          sessions={sessions} streak={streak} fmt={fmt} today={today}
+          onOpenProfile={openProfile} myHandle={myHandle} />
+      )}
+      {socialView === "leaderboard" && (
+        <SocialLeaderboard user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} onOpenProfile={openProfile} />
+      )}
+      {socialView === "events" && (
+        <SocialEvents user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} myHandle={myHandle} />
+      )}
+      {socialView === "explore" && (
+        <SocialExplore user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} onOpenProfile={openProfile} />
+      )}
+      {socialView === "profile" && (
+        <SocialProfile user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+          viewingUserId={viewingUserId || user?.id}
+          isOwn={!viewingUserId || viewingUserId === user?.id}
+          onOpenProfile={openProfile} onBack={goFeed}
+          sessions={sessions}
+        />
+      )}
     </div>
   );
 }
@@ -1745,29 +1874,40 @@ function SocialTab({ user, d, dark, SB_URL, SB_ANON, sessions, streak, fmt, toda
 // ─────────────────────────────────────────────────────────────────────────────
 // FEED
 // ─────────────────────────────────────────────────────────────────────────────
-function SocialFeed({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, onOpenProfile }) {
+function SocialFeed({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, onOpenProfile, myHandle }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showLog, setShowLog] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [followingSet, setFollowingSet] = useState(new Set());
+  const [activeStreak, setActiveStreak] = useState(streak);
+  const [weekTotal, setWeekTotal] = useState(0);
 
-  useEffect(() => { fetchFeed(); fetchSuggestions(); }, []);
+  useEffect(() => {
+    fetchFeed();
+    // week total from sessions prop
+    const weekStart = (() => {
+      const d2 = new Date(); d2.setHours(0,0,0,0);
+      const day = d2.getDay();
+      d2.setDate(d2.getDate() - (day === 0 ? 6 : day - 1));
+      return d2.toISOString().split("T")[0];
+    })();
+    setWeekTotal(sessions.filter(s => s.date >= weekStart).reduce((a, s) => a + s.duration, 0));
+  }, []);
 
   async function fetchFeed() {
     setLoading(true);
     if (!user?.id) { setLoading(false); return; }
-    // Get follows
+
     const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
     const follows = fr.ok ? await fr.json() : [];
     const followIds = follows.map(f => f.following_id);
-    const feedIds = [user.id, ...followIds];
     setFollowingSet(new Set(followIds));
 
-    // Fetch posts
-    const ids = feedIds.map(id => `user_id=eq.${id}`).join(",");
+    const feedIds = [user.id, ...followIds];
+    const idsQ = feedIds.map(id => `user_id=eq.${id}`).join(",");
     const pr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?or=(${ids})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,avatar_url)&order=created_at.desc&limit=40`
+      `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`
     );
     const raw = pr.ok ? await pr.json() : [];
     setPosts(raw.map(p => ({
@@ -1775,224 +1915,209 @@ function SocialFeed({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, on
       kudos_count: (p.social_kudos || []).length,
       kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
     })));
-    setLoading(false);
-  }
 
-  async function fetchSuggestions() {
-    if (!user?.id) return;
-    const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
-    const follows = fr.ok ? await fr.json() : [];
-    const followIds = follows.map(f => f.following_id);
-    const exclude = [user.id, ...followIds];
-    const excStr = exclude.map(id => `id.neq.${id}`).join(",");
-    const pr = await sbFetch(SB_URL, SB_ANON,
-      `profiles?and=(${excStr})&select=id,display_name,avatar_url&limit=4&order=created_at.desc`
+    // suggestions
+    const excStr = feedIds.map(id => `id.neq.${id}`).join(",");
+    const sr = await sbFetch(SB_URL, SB_ANON,
+      `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url&limit=4&order=created_at.desc`
     );
-    setSuggestions(pr.ok ? await pr.json() : []);
+    setSuggestions(sr.ok ? await sr.json() : []);
+    setLoading(false);
   }
 
   async function toggleKudos(post) {
     if (!user?.id || post.user_id === user.id) return;
     if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON,
-        `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`,
-        { method: "DELETE" }
-      );
+      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE" });
     } else {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos`, {
-        method: "POST",
+      await sbFetch(SB_URL, SB_ANON, "social_kudos", {
+        method:"POST", prefer:"return=minimal",
         body: JSON.stringify({ post_id: post.id, user_id: user.id }),
-        prefer: "return=minimal",
       });
     }
     setPosts(prev => prev.map(p => p.id === post.id ? {
-      ...p,
-      kudos_given: !p.kudos_given,
-      kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
+      ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
     } : p));
   }
 
-  async function followUser(uid) {
+  async function followSuggestion(uid) {
     if (!user?.id) return;
-    await sbFetch(SB_URL, SB_ANON, `social_follows`, {
-      method: "POST",
+    await sbFetch(SB_URL, SB_ANON, "social_follows", {
+      method:"POST", prefer:"return=minimal",
       body: JSON.stringify({ follower_id: user.id, following_id: uid }),
-      prefer: "return=minimal",
     });
     setFollowingSet(prev => new Set([...prev, uid]));
     setSuggestions(prev => prev.filter(s => s.id !== uid));
     fetchFeed();
   }
 
-  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8" };
+  const todayMins = sessions.filter(s => s.date === today()).reduce((a, s) => a + s.duration, 0);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16, alignItems: "start" }}>
-      {/* Main feed column */}
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 252px", gap:16, alignItems:"start" }}>
+      {/* Main */}
       <div>
-        {/* Log session card */}
-        <div className="card cp" style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: showLog ? 14 : 0 }}>
-            <SAvatar name={user?.name} avatarUrl={user?.avatar} size={36} d={d} />
-            <button
-              onClick={() => setShowLog(v => !v)}
-              style={{
-                flex: 1, padding: "9px 14px", background: d.hover,
-                border: `1px solid ${d.b}`, borderRadius: 3,
-                color: d.t3, fontSize: 13, fontFamily: "inherit",
-                cursor: "pointer", textAlign: "left", transition: "all .12s",
-              }}
-            >
-              {showLog ? "▲ close" : "post a study session…"}
+        {/* Post composer */}
+        <div className="card" style={{ marginBottom:12, overflow:"hidden" }}>
+          <div style={{ padding: showLog ? "14px 16px 10px" : "12px 16px", display:"flex", alignItems:"center", gap:10 }}>
+            <SAvatar name={user?.name} avatarUrl={user?.avatar} size={34} d={d} />
+            <button onClick={() => setShowLog(v => !v)} style={{
+              flex:1, padding:"8px 12px", background:d.hover,
+              border:`1px solid ${d.b}`, borderRadius:3,
+              color:d.t3, fontSize:12.5, fontFamily:"inherit",
+              cursor:"pointer", textAlign:"left", transition:"all .12s",
+            }}>
+              {showLog ? "▲ cancel" : `what did you grind on today, @${myHandle}?`}
             </button>
           </div>
           {showLog && (
-            <LogPostForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-              onPosted={() => { setShowLog(false); fetchFeed(); }} />
+            <div style={{ padding:"0 16px 14px" }}>
+              <LogPostForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+                onPosted={() => { setShowLog(false); fetchFeed(); }} />
+            </div>
           )}
         </div>
 
         {loading ? (
-          <div style={{ padding: "32px 0", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>
-            loading feed…
-          </div>
+          <div style={{ padding:"40px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading feed…</div>
         ) : posts.length === 0 ? (
-          <div className="card cp" style={{ textAlign: "center", padding: "36px 24px" }}>
-            <div style={{ fontSize: 28, marginBottom: 10 }}>👋</div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: 6 }}>feed's empty.</div>
-            <div style={{ fontSize: 12, color: d.t3, lineHeight: 1.7 }}>
-              follow some students or post your first session to get started.
+          <div className="card cp" style={{ textAlign:"center", padding:"40px 24px" }}>
+            <div style={{ fontSize:28, marginBottom:10 }}>👋</div>
+            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:18, color:d.t, marginBottom:6 }}>feed's empty.</div>
+            <div style={{ fontSize:12, color:d.t3, lineHeight:1.7 }}>
+              follow students from Explore, or post your first session above.
             </div>
           </div>
-        ) : posts.map(post => {
-          const profile = post.profiles || {};
-          const sc = SUB_C[post.subject] || d.a3;
-          return (
-            <div key={post.id} className="card" style={{ marginBottom: 10, overflow: "hidden" }}>
-              {/* Header */}
-              <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
-                <button onClick={() => onOpenProfile(post.user_id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
-                  <SAvatar name={profile.display_name} avatarUrl={profile.avatar_url} size={34} d={d} />
-                </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                    <button onClick={() => onOpenProfile(post.user_id)}
-                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, color: d.t, fontFamily: "inherit", padding: 0 }}>
-                      {profile.display_name || "Student"}
-                    </button>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}18`, color: sc, letterSpacing: ".03em" }}>
-                      {post.subject}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 10.5, color: d.t3, marginTop: 1 }}>{socialTimeAgo(post.created_at)}</div>
-                </div>
-              </div>
-
-              {/* Content */}
-              <div style={{ padding: "0 16px 12px" }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: post.notes ? 6 : 10 }}>
-                  {post.title}
-                </div>
-                {post.notes && (
-                  <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.7, marginBottom: 10 }}>{post.notes}</div>
-                )}
-
-                {/* Stats strip */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                  {[
-                    { label: "Duration", val: fmtDurSec(post.duration_seconds) },
-                    { label: "Problems", val: post.problems_solved ?? "—" },
-                    { label: "Accuracy", val: post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
-                  ].map(s => (
-                    <div key={s.label} style={{
-                      flex: 1, textAlign: "center", background: d.hover,
-                      borderRadius: 3, padding: "7px 4px",
-                      border: `1px solid ${d.b}`,
-                    }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: d.t, letterSpacing: "-.01em" }}>{s.val}</div>
-                      <div style={{ fontSize: 9, color: d.t4, textTransform: "uppercase", letterSpacing: ".06em", marginTop: 2 }}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div style={{
-                padding: "9px 16px", borderTop: `1px solid ${d.b}`,
-                display: "flex", gap: 4, background: d.hover,
-              }}>
-                {[
-                  {
-                    label: `${post.kudos_count} Kudos`,
-                    icon: post.kudos_given ? "♥" : "♡",
-                    active: post.kudos_given,
-                    color: post.kudos_given ? "#d4604a" : d.t3,
-                    disabled: post.user_id === user?.id,
-                    onClick: () => toggleKudos(post),
-                  },
-                  { label: "Comment", icon: "◎", color: d.t3, onClick: () => {} },
-                  { label: "Share", icon: "↗", color: d.t3, style: { marginLeft: "auto" }, onClick: () => {} },
-                ].map(a => (
-                  <button key={a.label}
-                    onClick={a.onClick} disabled={a.disabled}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 5,
-                      padding: "5px 8px", border: "none", background: "transparent",
-                      fontFamily: "inherit", fontSize: 12, color: a.color,
-                      cursor: a.disabled ? "default" : "pointer", opacity: a.disabled ? 0.4 : 1,
-                      borderRadius: 3, transition: "background .1s",
-                      ...(a.style || {}),
-                    }}>
-                    <span style={{ fontSize: 14 }}>{a.icon}</span>{a.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        ) : posts.map(post => <PostCard key={post.id} post={post} user={user} d={d} onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile} />)}
       </div>
 
       {/* Right sidebar */}
-      <div>
-        {/* Your stats mini */}
-        <div className="card cp" style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 12 }}>your week</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+      <div style={{ position:"sticky", top:16 }}>
+        {/* Your stats */}
+        <div className="card cp" style={{ marginBottom:10 }}>
+          <div style={{ fontSize:8.5, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:10 }}>your week</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
             {[
-              { label: "streak", val: `${streak}d` },
-              { label: "today", val: fmt(sessions.filter(s => s.date === today()).reduce((a, s) => a + s.duration, 0)) || "0m" },
+              { label:"streak", val:`${streak}d`, color:d.a1 },
+              { label:"today", val: todayMins > 0 ? fmt(todayMins) : "0m", color: todayMins >= 120 ? d.a2 : d.t },
+              { label:"this week", val: weekTotal > 0 ? fmt(weekTotal) : "0m", color:d.a3 },
+              { label:"sessions", val: sessions.filter(s => s.date === today()).length, color:d.t },
             ].map(s => (
-              <div key={s.label} style={{ textAlign: "center", padding: "8px", background: d.hover, borderRadius: 3 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: d.a1 }}>{s.val}</div>
-                <div style={{ fontSize: 9, color: d.t4, marginTop: 2, textTransform: "uppercase", letterSpacing: ".06em" }}>{s.label}</div>
+              <div key={s.label} style={{ textAlign:"center", padding:"8px 4px", background:d.hover, borderRadius:3 }}>
+                <div style={{ fontSize:17, fontWeight:700, color:s.color, letterSpacing:"-.01em" }}>{s.val}</div>
+                <div style={{ fontSize:9, color:d.t4, marginTop:2, textTransform:"uppercase", letterSpacing:".06em" }}>{s.label}</div>
               </div>
             ))}
           </div>
+          {streak >= 3 && (
+            <div style={{ fontSize:11, color:d.a1, textAlign:"center", padding:"5px", background:`${d.a1}10`, borderRadius:3 }}>
+              🔥 {streak} day streak — keep it going
+            </div>
+          )}
         </div>
 
         {/* Suggestions */}
         {suggestions.length > 0 && (
-          <div className="card cp" style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 10 }}>who to follow</div>
+          <div className="card cp" style={{ marginBottom:10 }}>
+            <div style={{ fontSize:8.5, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:10 }}>who to follow</div>
             {suggestions.map(s => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <button onClick={() => onOpenProfile(s.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                  <SAvatar name={s.display_name} avatarUrl={s.avatar_url} size={28} d={d} />
-                </button>
-                <button onClick={() => onOpenProfile(s.id)}
-                  style={{ flex: 1, background: "none", border: "none", cursor: "pointer", textAlign: "left", fontSize: 12, fontWeight: 500, color: d.t, fontFamily: "inherit", padding: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {s.display_name || "Student"}
-                </button>
-                {!followingSet.has(s.id) && (
-                  <button onClick={() => followUser(s.id)}
-                    style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 2, background: `${d.a1}15`, color: d.a1, border: `1px solid ${d.a1}30`, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-                    follow
+              <div key={s.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:9 }}>
+                <SAvatar name={s.display_name} avatarUrl={s.avatar_url} size={28} d={d} onClick={() => onOpenProfile(s.id)} />
+                <div style={{ flex:1, minWidth:0 }}>
+                  <button onClick={() => onOpenProfile(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:12.5, fontWeight:600, color:d.t, padding:0, textAlign:"left", display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"100%" }}>
+                    {s.display_name}
                   </button>
-                )}
+                  <div style={{ fontSize:10, color:d.t3 }}>@{s.handle}</div>
+                </div>
+                <button onClick={() => followSuggestion(s.id)} style={{
+                  fontSize:10, fontWeight:700, padding:"3px 9px", borderRadius:2,
+                  background:`${d.a1}15`, color:d.a1, border:`1px solid ${d.a1}30`,
+                  cursor:"pointer", fontFamily:"inherit", flexShrink:0,
+                }}>follow</button>
               </div>
             ))}
           </div>
         )}
+
+        {/* Motivation */}
+        <div style={{
+          padding:"12px 14px", borderRadius:3,
+          background:`${d.a1}08`, border:`1px solid ${d.a1}18`,
+          fontSize:11, color:d.t2, lineHeight:1.7, fontStyle:"italic",
+        }}>
+          {todayMins === 0
+            ? "the leaderboard doesn't care that you're tired."
+            : todayMins < 60
+            ? `${fmt(todayMins)} done. the people above you are still studying.`
+            : `${fmt(todayMins)} today. you're dangerous.`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Post Card (reused in feed + profile) ─────────────────────────────────────
+function PostCard({ post, user, d, onKudos, onOpenProfile }) {
+  const profile = post.profiles || {};
+  const sc = SUB_C[post.subject] || d.a3;
+  const isOwn = post.user_id === user?.id;
+
+  return (
+    <div className="card" style={{ marginBottom:10, overflow:"hidden", transition:"box-shadow .15s" }}>
+      <div style={{ padding:"14px 16px 10px", display:"flex", alignItems:"center", gap:10 }}>
+        <SAvatar name={profile.display_name} avatarUrl={profile.avatar_url} size={34} d={d}
+          onClick={() => onOpenProfile(post.user_id)} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
+            <button onClick={() => onOpenProfile(post.user_id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, color:d.t, padding:0 }}>
+              {profile.display_name || "Student"}
+            </button>
+            {profile.handle && <span style={{ fontSize:10.5, color:d.t3 }}>@{profile.handle}</span>}
+            <span style={{ fontSize:10, fontWeight:700, padding:"1px 7px", borderRadius:2, background:`${sc}18`, color:sc }}>
+              {post.subject}
+            </span>
+          </div>
+          <div style={{ fontSize:10.5, color:d.t4, marginTop:1 }}>{socialTimeAgo(post.created_at)}</div>
+        </div>
+      </div>
+
+      <div style={{ padding:"0 16px 12px" }}>
+        <div style={{ fontSize:14, fontWeight:600, color:d.t, marginBottom: post.notes ? 6 : 10, lineHeight:1.4 }}>
+          {post.title}
+        </div>
+        {post.notes && (
+          <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{post.notes}</div>
+        )}
+        <div style={{ display:"flex", gap:6 }}>
+          {[
+            { label:"Duration", val: fmtDurSec(post.duration_seconds) },
+            { label:"Problems", val: post.problems_solved ?? "—" },
+            { label:"Accuracy", val: post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
+          ].map(s => (
+            <div key={s.label} style={{
+              flex:1, textAlign:"center", background:d.hover,
+              borderRadius:3, padding:"7px 4px", border:`1px solid ${d.b}`,
+            }}>
+              <div style={{ fontSize:14, fontWeight:700, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
+              <div style={{ fontSize:9, color:d.t4, textTransform:"uppercase", letterSpacing:".06em", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding:"9px 16px", borderTop:`1px solid ${d.b}`, display:"flex", gap:2, background:d.hover, alignItems:"center" }}>
+        <button onClick={onKudos} disabled={isOwn} style={{
+          display:"flex", alignItems:"center", gap:5, padding:"5px 9px",
+          border:"none", background: post.kudos_given ? `${d.danger}12` : "transparent",
+          borderRadius:3, fontFamily:"inherit", fontSize:12,
+          color: post.kudos_given ? d.danger : d.t3,
+          cursor: isOwn ? "default" : "pointer",
+          opacity: isOwn ? 0.4 : 1, transition:"all .12s",
+        }}>
+          <span style={{ fontSize:15, lineHeight:1 }}>{post.kudos_given ? "♥" : "♡"}</span>
+          {post.kudos_count} {post.kudos_count === 1 ? "kudo" : "kudos"}
+        </button>
+        <span style={{ marginLeft:"auto", fontSize:10.5, color:d.t4 }}>{socialTimeAgo(post.created_at)}</span>
       </div>
     </div>
   );
@@ -2002,28 +2127,25 @@ function SocialFeed({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, on
 // LOG POST FORM
 // ─────────────────────────────────────────────────────────────────────────────
 function LogPostForm({ user, d, SB_URL, SB_ANON, onPosted }) {
-  const [form, setForm] = useState({ title: "", subject: "Physics", duration_seconds: "", problems_solved: "", accuracy_pct: "", notes: "" });
+  const [form, setForm] = useState({ title:"", subject:"Physics", dur:"", problems:"", accuracy:"", notes:"" });
   const [saving, setSaving] = useState(false);
 
   async function submit() {
     if (!form.title.trim() || !user?.id) return;
     setSaving(true);
-    // Upsert profile first (display_name, avatar)
     await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method: "POST",
-      body: JSON.stringify({ id: user.id, display_name: user.name, avatar_url: user.avatar || null }),
-      prefer: "resolution=merge-duplicates,return=minimal",
+      method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
+      body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
     });
     await sbFetch(SB_URL, SB_ANON, "social_posts", {
-      method: "POST",
-      prefer: "return=minimal",
+      method:"POST", prefer:"return=minimal",
       body: JSON.stringify({
         user_id: user.id,
         title: form.title.trim(),
         subject: form.subject,
-        duration_seconds: form.duration_seconds ? parseInt(form.duration_seconds) * 60 : null,
-        problems_solved: form.problems_solved ? parseInt(form.problems_solved) : null,
-        accuracy_pct: form.accuracy_pct ? parseInt(form.accuracy_pct) : null,
+        duration_seconds: form.dur ? parseInt(form.dur) * 60 : null,
+        problems_solved: form.problems ? parseInt(form.problems) : null,
+        accuracy_pct: form.accuracy ? parseInt(form.accuracy) : null,
         notes: form.notes.trim() || null,
       }),
     });
@@ -2032,42 +2154,137 @@ function LogPostForm({ user, d, SB_URL, SB_ANON, onPosted }) {
   }
 
   const inp = {
-    padding: "8px 11px", border: `1px solid ${d.b}`, borderRadius: 3,
-    background: d.inp, color: d.t, fontFamily: "inherit", fontSize: 13, outline: "none",
-  };
-  const sel = {
-    ...inp, cursor: "pointer",
+    padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3,
+    background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none",
+    width:"100%", boxSizing:"border-box",
   };
 
   return (
-    <div style={{ animation: "selIn .18s ease" }}>
-      <div style={{ marginBottom: 9 }}>
-        <input style={{ ...inp, width: "100%", boxSizing: "border-box" }}
-          placeholder="Session title — e.g. Electrostatics deep dive"
-          value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 7, marginBottom: 9 }}>
-        <select style={sel} value={form.subject} onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}>
+    <div style={{ animation:"selIn .18s ease" }}>
+      <input style={{ ...inp, marginBottom:8 }}
+        placeholder="Session title — e.g. Rotational Motion deep dive"
+        value={form.title} onChange={e => setForm(f => ({ ...f, title:e.target.value }))} />
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:7, marginBottom:8 }}>
+        <select style={{ ...inp, cursor:"pointer" }} value={form.subject}
+          onChange={e => setForm(f => ({ ...f, subject:e.target.value }))}>
           <option>Physics</option><option>Chemistry</option><option>Mathematics</option>
         </select>
-        <input style={inp} type="number" min="1" placeholder="Duration (min)" value={form.duration_seconds}
-          onChange={e => setForm(f => ({ ...f, duration_seconds: e.target.value }))} />
-        <input style={inp} type="number" min="0" placeholder="Problems" value={form.problems_solved}
-          onChange={e => setForm(f => ({ ...f, problems_solved: e.target.value }))} />
-        <input style={inp} type="number" min="0" max="100" placeholder="Accuracy %" value={form.accuracy_pct}
-          onChange={e => setForm(f => ({ ...f, accuracy_pct: e.target.value }))} />
+        <input style={inp} type="number" min="1" placeholder="Mins" value={form.dur}
+          onChange={e => setForm(f => ({ ...f, dur:e.target.value }))} />
+        <input style={inp} type="number" min="0" placeholder="Problems" value={form.problems}
+          onChange={e => setForm(f => ({ ...f, problems:e.target.value }))} />
+        <input style={inp} type="number" min="0" max="100" placeholder="Acc %" value={form.accuracy}
+          onChange={e => setForm(f => ({ ...f, accuracy:e.target.value }))} />
       </div>
-      <div style={{ marginBottom: 9 }}>
-        <textarea style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical", minHeight: 60 }}
-          placeholder="Notes — what did you cover? any breakthroughs?"
-          value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
-      </div>
-      <div style={{ display: "flex", gap: 7, justifyContent: "flex-end" }}>
+      <textarea style={{ ...inp, resize:"vertical", minHeight:54, marginBottom:8 }}
+        placeholder="notes — what clicked? what broke your brain?"
+        value={form.notes} onChange={e => setForm(f => ({ ...f, notes:e.target.value }))} />
+      <div style={{ display:"flex", justifyContent:"flex-end" }}>
         <button className="btn btn-d" onClick={submit} disabled={saving || !form.title.trim()}
-          style={{ padding: "8px 18px", fontSize: 12, opacity: saving || !form.title.trim() ? 0.4 : 1 }}>
-          {saving ? "posting…" : "post to feed"}
+          style={{ padding:"8px 18px", fontSize:12, opacity: saving || !form.title.trim() ? 0.4 : 1 }}>
+          {saving ? "posting…" : "post to feed →"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPLORE — search by username
+// ─────────────────────────────────────────────────────────────────────────────
+function SocialExplore({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [all, setAll] = useState([]);
+  const [followingSet, setFollowingSet] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { fetchAll(); }, []);
+
+  async function fetchAll() {
+    const [ar, fr] = await Promise.all([
+      sbFetch(SB_URL, SB_ANON, `profiles?id=neq.${user?.id || "none"}&select=id,display_name,handle,avatar_url,target_college&order=display_name`),
+      user?.id ? sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`) : Promise.resolve({ ok:true, json: ()=>[] }),
+    ]);
+    const users = ar.ok ? await ar.json() : [];
+    const follows = fr.ok ? await fr.json() : [];
+    setAll(users);
+    setResults(users);
+    setFollowingSet(new Set(follows.map(f => f.following_id)));
+    setLoading(false);
+  }
+
+  function search(q) {
+    setQuery(q);
+    if (!q.trim()) { setResults(all); return; }
+    const lq = q.toLowerCase();
+    setResults(all.filter(u =>
+      u.handle?.toLowerCase().includes(lq) ||
+      u.display_name?.toLowerCase().includes(lq) ||
+      u.target_college?.toLowerCase().includes(lq)
+    ));
+  }
+
+  async function toggleFollow(uid) {
+    if (!user?.id) return;
+    if (followingSet.has(uid)) {
+      await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&following_id=eq.${uid}`, { method:"DELETE" });
+      setFollowingSet(prev => { const s = new Set(prev); s.delete(uid); return s; });
+    } else {
+      await sbFetch(SB_URL, SB_ANON, "social_follows", {
+        method:"POST", prefer:"return=minimal",
+        body: JSON.stringify({ follower_id:user.id, following_id:uid }),
+      });
+      setFollowingSet(prev => new Set([...prev, uid]));
+    }
+  }
+
+  return (
+    <div>
+      {/* Search bar */}
+      <div style={{ position:"relative", marginBottom:14 }}>
+        <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:14, color:d.t3, pointerEvents:"none" }}>⌕</span>
+        <input
+          value={query} onChange={e => search(e.target.value)}
+          placeholder="search by @username, name, or target college…"
+          style={{
+            width:"100%", boxSizing:"border-box",
+            padding:"10px 12px 10px 34px",
+            border:`1px solid ${d.b}`, borderRadius:3,
+            background:d.inp, color:d.t,
+            fontFamily:"inherit", fontSize:13, outline:"none",
+          }}
+        />
+      </div>
+
+      {loading ? (
+        <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>
+      ) : results.length === 0 ? (
+        <div className="card cp" style={{ textAlign:"center", padding:"32px" }}>
+          <div style={{ fontSize:13, color:d.t3, fontStyle:"italic" }}>no one found. they might be hiding.</div>
+        </div>
+      ) : results.map(u => (
+        <div key={u.id} className="card" style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", marginBottom:8 }}>
+          <SAvatar name={u.display_name} avatarUrl={u.avatar_url} size={40} d={d} onClick={() => onOpenProfile(u.id)} />
+          <div style={{ flex:1, minWidth:0 }}>
+            <button onClick={() => onOpenProfile(u.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13.5, fontWeight:700, color:d.t, padding:0, textAlign:"left" }}>
+              {u.display_name}
+            </button>
+            <div style={{ fontSize:11, color:d.t3 }}>
+              @{u.handle}{u.target_college ? ` · 🎯 ${u.target_college}` : ""}
+            </div>
+          </div>
+          <button onClick={() => toggleFollow(u.id)} style={{
+            padding:"6px 14px", border:`1px solid ${followingSet.has(u.id) ? d.b : d.a1}`,
+            borderRadius:3, background: followingSet.has(u.id) ? "transparent" : d.a1,
+            color: followingSet.has(u.id) ? d.t3 : "#fff",
+            fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer",
+            transition:"all .12s", flexShrink:0,
+          }}>
+            {followingSet.has(u.id) ? "following" : "follow"}
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -2077,7 +2294,7 @@ function LogPostForm({ user, d, SB_URL, SB_ANON, onPosted }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function SocialLeaderboard({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
   const [board, setBoard] = useState([]);
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useState("week");
   const [subject, setSubject] = useState("All");
   const [loading, setLoading] = useState(true);
 
@@ -2085,14 +2302,14 @@ function SocialLeaderboard({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
 
   async function fetchBoard() {
     setLoading(true);
-    let q = `social_posts?select=user_id,duration_seconds,subject,created_at,profiles:user_id(id,display_name,avatar_url)`;
+    let q = `social_posts?select=user_id,duration_seconds,subject,created_at,profiles:user_id(id,display_name,handle,avatar_url)`;
     if (subject !== "All") q += `&subject=eq.${subject}`;
     if (period === "week") {
-      const since = new Date(); since.setDate(since.getDate() - 7);
-      q += `&created_at=gte.${since.toISOString()}`;
+      const s = new Date(); s.setDate(s.getDate() - 7);
+      q += `&created_at=gte.${s.toISOString()}`;
     } else if (period === "month") {
-      const since = new Date(); since.setMonth(since.getMonth() - 1);
-      q += `&created_at=gte.${since.toISOString()}`;
+      const s = new Date(); s.setMonth(s.getMonth() - 1);
+      q += `&created_at=gte.${s.toISOString()}`;
     }
     q += `&limit=500`;
     const r = await sbFetch(SB_URL, SB_ANON, q);
@@ -2102,82 +2319,110 @@ function SocialLeaderboard({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
     data.forEach(s => {
       if (!s.profiles) return;
       const uid = s.user_id;
-      if (!map[uid]) map[uid] = { profile: s.profiles, total_seconds: 0 };
+      if (!map[uid]) map[uid] = { profile:s.profiles, total_seconds:0, sessions:0 };
       map[uid].total_seconds += (s.duration_seconds || 0);
+      map[uid].sessions++;
     });
 
-    setBoard(Object.values(map).filter(e => e.profile).sort((a, b) => b.total_seconds - a.total_seconds).slice(0, 50));
+    setBoard(Object.values(map).filter(e => e.profile).sort((a,b) => b.total_seconds - a.total_seconds).slice(0, 50));
     setLoading(false);
   }
 
   const myRank = board.findIndex(e => e.profile.id === user?.id) + 1;
-  const MEDAL = ["🥇", "🥈", "🥉"];
+  const myEntry = board.find(e => e.profile.id === user?.id);
+  const MEDAL = ["🥇","🥈","🥉"];
 
-  const pillBtn = (label, active, onClick) => (
+  const pill = (label, active, onClick) => (
     <button key={label} onClick={onClick} style={{
-      padding: "5px 12px", border: `1px solid ${active ? d.a1 : d.b}`,
-      borderRadius: 3, background: active ? `${d.a1}18` : "transparent",
-      color: active ? d.a1 : d.t3, fontFamily: "inherit", fontSize: 11,
-      fontWeight: active ? 700 : 400, cursor: "pointer", transition: "all .12s",
+      padding:"5px 12px", border:`1px solid ${active ? d.a1 : d.b}`,
+      borderRadius:3, background: active ? `${d.a1}18` : "transparent",
+      color: active ? d.a1 : d.t3, fontFamily:"inherit", fontSize:11,
+      fontWeight: active ? 700 : 400, cursor:"pointer", transition:"all .12s",
     }}>{label}</button>
   );
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 16, alignItems: "start" }}>
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 200px", gap:16, alignItems:"start" }}>
       <div>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
-          {[["all", "All time"], ["week", "This week"], ["month", "This month"]].map(([v, l]) =>
-            pillBtn(l, period === v, () => setPeriod(v))
-          )}
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:7 }}>
+          {[["week","This week"],["month","This month"],["all","All time"]].map(([v,l]) => pill(l, period===v, () => setPeriod(v)))}
         </div>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 14 }}>
-          {["All", "Physics", "Chemistry", "Mathematics"].map(s =>
-            pillBtn(s, subject === s, () => setSubject(s))
-          )}
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:14 }}>
+          {["All","Physics","Chemistry","Mathematics"].map(s => pill(s, subject===s, () => setSubject(s)))}
         </div>
 
         <div className="card">
           {loading ? (
-            <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading…</div>
+            <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>
           ) : board.length === 0 ? (
-            <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>no data yet. be the first.</div>
+            <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>
+              no data yet. post a session to get ranked.
+            </div>
           ) : board.map((entry, i) => {
             const isMe = entry.profile.id === user?.id;
+            const pct = board[0]?.total_seconds > 0 ? (entry.total_seconds / board[0].total_seconds) * 100 : 0;
             return (
               <div key={entry.profile.id} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 16px",
-                borderBottom: `1px solid ${d.b}`,
+                display:"flex", alignItems:"center", gap:10,
+                padding:"11px 16px",
+                borderBottom: i < board.length - 1 ? `1px solid ${d.b}` : "none",
                 background: isMe ? `${d.a1}08` : "transparent",
+                position:"relative",
               }}>
-                <span style={{ fontSize: i < 3 ? 18 : 13, fontWeight: 700, width: 28, textAlign: "center", color: i < 3 ? "inherit" : d.t3 }}>
-                  {i < 3 ? MEDAL[i] : i + 1}
+                {/* bar bg */}
+                <div style={{ position:"absolute", left:0, top:0, bottom:0, width:`${pct}%`, background:`${d.a1}06`, pointerEvents:"none" }}/>
+                <span style={{ fontSize: i < 3 ? 17 : 13, fontWeight:700, width:26, textAlign:"center", color: i < 3 ? "inherit" : d.t4, flexShrink:0, zIndex:1 }}>
+                  {i < 3 ? MEDAL[i] : i+1}
                 </span>
-                <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
-                  <SAvatar name={entry.profile.display_name} avatarUrl={entry.profile.avatar_url} size={30} d={d} />
-                </button>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <button onClick={() => onOpenProfile(entry.profile.id)}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: isMe ? 700 : 500, color: isMe ? d.a1 : d.t, padding: 0 }}>
-                    {entry.profile.display_name}{isMe && <span style={{ fontSize: 9, marginLeft: 5, background: `${d.a1}18`, color: d.a1, padding: "1px 5px", borderRadius: 2 }}>you</span>}
+                <SAvatar name={entry.profile.display_name} avatarUrl={entry.profile.avatar_url} size={30} d={d}
+                  onClick={() => onOpenProfile(entry.profile.id)} />
+                <div style={{ flex:1, minWidth:0, zIndex:1 }}>
+                  <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight: isMe ? 700 : 500, color: isMe ? d.a1 : d.t, padding:0 }}>
+                    {entry.profile.display_name}
+                    {isMe && <span style={{ fontSize:9, marginLeft:6, background:`${d.a1}18`, color:d.a1, padding:"1px 5px", borderRadius:2 }}>you</span>}
                   </button>
+                  {entry.profile.handle && <div style={{ fontSize:10, color:d.t4 }}>@{entry.profile.handle}</div>}
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: d.a1 }}>{fmtDurSec(entry.total_seconds)}</div>
+                <div style={{ textAlign:"right", zIndex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color: isMe ? d.a1 : d.t }}>{fmtDurSec(entry.total_seconds)}</div>
+                  <div style={{ fontSize:9, color:d.t4 }}>{entry.sessions} session{entry.sessions !== 1 ? "s" : ""}</div>
+                </div>
               </div>
             );
           })}
         </div>
       </div>
 
-      <div>
-        <div className="card cp">
-          <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: d.t4, marginBottom: 10 }}>your rank</div>
-          <div style={{ textAlign: "center", padding: "8px 0" }}>
-            <div style={{ fontSize: 44, fontWeight: 700, color: d.a1, letterSpacing: "-.04em", lineHeight: 1 }}>
+      <div style={{ position:"sticky", top:16 }}>
+        <div className="card cp" style={{ marginBottom:10 }}>
+          <div style={{ fontSize:8.5, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:10 }}>your rank</div>
+          <div style={{ textAlign:"center", padding:"6px 0" }}>
+            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:48, fontWeight:400, color:d.a1, letterSpacing:"-.04em", lineHeight:1 }}>
               {myRank > 0 ? `#${myRank}` : "—"}
             </div>
-            <div style={{ fontSize: 11, color: d.t3, marginTop: 4 }}>out of {board.length} students</div>
+            <div style={{ fontSize:11, color:d.t3, marginTop:4 }}>of {board.length} students</div>
           </div>
+          {myEntry && myRank > 1 && board[myRank-2] && (
+            <div style={{ fontSize:10.5, color:d.t3, textAlign:"center", marginTop:8, padding:"6px", background:d.hover, borderRadius:3 }}>
+              {fmtDurSec(board[myRank-2].total_seconds - myEntry.total_seconds)} behind #{myRank-1}
+            </div>
+          )}
+        </div>
+
+        {/* Subject mini-ranks */}
+        <div className="card cp">
+          <div style={{ fontSize:8.5, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:10 }}>subject ranks</div>
+          {["Physics","Chemistry","Mathematics"].map(sub => (
+            <button key={sub} onClick={() => { setSubject(sub); }}
+              style={{ display:"flex", justifyContent:"space-between", width:"100%",
+                padding:"6px 0", background:"none", border:"none", borderBottom:`1px solid ${d.b}`,
+                fontFamily:"inherit", fontSize:12, color:d.t, cursor:"pointer",
+                ":last-child": { borderBottom:"none" },
+              }}>
+              <span>{sub}</span>
+              <span style={{ fontSize:10, color:SUB_C[sub], fontWeight:700 }}>view →</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -2185,28 +2430,32 @@ function SocialLeaderboard({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EVENTS
+// EVENTS — create public/private, register, join live
 // ─────────────────────────────────────────────────────────────────────────────
-function SocialEvents({ user, d, SB_URL, SB_ANON }) {
+function SocialEvents({ user, d, SB_URL, SB_ANON, myHandle }) {
   const [events, setEvents] = useState([]);
   const [registered, setRegistered] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [tab, setTab] = useState("upcoming"); // upcoming | mine
 
-  useEffect(() => { fetchEvents(); }, []);
+  useEffect(() => { fetchEvents(); }, [tab]);
 
   async function fetchEvents() {
     setLoading(true);
     const now = new Date().toISOString();
-    const er = await sbFetch(SB_URL, SB_ANON,
-      `study_events?ends_at=gte.${now}&select=*,study_event_registrations(count)&order=starts_at.asc`
-    );
-    const evts = er.ok ? await er.json() : [];
-    setEvents(evts);
+    let q;
+    if (tab === "mine") {
+      q = `study_events?created_by=eq.${user?.id}&select=*,study_event_registrations(count)&order=starts_at.desc`;
+    } else {
+      // public + private ones where user is invited/registered
+      q = `study_events?ends_at=gte.${now}&or=(is_private.eq.false,created_by.eq.${user?.id})&select=*,study_event_registrations(count)&order=starts_at.asc&limit=30`;
+    }
+    const er = await sbFetch(SB_URL, SB_ANON, q);
+    setEvents(er.ok ? await er.json() : []);
 
     if (user?.id) {
-      const rr = await sbFetch(SB_URL, SB_ANON,
-        `study_event_registrations?user_id=eq.${user.id}&select=event_id`
-      );
+      const rr = await sbFetch(SB_URL, SB_ANON, `study_event_registrations?user_id=eq.${user.id}&select=event_id`);
       const regs = rr.ok ? await rr.json() : [];
       setRegistered(new Set(regs.map(r => r.event_id)));
     }
@@ -2216,15 +2465,12 @@ function SocialEvents({ user, d, SB_URL, SB_ANON }) {
   async function toggleReg(evtId) {
     if (!user?.id) return;
     if (registered.has(evtId)) {
-      await sbFetch(SB_URL, SB_ANON,
-        `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`,
-        { method: "DELETE" }
-      );
+      await sbFetch(SB_URL, SB_ANON, `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`, { method:"DELETE" });
       setRegistered(prev => { const s = new Set(prev); s.delete(evtId); return s; });
     } else {
       await sbFetch(SB_URL, SB_ANON, "study_event_registrations", {
-        method: "POST", prefer: "return=minimal",
-        body: JSON.stringify({ event_id: evtId, user_id: user.id }),
+        method:"POST", prefer:"return=minimal",
+        body: JSON.stringify({ event_id:evtId, user_id:user.id }),
       });
       setRegistered(prev => new Set([...prev, evtId]));
     }
@@ -2235,63 +2481,96 @@ function SocialEvents({ user, d, SB_URL, SB_ANON }) {
     return new Date(e.starts_at) <= now && new Date(e.ends_at) >= now;
   };
 
-  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8", "All Subjects": "#7b8ec8" };
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+        <div style={{ display:"flex", gap:4 }}>
+          {[["upcoming","Upcoming"],["mine","My Events"]].map(([v,l]) => (
+            <button key={v} onClick={() => setTab(v)} style={{
+              padding:"5px 12px", border:`1px solid ${tab===v ? d.a1 : d.b}`,
+              borderRadius:3, background: tab===v ? `${d.a1}18` : "transparent",
+              color: tab===v ? d.a1 : d.t3, fontFamily:"inherit", fontSize:11,
+              fontWeight: tab===v ? 700 : 400, cursor:"pointer",
+            }}>{l}</button>
+          ))}
+        </div>
+        <button onClick={() => setShowCreate(v => !v)} style={{
+          padding:"7px 14px", border:`1px solid ${d.a1}`,
+          borderRadius:3, background: showCreate ? d.a1 : "transparent",
+          color: showCreate ? "#fff" : d.a1,
+          fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer",
+        }}>
+          {showCreate ? "✕ cancel" : "+ create event"}
+        </button>
+      </div>
 
-  return loading ? (
-    <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading…</div>
-  ) : events.length === 0 ? (
-    <div className="card cp" style={{ textAlign: "center", padding: "40px" }}>
-      <div style={{ fontSize: 28, marginBottom: 10 }}>🗓</div>
-      <div style={{ fontSize: 14, fontWeight: 500, color: d.t, marginBottom: 6 }}>no upcoming events.</div>
-      <div style={{ fontSize: 12, color: d.t3 }}>check back soon. events are added weekly.</div>
-    </div>
-  ) : (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {events.map(evt => {
+      {/* Create form */}
+      {showCreate && (
+        <CreateEventForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+          onCreated={() => { setShowCreate(false); fetchEvents(); }} />
+      )}
+
+      {/* Events list */}
+      {loading ? (
+        <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>
+      ) : events.length === 0 ? (
+        <div className="card cp" style={{ textAlign:"center", padding:"40px" }}>
+          <div style={{ fontSize:28, marginBottom:10 }}>🗓</div>
+          <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:16, color:d.t, marginBottom:6 }}>
+            {tab === "mine" ? "you haven't created any events." : "no upcoming events."}
+          </div>
+          <div style={{ fontSize:12, color:d.t3 }}>
+            {tab === "mine" ? "create one above." : "check back soon, or create your own."}
+          </div>
+        </div>
+      ) : events.map(evt => {
         const live = isLive(evt);
         const sc = SUB_C[evt.subject] || d.a3;
         const count = evt.study_event_registrations?.[0]?.count || 0;
         const reg = registered.has(evt.id);
+        const isOwn = evt.created_by === user?.id;
 
         return (
-          <div key={evt.id} className="card" style={{ overflow: "hidden" }}>
-            <div style={{ padding: "14px 16px 12px" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: d.t }}>{evt.name}</span>
-                    {live
-                      ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 2, background: "#d4604a18", color: "#d4604a" }}>🔴 Live</span>
-                      : <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 2, background: `${d.a3}18`, color: d.a3 }}>Upcoming</span>}
+          <div key={evt.id} className="card" style={{ marginBottom:10, overflow:"hidden" }}>
+            <div style={{ padding:"14px 16px 12px" }}>
+              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, marginBottom:8 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap", marginBottom:5 }}>
+                    <span style={{ fontSize:15, fontWeight:700, color:d.t }}>{evt.name}</span>
+                    {live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:"#d4604a18", color:"#d4604a" }}>🔴 Live</span>}
+                    {!live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:`${d.a3}18`, color:d.a3 }}>Upcoming</span>}
+                    {evt.is_private && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:`${d.t4}18`, color:d.t4 }}>🔒 Private</span>}
+                    {isOwn && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:`${d.a1}18`, color:d.a1 }}>yours</span>}
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}15`, color: sc }}>{evt.subject}</span>
+                  <span style={{ fontSize:10, fontWeight:700, padding:"1px 7px", borderRadius:2, background:`${sc}15`, color:sc }}>{evt.subject}</span>
                 </div>
               </div>
 
               {evt.description && (
-                <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.7, marginBottom: 10 }}>{evt.description}</div>
+                <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{evt.description}</div>
               )}
 
-              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:12 }}>
                 {[
-                  { icon: "📅", val: new Date(evt.starts_at).toLocaleString("en-IN", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) },
-                  { icon: "⏱", val: (() => { const mins = Math.round((new Date(evt.ends_at) - new Date(evt.starts_at)) / 60000); const h = Math.floor(mins / 60); return h > 0 ? `${h}h ${mins % 60 > 0 ? (mins % 60) + "m" : ""}` : `${mins}m`; })() },
-                  { icon: "👥", val: `${count} registered` },
-                ].map((m, i) => (
-                  <span key={i} style={{ fontSize: 11, color: d.t3 }}>{m.icon} {m.val}</span>
-                ))}
+                  { icon:"📅", val: new Date(evt.starts_at).toLocaleString("en-IN",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) },
+                  { icon:"⏱", val: (() => { const mins = Math.round((new Date(evt.ends_at) - new Date(evt.starts_at))/60000); const h = Math.floor(mins/60); return h>0 ? `${h}h${mins%60>0?" "+(mins%60)+"m":""}` : `${mins}m`; })() },
+                  { icon:"👥", val:`${count} joined` },
+                ].map((m,i) => <span key={i} style={{ fontSize:11, color:d.t3 }}>{m.icon} {m.val}</span>)}
               </div>
 
-              <button onClick={() => toggleReg(evt.id)} style={{
-                padding: "9px 20px", border: "none", borderRadius: 3,
-                background: reg ? d.hover : live ? "#d4604a" : d.a1,
-                color: reg ? d.t3 : "#fff",
-                border: reg ? `1px solid ${d.b}` : "none",
-                fontFamily: "inherit", fontSize: 12, fontWeight: 700,
-                cursor: "pointer", transition: "all .12s",
-              }}>
-                {reg ? (live ? "✓ Joined" : "✓ Registered — cancel?") : (live ? "Join live session" : "Register")}
-              </button>
+              {!isOwn && (
+                <button onClick={() => toggleReg(evt.id)} style={{
+                  padding:"8px 20px", border:`1px solid ${reg ? d.b : live ? "#d4604a" : d.a1}`,
+                  borderRadius:3,
+                  background: reg ? "transparent" : live ? "#d4604a" : d.a1,
+                  color: reg ? d.t3 : "#fff",
+                  fontFamily:"inherit", fontSize:12, fontWeight:700,
+                  cursor:"pointer", transition:"all .12s",
+                }}>
+                  {reg ? (live ? "✓ in — good luck" : "✓ registered — cancel?") : (live ? "join live" : "register")}
+                </button>
+              )}
             </div>
           </div>
         );
@@ -2300,57 +2579,169 @@ function SocialEvents({ user, d, SB_URL, SB_ANON }) {
   );
 }
 
+// ── Create Event Form ─────────────────────────────────────────────────────────
+function CreateEventForm({ user, d, SB_URL, SB_ANON, onCreated }) {
+  const now = new Date();
+  now.setMinutes(Math.ceil(now.getMinutes()/15)*15, 0, 0);
+  const localISO = (d2) => new Date(d2.getTime() - d2.getTimezoneOffset()*60000).toISOString().slice(0,16);
+
+  const [form, setForm] = useState({
+    name: "", subject:"Physics", description:"",
+    starts_at: localISO(now),
+    duration_hours: "2",
+    is_private: false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    if (!form.name.trim()) { setError("give it a name."); return; }
+    setSaving(true); setError("");
+    const starts = new Date(form.starts_at);
+    const ends = new Date(starts.getTime() + parseFloat(form.duration_hours) * 3600000);
+    const r = await sbFetch(SB_URL, SB_ANON, "study_events", {
+      method:"POST", prefer:"return=minimal",
+      body: JSON.stringify({
+        name: form.name.trim(),
+        subject: form.subject,
+        description: form.description.trim() || null,
+        starts_at: starts.toISOString(),
+        ends_at: ends.toISOString(),
+        is_private: form.is_private,
+        created_by: user?.id,
+      }),
+    });
+    setSaving(false);
+    if (r.ok) onCreated();
+    else setError("something went wrong. try again.");
+  }
+
+  const inp = {
+    padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3,
+    background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none",
+    width:"100%", boxSizing:"border-box",
+  };
+
+  return (
+    <div className="card cp" style={{ marginBottom:14, animation:"selIn .18s ease" }}>
+      <div style={{ fontSize:12, fontWeight:700, color:d.t, marginBottom:12 }}>create an event</div>
+
+      <div style={{ marginBottom:8 }}>
+        <input style={inp} placeholder="Event name — e.g. Physics Marathon, Chem Blitz…" maxLength={60}
+          value={form.name} onChange={e => setForm(f => ({ ...f, name:e.target.value }))} />
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:8 }}>
+        <select style={{ ...inp, cursor:"pointer" }} value={form.subject}
+          onChange={e => setForm(f => ({ ...f, subject:e.target.value }))}>
+          <option>Physics</option><option>Chemistry</option><option>Mathematics</option>
+          <option>All Subjects</option>
+        </select>
+        <input style={inp} type="datetime-local" value={form.starts_at}
+          onChange={e => setForm(f => ({ ...f, starts_at:e.target.value }))} />
+        <select style={{ ...inp, cursor:"pointer" }} value={form.duration_hours}
+          onChange={e => setForm(f => ({ ...f, duration_hours:e.target.value }))}>
+          {["0.5","1","1.5","2","3","4","6"].map(h => <option key={h} value={h}>{h === "0.5" ? "30 min" : `${h}h`}</option>)}
+        </select>
+      </div>
+
+      <div style={{ marginBottom:8 }}>
+        <textarea style={{ ...inp, resize:"vertical", minHeight:54 }}
+          placeholder="Description — what will you cover? any rules?"
+          value={form.description} onChange={e => setForm(f => ({ ...f, description:e.target.value }))} />
+      </div>
+
+      {/* Private toggle */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:"10px 12px", background:d.hover, borderRadius:3, border:`1px solid ${d.b}` }}>
+        <button onClick={() => setForm(f => ({ ...f, is_private:!f.is_private }))}
+          style={{
+            width:36, height:20, borderRadius:10,
+            background: form.is_private ? d.a1 : d.b,
+            border:"none", cursor:"pointer", position:"relative", transition:"background .2s",
+            flexShrink:0,
+          }}>
+          <span style={{
+            position:"absolute", top:2, left: form.is_private ? 18 : 2,
+            width:16, height:16, borderRadius:"50%", background:"#fff",
+            transition:"left .2s",
+          }}/>
+        </button>
+        <div>
+          <div style={{ fontSize:12, fontWeight:600, color:d.t }}>{form.is_private ? "🔒 Private event" : "🌐 Public event"}</div>
+          <div style={{ fontSize:10.5, color:d.t3 }}>
+            {form.is_private ? "only people you share the link with can see it" : "anyone on StudyRun can find and join this"}
+          </div>
+        </div>
+      </div>
+
+      {error && <div style={{ fontSize:11, color:d.danger, marginBottom:8 }}>{error}</div>}
+
+      <button className="btn btn-d" onClick={submit} disabled={saving || !form.name.trim()}
+        style={{ padding:"9px 20px", fontSize:12, opacity: saving || !form.name.trim() ? 0.4 : 1 }}>
+        {saving ? "creating…" : "create event →"}
+      </button>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// PROFILE PAGE
+// PROFILE
 // ─────────────────────────────────────────────────────────────────────────────
-function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenProfile, onBack }) {
+function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenProfile, onBack, sessions }) {
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
-  const [stats, setStats] = useState({ totalSecs: 0, followers: 0, following: 0 });
+  const [stats, setStats] = useState({ totalSecs:0, followers:0, following:0, sessions:0 });
   const [isFollowing, setIsFollowing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState("sessions"); // sessions | stats
 
   useEffect(() => { loadProfile(); }, [viewingUserId]);
 
   async function loadProfile() {
     setLoading(true);
-    // Profile
     const pr = await sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${viewingUserId}&select=*`);
     const profiles = pr.ok ? await pr.json() : [];
     let prof = profiles[0];
-    if (!prof && isOwn) {
-      // auto-create profile
-      await sbFetch(SB_URL, SB_ANON, "profiles", {
-        method: "POST", prefer: "return=minimal",
-        body: JSON.stringify({ id: user.id, display_name: user.name, avatar_url: user.avatar || null }),
-      });
-      prof = { id: user.id, display_name: user.name, avatar_url: user.avatar, bio: null, target_college: null };
-    }
-    setProfile(prof || { id: viewingUserId, display_name: "Student", avatar_url: null });
 
-    // Posts
+    if (!prof && isOwn) {
+      await sbFetch(SB_URL, SB_ANON, "profiles", {
+        method:"POST", prefer:"return=minimal",
+        body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
+      });
+      prof = { id:user.id, display_name:user.name, avatar_url:user.avatar, bio:null, target_college:null, handle:null };
+    }
+    setProfile(prof || { id:viewingUserId, display_name:"Student" });
+
+    // Posts from Supabase social feed
     const postr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?user_id=eq.${viewingUserId}&select=*,social_kudos(user_id)&order=created_at.desc&limit=20`
+      `social_posts?user_id=eq.${viewingUserId}&select=*,social_kudos(user_id)&order=created_at.desc&limit=30`
     );
     const rawPosts = postr.ok ? await postr.json() : [];
-    const totalSecs = rawPosts.reduce((a, p) => a + (p.duration_seconds || 0), 0);
     setPosts(rawPosts.map(p => ({
-      ...p, profiles: prof || { display_name: user.name, avatar_url: user.avatar },
-      kudos_count: (p.social_kudos || []).length,
-      kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
+      ...p,
+      profiles: prof || { display_name:user.name, avatar_url:user.avatar },
+      kudos_count: (p.social_kudos||[]).length,
+      kudos_given: (p.social_kudos||[]).some(k => k.user_id === user?.id),
     })));
 
-    // Follower counts
+    // FIXED: total studied = from social posts duration_seconds (what they've posted)
+    // PLUS the local sessions for own profile (more accurate for yourself)
+    let totalSecs = rawPosts.reduce((a, p) => a + (p.duration_seconds || 0), 0);
+    // For own profile, also include local slothr sessions
+    if (isOwn && sessions?.length) {
+      const localSecs = sessions.reduce((a, s) => a + (s.duration || 0) * 60, 0);
+      totalSecs = Math.max(totalSecs, localSecs); // use whichever is larger
+    }
+
     const [folr, folgi] = await Promise.all([
       sbFetch(SB_URL, SB_ANON, `social_follows?following_id=eq.${viewingUserId}&select=follower_id`),
       sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${viewingUserId}&select=following_id`),
     ]);
     const followers = folr.ok ? (await folr.json()).length : 0;
     const following = folgi.ok ? (await folgi.json()).length : 0;
-    setStats({ totalSecs, followers, following });
+    setStats({ totalSecs, followers, following, sessions: rawPosts.length });
 
-    // Am I following?
     if (!isOwn && user?.id) {
       const cr = await sbFetch(SB_URL, SB_ANON,
         `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUserId}&select=follower_id`
@@ -2358,7 +2749,6 @@ function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenP
       const chk = cr.ok ? await cr.json() : [];
       setIsFollowing(chk.length > 0);
     }
-
     setLoading(false);
   }
 
@@ -2366,74 +2756,77 @@ function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenP
     if (!user?.id) return;
     if (isFollowing) {
       await sbFetch(SB_URL, SB_ANON,
-        `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUserId}`,
-        { method: "DELETE" }
+        `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUserId}`, { method:"DELETE" }
       );
       setIsFollowing(false);
-      setStats(s => ({ ...s, followers: s.followers - 1 }));
+      setStats(s => ({ ...s, followers:s.followers-1 }));
     } else {
       await sbFetch(SB_URL, SB_ANON, "social_follows", {
-        method: "POST", prefer: "return=minimal",
-        body: JSON.stringify({ follower_id: user.id, following_id: viewingUserId }),
+        method:"POST", prefer:"return=minimal",
+        body: JSON.stringify({ follower_id:user.id, following_id:viewingUserId }),
       });
       setIsFollowing(true);
-      setStats(s => ({ ...s, followers: s.followers + 1 }));
+      setStats(s => ({ ...s, followers:s.followers+1 }));
     }
   }
 
   async function toggleKudos(post) {
     if (!user?.id || post.user_id === user.id) return;
     if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method: "DELETE" });
+      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE" });
     } else {
       await sbFetch(SB_URL, SB_ANON, "social_kudos", {
-        method: "POST", prefer: "return=minimal",
-        body: JSON.stringify({ post_id: post.id, user_id: user.id }),
+        method:"POST", prefer:"return=minimal",
+        body: JSON.stringify({ post_id:post.id, user_id:user.id }),
       });
     }
     setPosts(prev => prev.map(p => p.id === post.id ? {
-      ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
+      ...p, kudos_given:!p.kudos_given, kudos_count:p.kudos_count+(p.kudos_given?-1:1),
     } : p));
   }
 
-  if (loading) return <div style={{ padding: "32px", textAlign: "center", color: d.t3, fontSize: 13, fontStyle: "italic" }}>loading profile…</div>;
+  if (loading) return <div style={{ padding:"40px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading profile…</div>;
 
   const bannerColor = avColor(profile?.display_name);
-  const SUB_C = { Physics: "#e8845c", Chemistry: "#5eaa8a", Mathematics: "#7b8ec8" };
+
+  // Subject breakdown
+  const subBreakdown = ["Physics","Chemistry","Mathematics"].map(sub => {
+    const secs = posts.filter(p => p.subject === sub).reduce((a,p) => a+(p.duration_seconds||0), 0);
+    return { sub, secs };
+  });
+  const totalPostedSecs = subBreakdown.reduce((a,b) => a+b.secs, 0);
 
   return (
     <div>
       {/* Profile card */}
-      <div className="card" style={{ overflow: "hidden", marginBottom: 12 }}>
-        <div style={{ height: 70, background: `linear-gradient(135deg, ${bannerColor}60, ${bannerColor}20)` }} />
-        <div style={{ padding: "0 20px 18px" }}>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: -20, marginBottom: 10 }}>
+      <div className="card" style={{ overflow:"hidden", marginBottom:12 }}>
+        <div style={{ height:72, background:`linear-gradient(135deg,${bannerColor}70,${bannerColor}20)` }}/>
+        <div style={{ padding:"0 20px 18px" }}>
+          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginTop:-24, marginBottom:10 }}>
             <div style={{
-              width: 52, height: 52, borderRadius: "50%",
-              background: bannerColor, color: "#fff",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 20, fontWeight: 700,
-              border: `3px solid ${d.card}`,
-              overflow: "hidden", flexShrink: 0,
+              width:52, height:52, borderRadius:"50%",
+              background:bannerColor, color:"#fff",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:20, fontWeight:700,
+              border:`3px solid ${d.card}`, overflow:"hidden", flexShrink:0,
             }}>
               {profile?.avatar_url
-                ? <img src={profile.avatar_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                ? <img src={profile.avatar_url} style={{ width:"100%",height:"100%",objectFit:"cover" }} alt=""/>
                 : initials(profile?.display_name)}
             </div>
             {isOwn ? (
               <button onClick={() => setEditing(v => !v)} style={{
-                padding: "6px 14px", border: `1px solid ${d.b}`, borderRadius: 3,
-                background: "transparent", color: d.t3, fontFamily: "inherit",
-                fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}>
-                {editing ? "cancel" : "edit profile"}
-              </button>
+                padding:"6px 14px", border:`1px solid ${d.b}`, borderRadius:3,
+                background:"transparent", color:d.t3, fontFamily:"inherit",
+                fontSize:11, fontWeight:600, cursor:"pointer",
+              }}>{editing ? "cancel" : "edit profile"}</button>
             ) : (
               <button onClick={toggleFollow} style={{
-                padding: "6px 16px", border: `1px solid ${isFollowing ? d.b : d.a1}`,
-                borderRadius: 3, background: isFollowing ? "transparent" : d.a1,
+                padding:"7px 18px", border:`1px solid ${isFollowing ? d.b : d.a1}`,
+                borderRadius:3, background: isFollowing ? "transparent" : d.a1,
                 color: isFollowing ? d.t3 : "#fff",
-                fontFamily: "inherit", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer",
+                transition:"all .12s",
               }}>
                 {isFollowing ? "following" : "follow"}
               </button>
@@ -2442,22 +2835,25 @@ function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenP
 
           {editing ? (
             <EditProfileInline user={user} profile={profile} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-              onSaved={(updated) => { setProfile(updated); setEditing(false); }} />
+              onSaved={updated => { setProfile(updated); setEditing(false); }} />
           ) : (
             <>
-              <div style={{ fontSize: 16, fontWeight: 700, color: d.t, marginBottom: 2 }}>{profile?.display_name || "Student"}</div>
-              {profile?.bio && <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.6, marginBottom: 5 }}>{profile.bio}</div>}
-              {profile?.target_college && <div style={{ fontSize: 12, color: d.t3, marginBottom: 10 }}>🎯 {profile.target_college}</div>}
-              <div style={{ display: "flex", gap: 20 }}>
+              <div style={{ fontSize:17, fontWeight:700, color:d.t, marginBottom:1 }}>{profile?.display_name}</div>
+              {profile?.handle && <div style={{ fontSize:11.5, color:d.t3, marginBottom:5 }}>@{profile.handle}</div>}
+              {profile?.bio && <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.65, marginBottom:6 }}>{profile.bio}</div>}
+              {profile?.target_college && <div style={{ fontSize:12, color:d.t3, marginBottom:10 }}>🎯 {profile.target_college}</div>}
+
+              {/* Stats row */}
+              <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
                 {[
-                  { val: fmtDurSec(stats.totalSecs), lbl: "studied" },
-                  { val: stats.followers, lbl: "followers" },
-                  { val: stats.following, lbl: "following" },
-                  { val: posts.length, lbl: "sessions" },
+                  { val: fmtDurSec(stats.totalSecs) !== "—" ? fmtDurSec(stats.totalSecs) : (isOwn && sessions?.length ? fmtDurSec(sessions.reduce((a,s)=>a+s.duration*60,0)) : "0m"), lbl:"studied" },
+                  { val: stats.followers, lbl:"followers" },
+                  { val: stats.following, lbl:"following" },
+                  { val: stats.sessions, lbl:"posts" },
                 ].map(s => (
                   <div key={s.lbl}>
-                    <div style={{ fontSize: 17, fontWeight: 700, color: d.t }}>{s.val}</div>
-                    <div style={{ fontSize: 10, color: d.t3 }}>{s.lbl}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
+                    <div style={{ fontSize:10, color:d.t3 }}>{s.lbl}</div>
                   </div>
                 ))}
               </div>
@@ -2466,52 +2862,70 @@ function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenP
         </div>
       </div>
 
-      {/* Posts */}
-      {posts.length === 0 ? (
-        <div className="card cp" style={{ textAlign: "center", padding: "32px" }}>
-          <div style={{ fontSize: 13, color: d.t3, fontStyle: "italic" }}>no sessions posted yet.</div>
-        </div>
-      ) : posts.map(post => {
-        const sc = SUB_C[post.subject] || d.a3;
-        return (
-          <div key={post.id} className="card" style={{ marginBottom: 10, overflow: "hidden" }}>
-            <div style={{ padding: "14px 16px 10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: d.t }}>{post.title}</span>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 2, background: `${sc}18`, color: sc }}>{post.subject}</span>
-              </div>
-              {post.notes && <div style={{ fontSize: 12.5, color: d.t2, lineHeight: 1.6, marginBottom: 8 }}>{post.notes}</div>}
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { label: "Duration", val: fmtDurSec(post.duration_seconds) },
-                  { label: "Problems", val: post.problems_solved ?? "—" },
-                  { label: "Accuracy", val: post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
-                ].map(s => (
-                  <div key={s.label} style={{ flex: 1, textAlign: "center", background: d.hover, borderRadius: 3, padding: "6px 4px", border: `1px solid ${d.b}` }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: d.t }}>{s.val}</div>
-                    <div style={{ fontSize: 9, color: d.t4, textTransform: "uppercase", letterSpacing: ".05em", marginTop: 1 }}>{s.label}</div>
+      {/* Tab bar */}
+      <div style={{ display:"flex", gap:0, marginBottom:14, borderBottom:`1px solid ${d.b}` }}>
+        {[["sessions","Sessions"],["stats","Stats"]].map(([v,l]) => (
+          <button key={v} onClick={() => setTab(v)} style={{
+            padding:"7px 14px", border:"none", background:"transparent",
+            fontFamily:"inherit", fontSize:12, fontWeight: tab===v ? 700 : 400,
+            color: tab===v ? d.t : d.t3, cursor:"pointer",
+            borderBottom:`2px solid ${tab===v ? d.a1 : "transparent"}`,
+            marginBottom:-1,
+          }}>{l}</button>
+        ))}
+      </div>
+
+      {tab === "sessions" && (
+        posts.length === 0 ? (
+          <div className="card cp" style={{ textAlign:"center", padding:"32px" }}>
+            <div style={{ fontSize:13, color:d.t3, fontStyle:"italic" }}>no sessions posted yet.</div>
+          </div>
+        ) : posts.map(post => (
+          <PostCard key={post.id} post={post} user={user} d={d}
+            onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile} />
+        ))
+      )}
+
+      {tab === "stats" && (
+        <div>
+          {/* Subject breakdown */}
+          <div className="card cp" style={{ marginBottom:10 }}>
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>subject breakdown</div>
+            {subBreakdown.map(({ sub, secs }) => {
+              const pct = totalPostedSecs > 0 ? Math.round((secs/totalPostedSecs)*100) : 0;
+              return (
+                <div key={sub} style={{ marginBottom:10 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:5 }}>
+                    <span style={{ color:SUB_C[sub], fontWeight:600 }}>{sub}</span>
+                    <span style={{ color:d.t3 }}>{fmtDurSec(secs) !== "—" ? fmtDurSec(secs) : "0m"}</span>
                   </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ padding: "8px 16px", borderTop: `1px solid ${d.b}`, display: "flex", gap: 4, background: d.hover, alignItems: "center" }}>
-              <button onClick={() => toggleKudos(post)} disabled={post.user_id === user?.id}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  padding: "4px 8px", border: "none", background: "transparent",
-                  fontFamily: "inherit", fontSize: 12,
-                  color: post.kudos_given ? "#d4604a" : d.t3,
-                  cursor: post.user_id === user?.id ? "default" : "pointer",
-                  opacity: post.user_id === user?.id ? 0.4 : 1,
-                }}>
-                <span style={{ fontSize: 14 }}>{post.kudos_given ? "♥" : "♡"}</span>
-                {post.kudos_count} Kudos
-              </button>
-              <span style={{ marginLeft: "auto", fontSize: 11, color: d.t4 }}>{socialTimeAgo(post.created_at)}</span>
+                  <div style={{ height:4, background:d.b, borderRadius:2, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width:`${pct}%`, background:SUB_C[sub], borderRadius:2, transition:"width .5s" }}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* All time numbers */}
+          <div className="card cp">
+            <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>all-time</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {[
+                { label:"Total studied", val: fmtDurSec(stats.totalSecs) !== "—" ? fmtDurSec(stats.totalSecs) : "0m" },
+                { label:"Sessions posted", val: stats.sessions },
+                { label:"Total kudos", val: posts.reduce((a,p) => a+p.kudos_count, 0) },
+                { label:"Avg session", val: stats.sessions > 0 ? fmtDurSec(Math.round(stats.totalSecs/stats.sessions)) : "—" },
+              ].map(s => (
+                <div key={s.label} style={{ textAlign:"center", padding:"10px", background:d.hover, borderRadius:3 }}>
+                  <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:22, fontWeight:400, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
+                  <div style={{ fontSize:9.5, color:d.t4, marginTop:3, textTransform:"uppercase", letterSpacing:".06em" }}>{s.label}</div>
+                </div>
+              ))}
             </div>
           </div>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2520,37 +2934,60 @@ function SocialProfile({ user, d, SB_URL, SB_ANON, viewingUserId, isOwn, onOpenP
 function EditProfileInline({ user, profile, d, SB_URL, SB_ANON, onSaved }) {
   const [form, setForm] = useState({
     display_name: profile?.display_name || user?.name || "",
+    handle: profile?.handle || "",
     bio: profile?.bio || "",
     target_college: profile?.target_college || "",
   });
+  const [handleOk, setHandleOk] = useState(true);
+  const [handleChecking, setHandleChecking] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  async function checkHandle(v) {
+    const clean = v.toLowerCase().replace(/[^a-z0-9_.]/g,"");
+    setForm(f => ({ ...f, handle:clean }));
+    if (clean === profile?.handle) { setHandleOk(true); return; }
+    if (clean.length < 3) { setHandleOk(false); return; }
+    setHandleChecking(true);
+    const r = await sbFetch(SB_URL, SB_ANON, `profiles?handle=eq.${clean}&select=id`);
+    const rows = r.ok ? await r.json() : [];
+    setHandleOk(rows.length === 0);
+    setHandleChecking(false);
+  }
+
   async function save() {
+    if (!handleOk) return;
     setSaving(true);
-    await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method: "POST", prefer: "resolution=merge-duplicates,return=representation",
-      body: JSON.stringify({ id: user.id, ...form, avatar_url: user.avatar || null }),
+    const r = await sbFetch(SB_URL, SB_ANON, "profiles", {
+      method:"POST", prefer:"resolution=merge-duplicates,return=representation",
+      body: JSON.stringify({ id:user.id, ...form, avatar_url:user.avatar||null }),
     });
+    const rows = r.ok ? await r.json() : [];
     setSaving(false);
-    onSaved({ ...profile, ...form });
+    onSaved(rows[0] || { ...profile, ...form });
   }
 
   const inp = {
-    padding: "8px 11px", border: `1px solid ${d.b}`, borderRadius: 3,
-    background: d.inp, color: d.t, fontFamily: "inherit", fontSize: 13,
-    outline: "none", width: "100%", boxSizing: "border-box", marginBottom: 8,
+    padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3,
+    background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13,
+    outline:"none", width:"100%", boxSizing:"border-box", marginBottom:8,
   };
 
   return (
-    <div style={{ animation: "selIn .15s ease" }}>
+    <div style={{ animation:"selIn .15s ease" }}>
       <input style={inp} placeholder="Display name" value={form.display_name}
-        onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
+        onChange={e => setForm(f => ({ ...f, display_name:e.target.value }))} />
+      <div style={{ position:"relative", marginBottom:8 }}>
+        <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:13, color:d.t3, pointerEvents:"none" }}>@</span>
+        <input style={{ ...inp, marginBottom:0, paddingLeft:26, border:`1px solid ${form.handle.length>=3 ? (handleOk ? d.a2 : d.danger) : d.b}` }}
+          placeholder="handle" value={form.handle} onChange={e => checkHandle(e.target.value)} />
+        {handleChecking && <span style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", fontSize:10, color:d.t3 }}>…</span>}
+      </div>
       <input style={inp} placeholder="Target college — e.g. IIT Bombay" value={form.target_college}
-        onChange={e => setForm(f => ({ ...f, target_college: e.target.value }))} />
-      <textarea style={{ ...inp, minHeight: 56, resize: "vertical" }} placeholder="Bio"
-        value={form.bio} onChange={e => setForm(f => ({ ...f, bio: e.target.value }))} />
-      <button className="btn btn-d" onClick={save} disabled={saving}
-        style={{ padding: "7px 16px", fontSize: 12 }}>
+        onChange={e => setForm(f => ({ ...f, target_college:e.target.value }))} />
+      <textarea style={{ ...inp, minHeight:54, resize:"vertical" }} placeholder="Bio"
+        value={form.bio} onChange={e => setForm(f => ({ ...f, bio:e.target.value }))} />
+      <button className="btn btn-d" onClick={save} disabled={saving || !handleOk}
+        style={{ padding:"7px 16px", fontSize:12, opacity:saving||!handleOk?0.4:1 }}>
         {saving ? "saving…" : "save changes"}
       </button>
     </div>
