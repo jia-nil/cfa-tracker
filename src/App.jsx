@@ -1806,21 +1806,21 @@ function UsernameSetupModal({ user, d, SB_URL, SB_ANON, onDone }) {
   );
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// HOME — global feed (everyone) + story-style streak row + composer
+// HOME — global feed + always-visible compose bar + story row
 // ─────────────────────────────────────────────────────────────────────────────
 function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHandle, onOpenProfile }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCompose, setShowCompose] = useState(false);
-  const [topStudiers, setTopStudiers] = useState([]); // for story row
+  const [topStudiers, setTopStudiers] = useState([]);
   const todayMins = sessions.filter(s => s.date === today()).reduce((a, s) => a + s.duration, 0);
 
   useEffect(() => { fetchHome(); }, []);
 
   async function fetchHome() {
     setLoading(true);
-    // Global feed — all public posts, newest first
     const pr = await sbFetch(SB_URL, SB_ANON,
       `social_posts?select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=50`
     );
@@ -1831,7 +1831,6 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
       kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
     })));
 
-    // Top studiers today for story row
     const now = new Date(); now.setHours(0,0,0,0);
     const tr = await sbFetch(SB_URL, SB_ANON,
       `social_posts?select=user_id,duration_seconds,profiles:user_id(id,display_name,handle,avatar_url)&created_at=gte.${now.toISOString()}&limit=100`
@@ -1840,9 +1839,8 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
     const map = {};
     td.forEach(p => {
       if (!p.profiles) return;
-      const uid = p.user_id;
-      if (!map[uid]) map[uid] = { profile: p.profiles, secs: 0 };
-      map[uid].secs += p.duration_seconds || 0;
+      if (!map[p.user_id]) map[p.user_id] = { profile: p.profiles, secs: 0 };
+      map[p.user_id].secs += p.duration_seconds || 0;
     });
     setTopStudiers(Object.values(map).sort((a,b) => b.secs - a.secs).slice(0, 10));
     setLoading(false);
@@ -1865,63 +1863,69 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
 
   return (
     <div>
-      {/* Story-style today's top studiers row */}
+      {/* ── Always-visible compose bar ── */}
+      <div className="card" style={{ marginBottom: 12, overflow:"hidden" }}>
+        <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:10 }}>
+          <Av name={user?.name} url={user?.avatar} size={34} d={d} />
+          <button
+            onClick={() => setShowCompose(v => !v)}
+            style={{
+              flex:1, padding:"9px 14px", background:d.hover,
+              border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
+              borderRadius:4, color: showCompose ? d.t : d.t3,
+              fontSize:13, fontFamily:"inherit", cursor:"pointer",
+              textAlign:"left", transition:"all .15s",
+            }}
+          >
+            {showCompose ? "▲ never mind" : `what did you just study, @${myHandle}?`}
+          </button>
+          <button
+            onClick={() => setShowCompose(v => !v)}
+            style={{
+              width:34, height:34, borderRadius:"50%",
+              background: showCompose ? d.danger : d.a1,
+              border:"none", color:"#fff", fontSize:20, lineHeight:1,
+              cursor:"pointer", display:"flex", alignItems:"center",
+              justifyContent:"center", flexShrink:0, transition:"all .15s",
+            }}
+          >
+            {showCompose ? "×" : "+"}
+          </button>
+        </div>
+
+        {showCompose && (
+          <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${d.b}`, paddingTop:12, animation:"selIn .15s ease" }}>
+            <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+              onPosted={() => { setShowCompose(false); fetchHome(); }} />
+          </div>
+        )}
+      </div>
+
+      {/* ── Story row — only if someone studied today ── */}
       {topStudiers.length > 0 && (
-        <div style={{ marginBottom:16, overflow:"hidden" }}>
-          <div style={{ display:"flex", gap:14, overflowX:"auto", paddingBottom:8, scrollbarWidth:"none" }}>
-            {/* My story slot */}
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0, cursor:"pointer" }}
-              onClick={() => setShowCompose(v => !v)}>
-              <div style={{ position:"relative" }}>
-                <Av name={user?.name} url={user?.avatar} size={52} d={d}
-                  ring={!!todayMins} ringColor={d.a1} />
-                <span style={{
-                  position:"absolute", bottom:0, right:0,
-                  width:18, height:18, borderRadius:"50%",
-                  background:d.a1, color:"#fff", fontSize:14, fontWeight:700,
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  border:`2px solid ${d.card}`,
-                }}>+</span>
-              </div>
-              <span style={{ fontSize:9.5, color:d.t3, textAlign:"center", maxWidth:52, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {todayMins > 0 ? fmt(todayMins) : "post"}
-              </span>
-            </div>
+        <div style={{ marginBottom:14 }}>
+          <div style={{ display:"flex", gap:14, overflowX:"auto", paddingBottom:6, scrollbarWidth:"none" }}>
             {topStudiers.map(({ profile, secs }) => (
-              <div key={profile.id} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5, flexShrink:0, cursor:"pointer" }}
+              <div key={profile.id}
+                style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, flexShrink:0, cursor:"pointer" }}
                 onClick={() => onOpenProfile(profile.id)}>
-                <Av name={profile.display_name} url={profile.avatar_url} size={52} d={d}
+                <Av name={profile.display_name} url={profile.avatar_url} size={48} d={d}
                   ring={true} ringColor={avColor(profile.display_name)} />
-                <span style={{ fontSize:9.5, color:d.t3, textAlign:"center", maxWidth:52, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                <span style={{ fontSize:9.5, color:d.t3, maxWidth:48, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"center" }}>
                   {fmtS(secs)}
                 </span>
               </div>
             ))}
           </div>
-          <div style={{ height:1, background:d.b, marginTop:4 }}/>
+          <div style={{ height:1, background:d.b }}/>
         </div>
       )}
 
-      {/* Composer */}
-      {showCompose && (
-        <div className="card" style={{ marginBottom:12, overflow:"hidden", animation:"selIn .18s ease" }}>
-          <div style={{ padding:"12px 14px 10px", display:"flex", alignItems:"center", gap:10, borderBottom:`1px solid ${d.b}` }}>
-            <Av name={user?.name} url={user?.avatar} size={32} d={d} />
-            <span style={{ fontSize:13, color:d.t2, fontStyle:"italic" }}>share what you just studied…</span>
-            <button onClick={() => setShowCompose(false)} style={{ marginLeft:"auto", background:"none", border:"none", color:d.t3, cursor:"pointer", fontSize:18, lineHeight:1 }}>×</button>
-          </div>
-          <div style={{ padding:"12px 14px" }}>
-            <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-              onPosted={() => { setShowCompose(false); fetchHome(); }} />
-          </div>
-        </div>
-      )}
-
-      {/* Feed */}
-      {loading ? (
-        <SkeletonFeed d={d} />
-      ) : posts.length === 0 ? (
-        <EmptySlate d={d} icon="📭" title="nothing here yet." sub="be the first to post a session." />
+      {/* ── Feed ── */}
+      {loading ? <SkeletonFeed d={d} /> :
+       posts.length === 0 ? (
+        <EmptySlate d={d} icon="📭" title="nothing posted yet."
+          sub="be the first — hit the + button above and log your session." />
       ) : posts.map(post => (
         <PostCard key={post.id} post={post} user={user} d={d}
           onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
@@ -1932,14 +1936,14 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FRIENDS — only people you follow, with follow suggestions
+// FRIENDS — following feed + always-visible compose + suggestions
 // ─────────────────────────────────────────────────────────────────────────────
 function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showCompose, setShowCompose] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [followingSet, setFollowingSet] = useState(new Set());
-  const [showCompose, setShowCompose] = useState(false);
 
   useEffect(() => { fetchFriends(); }, []);
 
@@ -1952,30 +1956,22 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
     const followIds = follows.map(f => f.following_id);
     setFollowingSet(new Set(followIds));
 
-    if (followIds.length === 0) {
-      // no friends yet — show suggestions instead
-      const sr = await sbFetch(SB_URL, SB_ANON,
-        `profiles?id=neq.${user.id}&select=id,display_name,handle,avatar_url,target_college&limit=8&order=created_at.desc`
+    if (followIds.length > 0) {
+      const idsQ = followIds.map(id => `user_id=eq.${id}`).join(",");
+      const pr = await sbFetch(SB_URL, SB_ANON,
+        `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`
       );
-      setSuggestions(sr.ok ? await sr.json() : []);
-      setLoading(false); return;
+      const raw = pr.ok ? await pr.json() : [];
+      setPosts(raw.map(p => ({
+        ...p,
+        kudos_count: (p.social_kudos || []).length,
+        kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
+      })));
     }
 
-    const idsQ = followIds.map(id => `user_id=eq.${id}`).join(",");
-    const pr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`
-    );
-    const raw = pr.ok ? await pr.json() : [];
-    setPosts(raw.map(p => ({
-      ...p,
-      kudos_count: (p.social_kudos || []).length,
-      kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
-    })));
-
-    // suggestions from outside follow list
     const excStr = [user.id, ...followIds].map(id => `id.neq.${id}`).join(",");
     const sr = await sbFetch(SB_URL, SB_ANON,
-      `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url&limit=4&order=created_at.desc`
+      `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url&limit=5&order=created_at.desc`
     );
     setSuggestions(sr.ok ? await sr.json() : []);
     setLoading(false);
@@ -2010,27 +2006,46 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
 
   return (
     <div>
-      {/* Compose strip */}
-      <div className="card" style={{ marginBottom:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
-        <Av name={user?.name} url={user?.avatar} size={32} d={d} />
-        <button onClick={() => setShowCompose(v => !v)} style={{
-          flex:1, padding:"8px 12px", background:d.hover, border:`1px solid ${d.b}`,
-          borderRadius:3, color:d.t3, fontSize:12.5, fontFamily:"inherit",
-          cursor:"pointer", textAlign:"left",
-        }}>
-          {showCompose ? "▲ cancel" : `what did you just finish, @${myHandle}?`}
-        </button>
+      {/* ── Always-visible compose bar ── */}
+      <div className="card" style={{ marginBottom:12, overflow:"hidden" }}>
+        <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:10 }}>
+          <Av name={user?.name} url={user?.avatar} size={34} d={d} />
+          <button
+            onClick={() => setShowCompose(v => !v)}
+            style={{
+              flex:1, padding:"9px 14px", background:d.hover,
+              border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
+              borderRadius:4, color: showCompose ? d.t : d.t3,
+              fontSize:13, fontFamily:"inherit", cursor:"pointer",
+              textAlign:"left", transition:"all .15s",
+            }}
+          >
+            {showCompose ? "▲ never mind" : `what did you just finish, @${myHandle}?`}
+          </button>
+          <button
+            onClick={() => setShowCompose(v => !v)}
+            style={{
+              width:34, height:34, borderRadius:"50%",
+              background: showCompose ? d.danger : d.a1,
+              border:"none", color:"#fff", fontSize:20, lineHeight:1,
+              cursor:"pointer", display:"flex", alignItems:"center",
+              justifyContent:"center", flexShrink:0, transition:"all .15s",
+            }}
+          >
+            {showCompose ? "×" : "+"}
+          </button>
+        </div>
+
+        {showCompose && (
+          <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${d.b}`, paddingTop:12, animation:"selIn .15s ease" }}>
+            <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+              onPosted={() => { setShowCompose(false); fetchFriends(); }} />
+          </div>
+        )}
       </div>
 
-      {showCompose && (
-        <div className="card" style={{ marginBottom:12, padding:"12px 14px", animation:"selIn .18s ease" }}>
-          <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-            onPosted={() => { setShowCompose(false); fetchFriends(); }} />
-        </div>
-      )}
-
-      {/* Suggestions when no friends */}
-      {noFriends && (
+      {/* Suggestions when no friends yet */}
+      {noFriends && suggestions.length > 0 && (
         <div className="card cp" style={{ marginBottom:12 }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>
             find people to follow
@@ -2045,16 +2060,20 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
       {/* Posts */}
       {loading ? <SkeletonFeed d={d} /> :
        posts.length === 0 && !noFriends ? (
-        <EmptySlate d={d} icon="👀" title="your friends haven't posted yet." sub="or you need to follow more people." />
+        <EmptySlate d={d} icon="👀" title="your friends haven't posted yet."
+          sub="they're slacking. you're not — hit + above to post." />
+      ) : noFriends && posts.length === 0 ? (
+        <EmptySlate d={d} icon="👋" title="follow someone first."
+          sub="their sessions will show up here." />
       ) : posts.map(post => (
         <PostCard key={post.id} post={post} user={user} d={d}
           onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
           onRefresh={fetchFriends} SB_URL={SB_URL} SB_ANON={SB_ANON} />
       ))}
 
-      {/* Suggestions strip at bottom */}
+      {/* Bottom suggestions strip */}
       {!noFriends && suggestions.length > 0 && (
-        <div className="card cp" style={{ marginTop:4 }}>
+        <div className="card cp" style={{ marginTop:8 }}>
           <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>suggested</div>
           {suggestions.map(s => (
             <SuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)}
@@ -2065,6 +2084,7 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LEADERBOARD
