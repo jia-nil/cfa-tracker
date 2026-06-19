@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-const SB_URL  = import.meta.env.VITE_SB_URL;
-const SB_ANON = import.meta.env.VITE_SB_ANON;
-const OR_KEY  = import.meta.env.VITE_OR_KEY;
+
+const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
+const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
+
+
+// ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -28,7 +33,7 @@ const SB_AUTH = {
       method:"POST",
       headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
     });
-    localStorage.removeItem("cfa_auth");
+    localStorage.removeItem("slothr_auth");
   },
   async getUser(accessToken) {
     const r = await fetch(`${SB_URL}/auth/v1/user`, {
@@ -228,13 +233,33 @@ function renderMath(text) {
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NTA SIMULATION — Practice Tab
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Shared Select ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SLOTHR — NTA JEE MAINS SIMULATION
+// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
+// Students add their own questions via the admin panel (slothr-admin.jsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Utility functions ────────────────────────────────────────────────────────
+const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
+const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
+function isOverdue(dateStr){return dateStr<today();}
+function isDueToday(dateStr){return dateStr===today();}
+function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
+function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
+
+// ── Select component ──────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
-      style={{background:d?d.inp:"#0d0f18",border:`1px solid ${d?d.inpb:"rgba(180,185,220,0.12)"}`,
-        color:d?d.t:"#eef0f8",borderRadius:4,padding:"7px 10px",fontSize:13,
+      style={{background:d?d.inp:"#1a1816",border:`1px solid ${d?d.b:"rgba(255,255,255,0.07)"}`,
+        color:d?d.t:"#f5f0e8",borderRadius:5,padding:"7px 10px",fontSize:13,
         fontFamily:"inherit",cursor:"pointer",minWidth:minWidth||120,outline:"none"}}>
       {placeholder&&<option value="">{placeholder}</option>}
       {options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
@@ -242,1038 +267,188 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-const SUB_C = SUBJECT_COLORS;
-const SUB_EMOJI = {
-  "Ethics & Standards":"⚖️","Quantitative Methods":"📊","Economics":"🌐",
-  "Financial Reporting":"📑","Corporate Issuers":"🏢","Equity Investments":"📈",
-  "Fixed Income":"🏦","Derivatives":"⚙️","Alternative Investments":"🔷","Portfolio Management":"💼",
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const THEME = {
+  dark:{
+    bg:"#0a0a0f",sb:"#0d0d15",card:"#12121e",hover:"#1a1a28",
+    b:"rgba(255,255,255,0.06)",bs:"rgba(255,255,255,0.12)",
+    t:"#f0f0ff",t2:"#c0c0e0",t3:"#7070a0",t4:"#404060",
+    a1:"#6c63ff",a2:"#00d4aa",a3:"#ff6b9d",
+    gold:"#ffd166",danger:"#ff4d6d",
+    inp:"#1a1a28",ring:"#6c63ff",
+    div:"rgba(255,255,255,0.05)",
+    tag:"rgba(255,255,255,0.04)",
+    sa:"rgba(108,99,255,0.08)",sab:"rgba(108,99,255,0.2)",
+    inpb:"rgba(255,255,255,0.08)",
+    sh1:"#1a1a28",sh2:"#222235",
+    sm:"#7070a0",
+  },
+  light:{
+    bg:"#f5f5ff",sb:"#ededfc",card:"#ffffff",hover:"#ededfc",
+    b:"rgba(0,0,0,0.07)",bs:"rgba(0,0,0,0.14)",
+    t:"#0a0a1a",t2:"#2a2a4a",t3:"#6060a0",t4:"#b0b0d0",
+    a1:"#5a52e8",a2:"#00b894",a3:"#e8437a",
+    gold:"#e8a000",danger:"#e8285a",
+    inp:"#f5f5ff",ring:"#5a52e8",
+    div:"rgba(0,0,0,0.05)",
+    tag:"rgba(0,0,0,0.03)",
+    sa:"rgba(90,82,232,0.06)",sab:"rgba(90,82,232,0.18)",
+    inpb:"rgba(0,0,0,0.08)",
+    sh1:"#ededfc",sh2:"#e5e5f8",
+    sm:"#6060a0",
+  },
 };
 
 
 
+
+
+// ── Placeholder papers — replace questions with real ones from your DB ────────
+const SUBJECT_COLORS = {
+  Ethics:"#6c63ff",
+  Quantitative:"#00d4aa",
+  Economics:"#ffd166",
+  "Fin. Reporting":"#ff6b9d",
+  "Corp. Issuers":"#4ecdc4",
+  Equity:"#45b7d1",
+  "Fixed Income":"#96ceb4",
+  Derivatives:"#ff9f43",
+  "Alt. Investments":"#a29bfe",
+  "Portfolio Mgmt":"#fd79a8",
+};
+const TOPICS = {
+  Ethics:{
+    L1:["Code of Ethics","Standards of Professional Conduct","GIPS"],
+    L2:["Code of Ethics","Standards of Professional Conduct","GIPS","Asset Manager Code"],
+    L3:["Code of Ethics","Standards of Professional Conduct","GIPS","Asset Manager Code"],
+  },
+  Quantitative:{
+    L1:["Time Value of Money","Statistical Concepts","Probability","Sampling","Hypothesis Testing","Correlation & Regression"],
+    L2:["Correlation & Regression","Time Series Analysis","Machine Learning","Big Data"],
+    L3:["Quantitative Methods"],
+  },
+  Economics:{
+    L1:["Microeconomics","Macroeconomics","Global Trade","Currency Exchange","Business Cycles"],
+    L2:["Economics & Investment Markets","Analysis of Active Investment Management"],
+    L3:["Capital Market Expectations","Economics & Investment"],
+  },
+  "Fin. Reporting":{
+    L1:["Financial Statements","Income Statement","Balance Sheet","Cash Flow","Inventories","PP&E","Deferred Taxes","Long-Term Debt","Leases","Intercorporate Investments","Multinational Operations","Financial Ratios"],
+    L2:["Intercorporate Investments","Pension & Employee Benefits","Multinational Operations","Evaluating Quality of Financial Reports","Integration of Financial Analysis"],
+    L3:[],
+  },
+  "Corp. Issuers":{
+    L1:["Capital Budgeting","Cost of Capital","Leverage","Working Capital","Corporate Governance","ESG"],
+    L2:["Capital Structure","Dividends","Corporate Governance & ESG"],
+    L3:["Corporate Issuers"],
+  },
+  Equity:{
+    L1:["Market Organisation","Securities","Equity Valuation Intro","Industry Analysis","DCF Valuation","Price Multiples"],
+    L2:["Equity Valuation DDM","FCF Valuation","Price Multiples","Residual Income","Private Company Valuation"],
+    L3:["Equity Portfolio Management","Active Equity Investing"],
+  },
+  "Fixed Income":{
+    L1:["Bond Features","Bond Valuation","Duration & Convexity","Credit Analysis","MBS"],
+    L2:["Term Structure","Credit Analysis","CDS","MBS"],
+    L3:["Fixed Income Portfolio Management","Liability-Driven Investing","Yield Curve Strategies"],
+  },
+  Derivatives:{
+    L1:["Futures & Forwards","Options","Swaps","Risk Management"],
+    L2:["Derivatives Valuation","Options Strategies"],
+    L3:["Derivatives & Currency Management","Options Strategies"],
+  },
+  "Alt. Investments":{
+    L1:["Alternative Investment Features","Hedge Funds","Private Equity","Real Estate","Commodities"],
+    L2:["Real Estate","Private Equity","Commodities","Infrastructure"],
+    L3:["Alternative Investments Portfolio Management"],
+  },
+  "Portfolio Mgmt":{
+    L1:["Portfolio Management Intro","IPS","Risk & Return","Basics of Portfolio Planning"],
+    L2:["Portfolio Concepts","Risk Management","Algorithmic Trading"],
+    L3:["Portfolio Management Process","IPS","Behavioural Finance","Risk Management","Algorithmic Trading","Performance Evaluation","GIPS"],
+  },
+};
+// CFA exam weights (approximate % of exam)
+const CFA_WEIGHTS = {
+  Ethics:{"L1":"H","L2":"H","L3":"H"},              // 15-20% all levels
+  Quantitative:{"L1":"H","L2":"M","L3":"L"},        // 8-12% L1
+  Economics:{"L1":"M","L2":"M","L3":"M"},           // 8-12% L1
+  "Fin. Reporting":{"L1":"H","L2":"H","L3":"L"},    // 13-17% L1, highest weight
+  "Corp. Issuers":{"L1":"M","L2":"M","L3":"L"},     // 8-12% L1
+  Equity:{"L1":"H","L2":"H","L3":"H"},              // 10-12% L1
+  "Fixed Income":{"L1":"H","L2":"H","L3":"H"},      // 10-12% L1
+  Derivatives:{"L1":"M","L2":"M","L3":"H"},         // 5-8% L1
+  "Alt. Investments":{"L1":"M","L2":"M","L3":"M"},  // 5-8% L1
+  "Portfolio Mgmt":{"L1":"M","L2":"M","L3":"H"},    // 5-8% L1, 35-40% L3
+};
+// JEE_WEIGHTAGE is computed at runtime using current jeClass
+// See getWeight(sub, topic) function used in components
+const JEE_WEIGHTAGE = {};
+function getWeight(sub, topic, level){
+  const lvlWeights = CFA_WEIGHTS[sub]||{};
+  return lvlWeights[level||"L1"]||"M";
+}
+const CLASSES = [
+  {id:"L1", label:"CFA Level 1", icon:"Ⅰ"},
+  {id:"L2", label:"CFA Level 2", icon:"Ⅱ"},
+  {id:"L3", label:"CFA Level 3", icon:"Ⅲ"},
+];
+
+const STREAK_MILESTONES = [
+  {days:1,  icon:"🌱", label:"First Day"},
+  {days:5,  icon:"🔥", label:"5 Day Streak"},
+  {days:7,  icon:"⚡", label:"One Week"},
+  {days:10, icon:"💪", label:"10 Days"},
+  {days:15, icon:"🎯", label:"15 Days"},
+  {days:21, icon:"🏆", label:"3 Weeks"},
+  {days:30, icon:"👑", label:"30 Days"},
+  {days:50, icon:"💎", label:"50 Days"},
+  {days:100,icon:"🦥", label:"100 Days"},
+];
+
+const TABS=[
+  {id:"overview",label:"Overview",icon:"⌂"},
+  {id:"coach",label:"Analytics",icon:"◈"},
+  {id:"goals",label:"today's goals",icon:"◎"},
+  {id:"sessions",label:"Sessions",icon:"◷"},
+  {id:"streaks",label:"Streaks",icon:"🔥"},
+  {id:"syllabus",label:"Syllabus",icon:"📋"},
+  {id:"revision",label:"Revision",icon:"↺"},
+  {id:"rank",label:"Readiness",icon:"🎯"},
+  {id:"feed",label:"Feed",icon:"◉"},
+  {id:"events",label:"Events",icon:"⚡"},
+  {id:"profile",label:"Profile",icon:"◯"},
+];
+
+
+// ── Placeholder questions — you'll populate these from Supabase ───────────────
+// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
+// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
+// Replace these with real questions fetched from Supabase.
+// IMPORTANT: every real question MUST include a `topic` field (chapter name).
+// This is how the Analytics tab and AI coach know which chapter you got wrong.
+// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
+// ─────────────────────────────────────────────────────────────────────────────const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
+
+// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
+// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
+
+
+// ── Question Status ───────────────────────────────────────────────────────────
+// notVisited | notAnswered | answered | markedReview | answeredMarked
+
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SOCIAL — Home · Network · Rankings · Events · Search · Profile
-// Premium CFA candidate social layer
+// PAPER LIST — card view
 // ─────────────────────────────────────────────────────────────────────────────
 
-function sbFetch(SB_URL, SB_ANON, path, opts = {}) {
-  const token = opts.token || SB_ANON;
-  const { token: _t, prefer, ...rest } = opts;
-  return fetch(`${SB_URL}/rest/v1/${path}`, {
-    ...rest,
-    headers: {
-      apikey: SB_ANON,
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: prefer || "",
-      ...(opts.headers || {}),
-    },
-  });
-}
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const AV_PALETTE = ["#c9a84c","#4a8fc4","#7b6fb5","#4aab8a","#c97a4a","#5a9fb5","#8f7ab5","#b54a6a"];
-function avColor(str) {
-  if (!str) return AV_PALETTE[0];
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-  return AV_PALETTE[Math.abs(h) % AV_PALETTE.length];
-}
-function sInitials(name) {
-  if (!name) return "?";
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-}
-function sAgo(iso) {
-  const d = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(d / 60000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const day = Math.floor(h / 24);
-  return day < 7 ? `${day}d` : new Date(iso).toLocaleDateString("en-GB", { day:"numeric", month:"short" });
-}
-function sFmtS(s) {
-  if (!s || s <= 0) return "0m";
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-  return h > 0 ? `${h}h ${m > 0 ? m + "m" : ""}`.trim() : `${m}m`;
-}
-const CFA_TOPICS_LIST = Object.keys(SUBJECT_COLORS);
 
-// ── Avatar ────────────────────────────────────────────────────────────────────
-function SAv({ name, url, size = 36, d, onClick, ring = false }) {
-  const bg = avColor(name);
-  const base = {
-    width: size, height: size, borderRadius: "50%", background: bg, color: "#fff",
-    flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center",
-    justifyContent: "center", fontSize: Math.round(size * 0.38), fontWeight: 700,
-    ...(ring ? { outline: `2.5px solid ${bg}`, outlineOffset: 2 } : {}),
-  };
-  const img = url
-    ? <img src={url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
-    : sInitials(name);
-  if (onClick) return (
-    <button onClick={onClick} style={{ background:"none", border:"none", padding:0, cursor:"pointer", flexShrink:0, borderRadius:"50%", display:"inline-flex" }}>
-      <div style={base}>{img}</div>
-    </button>
-  );
-  return <div style={base}>{img}</div>;
-}
 
-// ── Username setup modal ──────────────────────────────────────────────────────
-function UsernameSetupModal({ user, d, SB_URL, SB_ANON, accessToken, onDone }) {
-  const [handle, setHandle] = useState("");
-  const [state, setState] = useState("idle");
-  const debounceRef = useRef(null);
 
-  function onType(v) {
-    const clean = v.toLowerCase().replace(/[^a-z0-9_.]/g, "").slice(0, 24);
-    setHandle(clean);
-    setState("idle");
-    if (clean.length < 3) return;
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      setState("checking");
-      const r = await sbFetch(SB_URL, SB_ANON, `profiles?handle=eq.${clean}&select=id`);
-      const rows = r.ok ? await r.json() : [];
-      setState(rows.length > 0 ? "taken" : "ok");
-    }, 350);
-  }
 
-  async function save() {
-    if (state !== "ok") return;
-    await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method: "POST", prefer: "resolution=merge-duplicates,return=minimal", token: accessToken,
-      body: JSON.stringify({ id: user.id, display_name: user.name, handle, avatar_url: user.avatar || null }),
-    });
-    onDone(handle);
-  }
 
-  const borderC = state === "ok" ? d.a2 : state === "taken" ? d.danger : d.b;
 
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:999, background:"rgba(0,0,0,.8)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:10, padding:"36px 30px", width:"100%", maxWidth:380, textAlign:"center" }}>
-        <div style={{ fontSize:13, fontWeight:700, letterSpacing:".18em", textTransform:"uppercase", color:d.a1, marginBottom:20 }}>CharterRun</div>
-        <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:24, color:d.t, marginBottom:8 }}>pick your @handle.</div>
-        <div style={{ fontSize:13, color:d.t3, marginBottom:28, lineHeight:1.65 }}>this is how fellow candidates find you. choose wisely.</div>
-        <div style={{ position:"relative", marginBottom:10 }}>
-          <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", color:d.t3, fontSize:14, pointerEvents:"none" }}>@</span>
-          <input value={handle} onChange={e => onType(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
-            placeholder="your_handle" maxLength={24}
-            style={{ width:"100%", boxSizing:"border-box", padding:"11px 14px 11px 32px", border:`1.5px solid ${borderC}`, borderRadius:5, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:14, outline:"none", transition:"border-color .15s" }} />
-          {state === "checking" && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:11, color:d.t3 }}>…</span>}
-          {state === "ok"       && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:15, color:d.a2 }}>✓</span>}
-          {state === "taken"    && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:11, color:d.danger }}>taken</span>}
-        </div>
-        <div style={{ fontSize:10.5, color:d.t4, marginBottom:22 }}>3–24 chars · letters, numbers, _ and . only</div>
-        <button onClick={save} disabled={state !== "ok"}
-          style={{ width:"100%", padding:"12px", borderRadius:5, border:"none", background:state==="ok"?d.a1:d.b, color:state==="ok"?"#fff":d.t4, fontFamily:"inherit", fontSize:13, fontWeight:700, cursor:state==="ok"?"pointer":"not-allowed", transition:"all .15s", letterSpacing:".03em" }}>
-          confirm handle →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── HomeGate — username check + routes to correct social view ─────────────────
-function HomeGate({ user, d, dark, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, view }) {
-  const [myHandle, setMyHandle] = useState(null);
-  const [checked, setChecked] = useState(false);
-  const [profileUid, setProfileUid] = useState(null);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${user.id}&select=handle`)
-      .then(r => r.ok ? r.json() : [])
-      .then(rows => { setMyHandle(rows[0]?.handle || null); setChecked(true); });
-  }, [user?.id]);
-
-  function openProfile(uid) { setProfileUid(uid); }
-  function closeProfile() { setProfileUid(null); }
-
-  if (!checked) return <div style={{ padding:40, textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>;
-  if (!myHandle) return <UsernameSetupModal user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onDone={h => setMyHandle(h)} />;
-
-  const props = { user, d, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, myHandle, onOpenProfile: openProfile };
-
-  if (profileUid) return (
-    <div style={{ maxWidth:680, margin:"0 auto" }}>
-      <SProfileView {...props} viewingUid={profileUid} isOwn={profileUid === user?.id} onBack={closeProfile} />
-    </div>
-  );
-
-  return (
-    <div style={{ maxWidth:680, margin:"0 auto" }}>
-      {view === "home"        && <SHomeView        {...props} />}
-      {view === "friends"     && <SFriendsView     {...props} />}
-      {view === "leaderboard" && <SLeaderboardView {...props} />}
-      {view === "events"      && <SEventsView      {...props} />}
-    </div>
-  );
-}
-
-// ── Post Card ─────────────────────────────────────────────────────────────────
-function SPostCard({ post, user, d, onKudos, onOpenProfile, onRefresh, SB_URL, SB_ANON, accessToken }) {
-  const profile = post.profiles || {};
-  const sc = SUBJECT_COLORS[post.subject] || d.a1;
-  const isOwn = post.user_id === user?.id;
-  const [showMenu, setShowMenu] = useState(false);
-
-  async function deletePost() {
-    await sbFetch(SB_URL, SB_ANON, `social_posts?id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
-    onRefresh?.();
-  }
-
-  return (
-    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, overflow:"hidden" }}>
-      {/* Gold accent bar for high-weight topics */}
-      {CFA_WEIGHTAGE[post.subject] === "H" && (
-        <div style={{ height:2, background:`linear-gradient(90deg,${sc},${sc}30)` }} />
-      )}
-      {/* Header */}
-      <div style={{ padding:"13px 15px 10px", display:"flex", alignItems:"center", gap:10 }}>
-        <SAv name={profile.display_name} url={profile.avatar_url} size={36} d={d} onClick={() => onOpenProfile(post.user_id)} />
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
-            <button onClick={() => onOpenProfile(post.user_id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, color:d.t, padding:0 }}>
-              {profile.display_name || "Candidate"}
-            </button>
-            {profile.handle && <span style={{ fontSize:10.5, color:d.t4 }}>@{profile.handle}</span>}
-            <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${sc}18`, color:sc, letterSpacing:".02em" }}>
-              {SUB_EMOJI[post.subject] || "📚"} {post.subject}
-            </span>
-          </div>
-          <div style={{ fontSize:10.5, color:d.t4, marginTop:1 }}>{sAgo(post.created_at)}</div>
-        </div>
-        {isOwn && (
-          <div style={{ position:"relative" }}>
-            <button onClick={() => setShowMenu(v => !v)} style={{ background:"none", border:"none", color:d.t4, cursor:"pointer", fontSize:18, padding:"2px 6px" }}>⋯</button>
-            {showMenu && (
-              <div style={{ position:"absolute", right:0, top:"100%", zIndex:20, background:d.card, border:`1px solid ${d.b}`, borderRadius:6, padding:4, boxShadow:"0 8px 30px rgba(0,0,0,.25)", minWidth:110 }}>
-                <button onClick={deletePost} style={{ display:"block", width:"100%", padding:"8px 12px", background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:12, color:d.danger, textAlign:"left" }}>delete post</button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      {/* Content */}
-      <div style={{ padding:"0 15px 12px" }}>
-        <div style={{ fontSize:14, fontWeight:600, color:d.t, marginBottom:post.notes ? 6 : 10, lineHeight:1.4 }}>{post.title}</div>
-        {post.notes && <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{post.notes}</div>}
-        <div style={{ display:"flex", gap:6 }}>
-          {[
-            { label:"Duration", val:sFmtS(post.duration_seconds) },
-            { label:"Questions", val:post.problems_solved ?? "—" },
-            { label:"Accuracy",  val:post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
-          ].map(s => (
-            <div key={s.label} style={{ flex:1, textAlign:"center", background:d.hover, borderRadius:4, padding:"7px 4px", border:`1px solid ${d.b}` }}>
-              <div style={{ fontSize:14, fontWeight:700, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
-              <div style={{ fontSize:9, color:d.t4, textTransform:"uppercase", letterSpacing:".07em", marginTop:2 }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      {/* Actions */}
-      <div style={{ padding:"9px 15px", borderTop:`1px solid ${d.b}`, display:"flex", alignItems:"center", gap:4, background:d.hover }}>
-        <button onClick={onKudos} disabled={isOwn} style={{
-          display:"flex", alignItems:"center", gap:5, padding:"5px 9px", border:"none",
-          background: post.kudos_given ? `${d.danger}12` : "transparent", borderRadius:4,
-          fontFamily:"inherit", fontSize:12, color:post.kudos_given ? d.danger : d.t3,
-          cursor:isOwn ? "default" : "pointer", opacity:isOwn ? .4 : 1, transition:"all .12s",
-        }}>
-          <span style={{ fontSize:15, lineHeight:1 }}>{post.kudos_given ? "♥" : "♡"}</span>
-          {post.kudos_count} {post.kudos_count === 1 ? "kudo" : "kudos"}
-        </button>
-        <span style={{ marginLeft:"auto", fontSize:10.5, color:d.t4 }}>{sAgo(post.created_at)}</span>
-      </div>
-    </div>
-  );
-}
-
-// ── Post Composer ─────────────────────────────────────────────────────────────
-function SPostComposer({ user, d, SB_URL, SB_ANON, accessToken, onPosted }) {
-  const [form, setForm] = useState({ title:"", subject:CFA_TOPICS_LIST[0], dur:"", problems:"", accuracy:"", notes:"" });
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    if (!form.title.trim() || !user?.id) return;
-    setSaving(true);
-    await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method:"POST", prefer:"resolution=merge-duplicates,return=minimal", token:accessToken,
-      body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
-    });
-    await sbFetch(SB_URL, SB_ANON, "social_posts", {
-      method:"POST", prefer:"return=minimal", token:accessToken,
-      body: JSON.stringify({
-        user_id:user.id, title:form.title.trim(), subject:form.subject,
-        duration_seconds: form.dur ? parseInt(form.dur)*60 : null,
-        problems_solved: form.problems ? parseInt(form.problems) : null,
-        accuracy_pct: form.accuracy ? parseInt(form.accuracy) : null,
-        notes: form.notes.trim() || null,
-      }),
-    });
-    setSaving(false);
-    onPosted();
-  }
-
-  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:4, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
-
-  return (
-    <div>
-      <input style={{ ...inp, marginBottom:8 }} placeholder="what did you study? e.g. Fixed Income — duration and convexity"
-        value={form.title} onChange={e => setForm(f => ({ ...f, title:e.target.value }))} />
-      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:7, marginBottom:8 }}>
-        <select style={{ ...inp, cursor:"pointer" }} value={form.subject} onChange={e => setForm(f => ({ ...f, subject:e.target.value }))}>
-          {CFA_TOPICS_LIST.map(t => <option key={t}>{t}</option>)}
-        </select>
-        <input style={inp} type="number" min="1" placeholder="Mins" value={form.dur} onChange={e => setForm(f => ({ ...f, dur:e.target.value }))} />
-        <input style={inp} type="number" min="0" placeholder="Questions" value={form.problems} onChange={e => setForm(f => ({ ...f, problems:e.target.value }))} />
-        <input style={inp} type="number" min="0" max="100" placeholder="Acc %" value={form.accuracy} onChange={e => setForm(f => ({ ...f, accuracy:e.target.value }))} />
-      </div>
-      <textarea style={{ ...inp, resize:"vertical", minHeight:52, marginBottom:10 }}
-        placeholder="any insights? what clicked, what didn't?"
-        value={form.notes} onChange={e => setForm(f => ({ ...f, notes:e.target.value }))} />
-      <div style={{ display:"flex", justifyContent:"flex-end" }}>
-        <button className="btn btn-d" onClick={submit} disabled={saving || !form.title.trim()}
-          style={{ fontSize:12, opacity:saving || !form.title.trim() ? .4 : 1, letterSpacing:".03em" }}>
-          {saving ? "posting…" : "post session →"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Skeleton loaders ──────────────────────────────────────────────────────────
-function SSkeletonFeed({ d }) {
-  return (
-    <div>
-      {[1,2,3].map(i => (
-        <div key={i} style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, padding:"14px 15px" }}>
-          <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-            <div style={{ width:36, height:36, borderRadius:"50%", background:d.b, flexShrink:0 }}/>
-            <div style={{ flex:1 }}>
-              <div className="shim" style={{ height:10, width:"45%", marginBottom:6 }}/>
-              <div className="shim" style={{ height:8, width:"28%" }}/>
-            </div>
-          </div>
-          <div className="shim" style={{ height:12, width:"70%", marginBottom:10 }}/>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-            {[1,2,3].map(j => <div key={j} className="shim" style={{ height:42 }}/>)}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SEmptySlate({ d, icon, title, sub }) {
-  return (
-    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, textAlign:"center", padding:"48px 24px" }}>
-      <div style={{ fontSize:32, marginBottom:12 }}>{icon}</div>
-      <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:18, color:d.t, marginBottom:6 }}>{title}</div>
-      <div style={{ fontSize:13, color:d.t3, lineHeight:1.65 }}>{sub}</div>
-    </div>
-  );
-}
-
-function SSuggestRow({ s, d, isFollowing, onFollow, onOpenProfile }) {
-  return (
-    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-      <SAv name={s.display_name} url={s.avatar_url} size={32} d={d} onClick={() => onOpenProfile(s.id)} />
-      <div style={{ flex:1, minWidth:0 }}>
-        <button onClick={() => onOpenProfile(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:d.t, padding:0, textAlign:"left", display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"100%" }}>
-          {s.display_name}
-        </button>
-        <div style={{ fontSize:10.5, color:d.t3 }}>{s.handle ? `@${s.handle}` : ""}{s.target_college ? ` · ${s.target_college}` : ""}</div>
-      </div>
-      {!isFollowing && (
-        <button onClick={onFollow} style={{ fontSize:10, fontWeight:700, padding:"4px 10px", borderRadius:3, background:`${d.a1}15`, color:d.a1, border:`1px solid ${d.a1}30`, cursor:"pointer", fontFamily:"inherit", flexShrink:0, letterSpacing:".03em" }}>
-          follow
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── Home View — global feed ────────────────────────────────────────────────────
-function SHomeView({ user, d, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, myHandle, onOpenProfile }) {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCompose, setShowCompose] = useState(false);
-  const [topStudiers, setTopStudiers] = useState([]);
-  const todayMins = sessions.filter(s => s.date === today()).reduce((a, s) => a + s.duration, 0);
-
-  useEffect(() => { fetchHome(); }, []);
-
-  async function fetchHome() {
-    setLoading(true);
-    const pr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=50`
-    );
-    const raw = pr.ok ? await pr.json() : [];
-    setPosts(raw.map(p => ({
-      ...p,
-      kudos_count: (p.social_kudos || []).length,
-      kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
-    })));
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const tr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?select=user_id,duration_seconds,profiles:user_id(id,display_name,avatar_url)&created_at=gte.${todayStart.toISOString()}&limit=100`
-    );
-    const td = tr.ok ? await tr.json() : [];
-    const map = {};
-    td.forEach(p => {
-      if (!p.profiles) return;
-      if (!map[p.user_id]) map[p.user_id] = { profile:p.profiles, secs:0 };
-      map[p.user_id].secs += p.duration_seconds || 0;
-    });
-    setTopStudiers(Object.values(map).sort((a,b) => b.secs - a.secs).slice(0, 10));
-    setLoading(false);
-  }
-
-  async function toggleKudos(post) {
-    if (!user?.id || post.user_id === user.id) return;
-    if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
-    } else {
-      await sbFetch(SB_URL, SB_ANON, "social_kudos", { method:"POST", prefer:"return=minimal", token:accessToken, body: JSON.stringify({ post_id:post.id, user_id:user.id }) });
-    }
-    setPosts(prev => prev.map(p => p.id === post.id ? { ...p, kudos_given:!p.kudos_given, kudos_count:p.kudos_count+(p.kudos_given?-1:1) } : p));
-  }
-
-  return (
-    <div>
-      {/* Compose bar — always visible */}
-      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:12, overflow:"hidden" }}>
-        <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:10 }}>
-          <SAv name={user?.name} url={user?.avatar} size={34} d={d} />
-          <button onClick={() => setShowCompose(v => !v)} style={{
-            flex:1, padding:"9px 14px", background:d.hover,
-            border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
-            borderRadius:4, color:showCompose ? d.t : d.t3,
-            fontSize:12.5, fontFamily:"inherit", cursor:"pointer", textAlign:"left", transition:"all .15s",
-          }}>
-            {showCompose ? "▲ close" : `log a study session, @${myHandle}…`}
-          </button>
-          <button onClick={() => setShowCompose(v => !v)} style={{
-            width:34, height:34, borderRadius:"50%",
-            background:showCompose ? d.danger : d.a1,
-            border:"none", color:"#fff", fontSize:20, lineHeight:1,
-            cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all .15s",
-          }}>{showCompose ? "×" : "+"}</button>
-        </div>
-        {showCompose && (
-          <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${d.b}`, paddingTop:12, animation:"selIn .15s ease" }}>
-            <SPostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken}
-              onPosted={() => { setShowCompose(false); fetchHome(); }} />
-          </div>
-        )}
-      </div>
-
-      {/* Story row */}
-      {topStudiers.length > 0 && (
-        <div style={{ marginBottom:14 }}>
-          <div style={{ display:"flex", gap:14, overflowX:"auto", paddingBottom:6, scrollbarWidth:"none" }}>
-            {topStudiers.map(({ profile, secs }) => (
-              <div key={profile.id} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, flexShrink:0, cursor:"pointer" }} onClick={() => onOpenProfile(profile.id)}>
-                <SAv name={profile.display_name} url={profile.avatar_url} size={48} d={d} ring={true} />
-                <span style={{ fontSize:9.5, color:d.t3, maxWidth:48, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{sFmtS(secs)}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ height:1, background:d.b }}/>
-        </div>
-      )}
-
-      {loading ? <SSkeletonFeed d={d} /> :
-       posts.length === 0 ? <SEmptySlate d={d} icon="📭" title="no sessions posted yet." sub="be the first — hit + above to log your session." /> :
-       posts.map(post => (
-        <SPostCard key={post.id} post={post} user={user} d={d}
-          onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
-          onRefresh={fetchHome} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} />
-      ))}
-    </div>
-  );
-}
-
-// ── Friends/Network View ──────────────────────────────────────────────────────
-function SFriendsView({ user, d, SB_URL, SB_ANON, accessToken, myHandle, onOpenProfile }) {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [suggestions, setSuggestions] = useState([]);
-  const [followingSet, setFollowingSet] = useState(new Set());
-
-  useEffect(() => { fetchFriends(); }, []);
-
-  async function fetchFriends() {
-    setLoading(true);
-    if (!user?.id) { setLoading(false); return; }
-    const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
-    const follows = fr.ok ? await fr.json() : [];
-    const followIds = follows.map(f => f.following_id);
-    setFollowingSet(new Set(followIds));
-    if (followIds.length > 0) {
-      const idsQ = followIds.map(id => `user_id=eq.${id}`).join(",");
-      const pr = await sbFetch(SB_URL, SB_ANON, `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`);
-      const raw = pr.ok ? await pr.json() : [];
-      setPosts(raw.map(p => ({ ...p, kudos_count:(p.social_kudos||[]).length, kudos_given:(p.social_kudos||[]).some(k=>k.user_id===user?.id) })));
-    }
-    const excStr = [user.id,...followIds].map(id=>`id.neq.${id}`).join(",");
-    const sr = await sbFetch(SB_URL, SB_ANON, `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url,target_college&limit=5&order=created_at.desc`);
-    setSuggestions(sr.ok ? await sr.json() : []);
-    setLoading(false);
-  }
-
-  async function toggleKudos(post) {
-    if (!user?.id || post.user_id === user.id) return;
-    if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
-    } else {
-      await sbFetch(SB_URL, SB_ANON, "social_kudos", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({post_id:post.id,user_id:user.id}) });
-    }
-    setPosts(prev => prev.map(p => p.id===post.id ? {...p,kudos_given:!p.kudos_given,kudos_count:p.kudos_count+(p.kudos_given?-1:1)} : p));
-  }
-
-  async function follow(uid) {
-    await sbFetch(SB_URL, SB_ANON, "social_follows", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({follower_id:user.id,following_id:uid}) });
-    setFollowingSet(prev => new Set([...prev, uid]));
-    setSuggestions(prev => prev.filter(s => s.id !== uid));
-    fetchFriends();
-  }
-
-  const noFriends = followingSet.size === 0;
-
-  return (
-    <div>
-      {noFriends && suggestions.length > 0 && (
-        <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px", marginBottom:12 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>find candidates to follow</div>
-          {suggestions.map(s => <SSuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)} onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />)}
-        </div>
-      )}
-      {loading ? <SSkeletonFeed d={d} /> :
-       posts.length === 0 ? <SEmptySlate d={d} icon="👥" title={noFriends?"follow fellow candidates.":"network is quiet."} sub={noFriends?"their study sessions will appear here.":"your connections haven't posted yet."} /> :
-       posts.map(post => (
-        <SPostCard key={post.id} post={post} user={user} d={d}
-          onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
-          onRefresh={fetchFriends} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} />
-      ))}
-      {!noFriends && suggestions.length > 0 && (
-        <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px", marginTop:8 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>suggested candidates</div>
-          {suggestions.map(s => <SSuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)} onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Leaderboard ───────────────────────────────────────────────────────────────
-function SLeaderboardView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
-  const [board, setBoard] = useState([]);
-  const [period, setPeriod] = useState("week");
-  const [subject, setSubject] = useState("All");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { fetchBoard(); }, [period, subject]);
-
-  async function fetchBoard() {
-    setLoading(true);
-    let q = `social_posts?select=user_id,duration_seconds,subject,created_at,profiles:user_id(id,display_name,handle,avatar_url)`;
-    if (subject !== "All") q += `&subject=eq.${encodeURIComponent(subject)}`;
-    if (period === "week") { const s = new Date(); s.setDate(s.getDate()-7); q += `&created_at=gte.${s.toISOString()}`; }
-    else if (period === "month") { const s = new Date(); s.setMonth(s.getMonth()-1); q += `&created_at=gte.${s.toISOString()}`; }
-    q += `&limit=500`;
-    const r = await sbFetch(SB_URL, SB_ANON, q);
-    const data = r.ok ? await r.json() : [];
-    const map = {};
-    data.forEach(s => {
-      if (!s.profiles) return;
-      if (!map[s.user_id]) map[s.user_id] = { profile:s.profiles, secs:0, sessions:0 };
-      map[s.user_id].secs += s.duration_seconds || 0;
-      map[s.user_id].sessions++;
-    });
-    setBoard(Object.values(map).filter(e=>e.profile).sort((a,b)=>b.secs-a.secs).slice(0,50));
-    setLoading(false);
-  }
-
-  const myRank = board.findIndex(e => e.profile.id === user?.id) + 1;
-  const myEntry = board.find(e => e.profile.id === user?.id);
-  const prevEntry = myRank > 1 ? board[myRank-2] : null;
-  const MEDAL = ["🥇","🥈","🥉"];
-
-  const Pill = ({ label, active, onClick }) => (
-    <button onClick={onClick} style={{ padding:"5px 12px", border:`1px solid ${active?d.a1:d.b}`, borderRadius:3, background:active?`${d.a1}15`:"transparent", color:active?d.a1:d.t3, fontFamily:"inherit", fontSize:11, fontWeight:active?700:400, cursor:"pointer", transition:"all .12s" }}>{label}</button>
-  );
-
-  return (
-    <div>
-      {myEntry && (
-        <div style={{ padding:"18px 20px", marginBottom:14, borderRadius:8, background:`linear-gradient(135deg,${d.a1}10,${d.a2}08)`, border:`1px solid ${d.a1}20`, display:"flex", alignItems:"center", gap:16 }}>
-          <div style={{ textAlign:"center", minWidth:60 }}>
-            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:46, fontWeight:400, color:d.a1, lineHeight:1 }}>#{myRank}</div>
-            <div style={{ fontSize:10, color:d.t3, marginTop:3, letterSpacing:".06em", textTransform:"uppercase" }}>your rank</div>
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:13, fontWeight:600, color:d.t, marginBottom:4 }}>{sFmtS(myEntry.secs)} studied</div>
-            {prevEntry && <div style={{ fontSize:12, color:d.t3 }}>{sFmtS(prevEntry.secs - myEntry.secs)} behind #{myRank-1}</div>}
-            <div style={{ height:3, background:d.b, borderRadius:2, overflow:"hidden", marginTop:10 }}>
-              <div style={{ height:"100%", borderRadius:2, background:d.a1, width:`${board[0]?.secs>0?(myEntry.secs/board[0].secs)*100:0}%`, transition:"width .6s ease" }}/>
-            </div>
-          </div>
-        </div>
-      )}
-      <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:7 }}>
-        {[["week","This week"],["month","This month"],["all","All time"]].map(([v,l]) => <Pill key={v} label={l} active={period===v} onClick={() => setPeriod(v)} />)}
-      </div>
-      <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:14 }}>
-        {["All",...CFA_TOPICS_LIST.slice(0,5)].map(s => <Pill key={s} label={s==="All"?"All":s.split(" ")[0]} active={subject===s} onClick={() => setSubject(s)} />)}
-      </div>
-      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, overflow:"hidden" }}>
-        {loading ? (
-          <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading rankings…</div>
-        ) : board.length === 0 ? (
-          <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>no data yet. post a session to get ranked.</div>
-        ) : board.map((entry, i) => {
-          const isMe = entry.profile.id === user?.id;
-          const pct = board[0]?.secs > 0 ? (entry.secs/board[0].secs)*100 : 0;
-          return (
-            <div key={entry.profile.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 16px", borderBottom:i<board.length-1?`1px solid ${d.b}`:"none", background:isMe?`${d.a1}06`:"transparent", position:"relative" }}>
-              <div style={{ position:"absolute", left:0, top:0, bottom:0, width:`${pct}%`, background:`${d.a1}04`, pointerEvents:"none" }}/>
-              <span style={{ fontSize:i<3?17:13, fontWeight:700, width:26, textAlign:"center", color:i<3?"inherit":d.t4, flexShrink:0, zIndex:1 }}>{i<3?MEDAL[i]:i+1}</span>
-              <SAv name={entry.profile.display_name} url={entry.profile.avatar_url} size={30} d={d} onClick={() => onOpenProfile(entry.profile.id)} />
-              <div style={{ flex:1, minWidth:0, zIndex:1 }}>
-                <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:isMe?700:500, color:isMe?d.a1:d.t, padding:0 }}>
-                  {entry.profile.display_name}{isMe&&<span style={{ fontSize:9, marginLeft:6, background:`${d.a1}18`, color:d.a1, padding:"1px 5px", borderRadius:2 }}>you</span>}
-                </button>
-                {entry.profile.handle && <div style={{ fontSize:10, color:d.t4 }}>@{entry.profile.handle}</div>}
-              </div>
-              <div style={{ textAlign:"right", zIndex:1 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:isMe?d.a1:d.t }}>{sFmtS(entry.secs)}</div>
-                <div style={{ fontSize:9, color:d.t4 }}>{entry.sessions} post{entry.sessions!==1?"s":""}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── Events ────────────────────────────────────────────────────────────────────
-function SEventsView({ user, d, SB_URL, SB_ANON, accessToken, myHandle }) {
-  const [events, setEvents] = useState([]);
-  const [registered, setRegistered] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [tab, setTab] = useState("upcoming");
-
-  useEffect(() => { fetchEvents(); }, [tab]);
-
-  async function fetchEvents() {
-    setLoading(true);
-    const now = new Date().toISOString();
-    const q = tab === "mine"
-      ? `study_events?created_by=eq.${user?.id}&select=*,study_event_registrations(count)&order=starts_at.desc`
-      : `study_events?ends_at=gte.${now}&or=(is_private.eq.false,created_by.eq.${user?.id})&select=*,study_event_registrations(count)&order=starts_at.asc&limit=30`;
-    const er = await sbFetch(SB_URL, SB_ANON, q);
-    setEvents(er.ok ? await er.json() : []);
-    if (user?.id) {
-      const rr = await sbFetch(SB_URL, SB_ANON, `study_event_registrations?user_id=eq.${user.id}&select=event_id`);
-      setRegistered(new Set((rr.ok ? await rr.json() : []).map(r => r.event_id)));
-    }
-    setLoading(false);
-  }
-
-  async function toggleReg(evtId) {
-    if (!user?.id) return;
-    if (registered.has(evtId)) {
-      await sbFetch(SB_URL, SB_ANON, `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
-      setRegistered(prev => { const s = new Set(prev); s.delete(evtId); return s; });
-    } else {
-      await sbFetch(SB_URL, SB_ANON, "study_event_registrations", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({event_id:evtId,user_id:user.id}) });
-      setRegistered(prev => new Set([...prev, evtId]));
-    }
-  }
-
-  const isLive = e => { const now = new Date(); return new Date(e.starts_at)<=now&&new Date(e.ends_at)>=now; };
-
-  return (
-    <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
-        <div style={{ display:"flex", gap:4 }}>
-          {[["upcoming","Upcoming"],["mine","My Events"]].map(([v,l]) => (
-            <button key={v} onClick={() => setTab(v)} style={{ padding:"5px 12px", border:`1px solid ${tab===v?d.a1:d.b}`, borderRadius:3, background:tab===v?`${d.a1}15`:"transparent", color:tab===v?d.a1:d.t3, fontFamily:"inherit", fontSize:11, fontWeight:tab===v?700:400, cursor:"pointer" }}>{l}</button>
-          ))}
-        </div>
-        <button onClick={() => setShowCreate(v=>!v)} style={{ padding:"7px 14px", border:`1px solid ${showCreate?d.danger:d.a1}`, borderRadius:3, background:showCreate?`${d.danger}10`:`${d.a1}10`, color:showCreate?d.danger:d.a1, fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer" }}>
-          {showCreate ? "✕ cancel" : "+ create event"}
-        </button>
-      </div>
-      {showCreate && (
-        <div style={{ marginBottom:12 }}>
-          <SCreateEventForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onCreated={() => { setShowCreate(false); fetchEvents(); }} />
-        </div>
-      )}
-      {loading ? <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div> :
-       events.length === 0 ? <SEmptySlate d={d} icon="🗓" title={tab==="mine"?"no events created yet.":"no upcoming events."} sub="create a study group event above." /> :
-       events.map(evt => {
-        const live = isLive(evt);
-        const sc = SUBJECT_COLORS[evt.subject] || d.a1;
-        const count = evt.study_event_registrations?.[0]?.count || 0;
-        const reg = registered.has(evt.id);
-        const isOwn = evt.created_by === user?.id;
-        return (
-          <div key={evt.id} style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, overflow:"hidden" }}>
-            <div style={{ height:2, background:`linear-gradient(90deg,${sc},${sc}30)` }}/>
-            <div style={{ padding:"14px 16px 13px" }}>
-              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:8 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:5 }}>
-                    <span style={{ fontSize:15, fontWeight:700, color:d.t }}>{evt.name}</span>
-                    {live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:"#c45a5a18", color:"#c45a5a" }}>🔴 Live</span>}
-                    {!live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${d.a2}15`, color:d.a2 }}>Upcoming</span>}
-                    {evt.is_private && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:`${d.t4}12`, color:d.t4 }}>🔒 Private</span>}
-                    {isOwn && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:`${d.a1}15`, color:d.a1 }}>yours</span>}
-                  </div>
-                  <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${sc}15`, color:sc }}>{SUB_EMOJI[evt.subject]||"📚"} {evt.subject}</span>
-                </div>
-              </div>
-              {evt.description && <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{evt.description}</div>}
-              <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:12 }}>
-                <span style={{ fontSize:11, color:d.t3 }}>📅 {new Date(evt.starts_at).toLocaleString("en-GB",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
-                <span style={{ fontSize:11, color:d.t3 }}>⏱ {(()=>{const m=Math.round((new Date(evt.ends_at)-new Date(evt.starts_at))/60000);const h=Math.floor(m/60);return h>0?`${h}h${m%60>0?" "+(m%60)+"m":""}`:m+"m";})()}</span>
-                <span style={{ fontSize:11, color:d.t3 }}>👥 {count} registered</span>
-              </div>
-              {!isOwn && (
-                <button onClick={() => toggleReg(evt.id)} style={{ padding:"8px 20px", borderRadius:3, border:`1px solid ${reg?d.b:live?"#c45a5a":d.a1}`, background:reg?"transparent":live?"#c45a5a":d.a1, color:reg?d.t3:"#fff", fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer", transition:"all .12s", letterSpacing:".02em" }}>
-                  {reg?(live?"✓ joined":"✓ registered — cancel?"):(live?"join live":"register")}
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function SCreateEventForm({ user, d, SB_URL, SB_ANON, accessToken, onCreated }) {
-  const now = new Date(); now.setMinutes(Math.ceil(now.getMinutes()/15)*15,0,0);
-  const localISO = dt => new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  const [form, setForm] = useState({ name:"", subject:CFA_TOPICS_LIST[0], description:"", starts_at:localISO(now), duration_hours:"2", is_private:false });
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    if (!form.name.trim()) return;
-    setSaving(true);
-    const starts = new Date(form.starts_at);
-    const ends = new Date(starts.getTime()+parseFloat(form.duration_hours)*3600000);
-    await sbFetch(SB_URL, SB_ANON, "study_events", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({name:form.name.trim(),subject:form.subject,description:form.description.trim()||null,starts_at:starts.toISOString(),ends_at:ends.toISOString(),is_private:form.is_private,created_by:user?.id}) });
-    setSaving(false); onCreated();
-  }
-
-  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:4, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
-  return (
-    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px" }}>
-      <div style={{ fontSize:12, fontWeight:700, color:d.t, marginBottom:12, letterSpacing:".04em" }}>new study event</div>
-      <input style={{ ...inp, marginBottom:8 }} placeholder="Event name — e.g. Fixed Income Marathon" maxLength={60} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
-      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr", gap:8, marginBottom:8 }}>
-        <select style={{ ...inp, cursor:"pointer" }} value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))}>
-          {CFA_TOPICS_LIST.map(t=><option key={t}>{t}</option>)}
-        </select>
-        <input style={inp} type="datetime-local" value={form.starts_at} onChange={e=>setForm(f=>({...f,starts_at:e.target.value}))}/>
-        <select style={{ ...inp, cursor:"pointer" }} value={form.duration_hours} onChange={e=>setForm(f=>({...f,duration_hours:e.target.value}))}>
-          {["0.5","1","1.5","2","3","4","6"].map(h=><option key={h} value={h}>{h==="0.5"?"30 min":`${h}h`}</option>)}
-        </select>
-      </div>
-      <textarea style={{ ...inp, resize:"vertical", minHeight:48, marginBottom:10 }} placeholder="What will you cover? Any rules?" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:"10px 12px", background:d.hover, borderRadius:4, border:`1px solid ${d.b}` }}>
-        <button onClick={()=>setForm(f=>({...f,is_private:!f.is_private}))} style={{ width:36,height:20,borderRadius:10,background:form.is_private?d.a1:d.b,border:"none",cursor:"pointer",position:"relative",flexShrink:0,transition:"background .2s" }}>
-          <span style={{ position:"absolute",top:2,left:form.is_private?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s" }}/>
-        </button>
-        <div>
-          <div style={{ fontSize:12,fontWeight:600,color:d.t }}>{form.is_private?"🔒 Private event":"🌐 Public event"}</div>
-          <div style={{ fontSize:10.5,color:d.t3 }}>{form.is_private?"invite only":"visible to all candidates"}</div>
-        </div>
-      </div>
-      <button className="btn btn-d" onClick={submit} disabled={saving||!form.name.trim()} style={{ fontSize:12,opacity:saving||!form.name.trim()?.4:1,letterSpacing:".03em" }}>
-        {saving?"creating…":"create event →"}
-      </button>
-    </div>
-  );
-}
-
-// ── Profile View ──────────────────────────────────────────────────────────────
-function SProfileView({ user, d, SB_URL, SB_ANON, accessToken, viewingUid, isOwn, onOpenProfile, onBack, sessions }) {
-  const [profile, setProfile] = useState(null);
-  const [posts, setPosts] = useState([]);
-  const [stats, setStats] = useState({ secs:0, followers:0, following:0 });
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [tab, setTab] = useState("posts");
-
-  useEffect(() => { load(); }, [viewingUid]);
-
-  async function load() {
-    setLoading(true); setEditing(false);
-    const pr = await sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${viewingUid}&select=*`);
-    let prof = (pr.ok ? await pr.json() : [])[0];
-    if (!prof && isOwn) {
-      await sbFetch(SB_URL, SB_ANON, "profiles", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({id:user.id,display_name:user.name,avatar_url:user.avatar||null}) });
-      prof = { id:user.id, display_name:user.name, avatar_url:user.avatar, bio:null, target_college:null, handle:null };
-    }
-    setProfile(prof || { id:viewingUid, display_name:"Candidate" });
-    const postr = await sbFetch(SB_URL, SB_ANON, `social_posts?user_id=eq.${viewingUid}&select=*,social_kudos(user_id)&order=created_at.desc&limit=30`);
-    const rawPosts = postr.ok ? await postr.json() : [];
-    let totalSecs = rawPosts.reduce((a,p)=>a+(p.duration_seconds||0),0);
-    if (isOwn && sessions?.length) totalSecs = Math.max(totalSecs, sessions.reduce((a,s)=>a+s.duration*60,0));
-    setPosts(rawPosts.map(p=>({...p,profiles:prof||{display_name:user.name,avatar_url:user.avatar},kudos_count:(p.social_kudos||[]).length,kudos_given:(p.social_kudos||[]).some(k=>k.user_id===user?.id)})));
-    const [folr,folgi] = await Promise.all([
-      sbFetch(SB_URL,SB_ANON,`social_follows?following_id=eq.${viewingUid}&select=follower_id`),
-      sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${viewingUid}&select=following_id`),
-    ]);
-    setStats({secs:totalSecs,followers:folr.ok?(await folr.json()).length:0,following:folgi.ok?(await folgi.json()).length:0});
-    if (!isOwn&&user?.id) {
-      const cr = await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}&select=follower_id`);
-      setIsFollowing((cr.ok?await cr.json():[]).length>0);
-    }
-    setLoading(false);
-  }
-
-  async function toggleFollow() {
-    if (!user?.id) return;
-    if (isFollowing) {
-      await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}`,{method:"DELETE",token:accessToken});
-      setIsFollowing(false); setStats(s=>({...s,followers:s.followers-1}));
-    } else {
-      await sbFetch(SB_URL,SB_ANON,"social_follows",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({follower_id:user.id,following_id:viewingUid})});
-      setIsFollowing(true); setStats(s=>({...s,followers:s.followers+1}));
-    }
-  }
-
-  async function toggleKudos(post) {
-    if (!user?.id||post.user_id===user.id) return;
-    if (post.kudos_given) {
-      await sbFetch(SB_URL,SB_ANON,`social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`,{method:"DELETE",token:accessToken});
-    } else {
-      await sbFetch(SB_URL,SB_ANON,"social_kudos",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({post_id:post.id,user_id:user.id})});
-    }
-    setPosts(prev=>prev.map(p=>p.id===post.id?{...p,kudos_given:!p.kudos_given,kudos_count:p.kudos_count+(p.kudos_given?-1:1)}:p));
-  }
-
-  if (loading) return <div style={{padding:40,textAlign:"center",color:d.t3,fontSize:13,fontStyle:"italic"}}>loading profile…</div>;
-  const bg = avColor(profile?.display_name);
-  const subBreakdown = CFA_TOPICS_LIST.map(sub=>({sub,secs:posts.filter(p=>p.subject===sub).reduce((a,p)=>a+(p.duration_seconds||0),0)}));
-  const totalPostedSecs = subBreakdown.reduce((a,b)=>a+b.secs,0);
-
-  return (
-    <div>
-      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, overflow:"hidden", marginBottom:10 }}>
-        <div style={{ height:72, background:`linear-gradient(135deg,${bg}60,${bg}15)`, position:"relative" }}>
-          {!isOwn && <button onClick={onBack} style={{ position:"absolute", top:10, left:12, background:"rgba(0,0,0,.4)", border:"none", color:"#fff", borderRadius:3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>← back</button>}
-        </div>
-        <div style={{ padding:"0 18px 18px" }}>
-          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginTop:-26, marginBottom:12 }}>
-            <div style={{ width:54,height:54,borderRadius:"50%",background:bg,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:700,border:`3px solid ${d.card}`,overflow:"hidden",flexShrink:0 }}>
-              {profile?.avatar_url?<img src={profile.avatar_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:sInitials(profile?.display_name)}
-            </div>
-            {isOwn ? (
-              <button onClick={()=>setEditing(v=>!v)} style={{padding:"7px 16px",border:`1px solid ${d.b}`,borderRadius:3,background:"transparent",color:d.t3,fontFamily:"inherit",fontSize:11,fontWeight:600,cursor:"pointer",letterSpacing:".03em"}}>
-                {editing?"cancel":"edit profile"}
-              </button>
-            ) : (
-              <button onClick={toggleFollow} style={{padding:"8px 20px",borderRadius:3,border:`1px solid ${isFollowing?d.b:d.a1}`,background:isFollowing?"transparent":d.a1,color:isFollowing?d.t3:"#fff",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .12s",letterSpacing:".02em"}}>
-                {isFollowing?"following":"follow"}
-              </button>
-            )}
-          </div>
-          {editing ? (
-            <SEditProfileForm user={user} profile={profile} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onSaved={updated=>{setProfile(updated);setEditing(false);}} />
-          ) : (
-            <>
-              <div style={{fontSize:17,fontWeight:700,color:d.t}}>{profile?.display_name}</div>
-              {profile?.handle&&<div style={{fontSize:12,color:d.t3,marginBottom:5}}>@{profile.handle}</div>}
-              {profile?.bio&&<div style={{fontSize:13,color:d.t2,lineHeight:1.65,marginBottom:6}}>{profile.bio}</div>}
-              {profile?.target_college&&<div style={{fontSize:12,color:d.t3,marginBottom:12}}>🎯 {profile.target_college}</div>}
-              <div style={{display:"flex",borderTop:`1px solid ${d.b}`,paddingTop:12}}>
-                {[
-                  {val:sFmtS(stats.secs)||"0m",lbl:"studied"},
-                  {val:posts.length,lbl:"posts"},
-                  {val:stats.followers,lbl:"followers"},
-                  {val:stats.following,lbl:"following"},
-                ].map((s,i)=>(
-                  <div key={s.lbl} style={{flex:1,textAlign:"center",borderRight:i<3?`1px solid ${d.b}`:"none",padding:"4px 0"}}>
-                    <div style={{fontSize:18,fontWeight:700,color:d.t,letterSpacing:"-.01em"}}>{s.val}</div>
-                    <div style={{fontSize:9.5,color:d.t3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.lbl}</div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-      <div style={{display:"flex",borderBottom:`1px solid ${d.b}`,marginBottom:12}}>
-        {[["posts","Sessions"],["stats","Stats"]].map(([v,l])=>(
-          <button key={v} onClick={()=>setTab(v)} style={{padding:"8px 16px",border:"none",background:"transparent",fontFamily:"inherit",fontSize:12,fontWeight:tab===v?700:400,color:tab===v?d.t:d.t3,cursor:"pointer",borderBottom:`2px solid ${tab===v?d.a1:"transparent"}`,marginBottom:-1}}>{l}</button>
-        ))}
-      </div>
-      {tab==="posts"&&(
-        posts.length===0?<SEmptySlate d={d} icon="📭" title="no sessions posted yet." sub="log sessions from the Home tab." />:
-        posts.map(post=><SPostCard key={post.id} post={post} user={user} d={d} onKudos={()=>toggleKudos(post)} onOpenProfile={onOpenProfile} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onRefresh={load}/>)
-      )}
-      {tab==="stats"&&(
-        <div>
-          <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,padding:"16px",marginBottom:10}}>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:12}}>topic breakdown</div>
-            {subBreakdown.filter(b=>b.secs>0).map(({sub,secs})=>{
-              const pct=totalPostedSecs>0?Math.round((secs/totalPostedSecs)*100):0;
-              const sc=SUBJECT_COLORS[sub]||d.a1;
-              return(<div key={sub} style={{marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5}}>
-                  <span style={{color:sc,fontWeight:600}}>{SUB_EMOJI[sub]} {sub}</span>
-                  <span style={{color:d.t3}}>{sFmtS(secs)}</span>
-                </div>
-                <div style={{height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${pct}%`,background:sc,borderRadius:2,transition:"width .5s"}}/>
-                </div>
-              </div>);
-            })}
-          </div>
-          <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,padding:"16px"}}>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:12}}>all-time</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[{label:"Total studied",val:sFmtS(stats.secs)||"0m"},{label:"Sessions posted",val:posts.length},{label:"Total kudos",val:posts.reduce((a,p)=>a+p.kudos_count,0)},{label:"Avg session",val:posts.length>0?sFmtS(Math.round(stats.secs/posts.length)):"—"}].map(s=>(
-                <div key={s.label} style={{textAlign:"center",padding:"10px 8px",background:d.hover,borderRadius:4}}>
-                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,fontWeight:400,color:d.t}}>{s.val}</div>
-                  <div style={{fontSize:9.5,color:d.t4,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SEditProfileForm({ user, profile, d, SB_URL, SB_ANON, accessToken, onSaved }) {
-  const [form, setForm] = useState({display_name:profile?.display_name||"",handle:profile?.handle||"",bio:profile?.bio||"",target_college:profile?.target_college||""});
-  const [handleState, setHandleState] = useState("ok");
-  const [saving, setSaving] = useState(false);
-  const debounceRef = useRef(null);
-
-  function onHandleType(v) {
-    const clean = v.toLowerCase().replace(/[^a-z0-9_.]/g,"").slice(0,24);
-    setForm(f=>({...f,handle:clean}));
-    if (clean===profile?.handle){setHandleState("ok");return;}
-    if (clean.length<3){setHandleState("short");return;}
-    setHandleState("checking");
-    clearTimeout(debounceRef.current);
-    debounceRef.current=setTimeout(async()=>{
-      const r=await sbFetch(SB_URL,SB_ANON,`profiles?handle=eq.${clean}&select=id`);
-      setHandleState((r.ok?await r.json():[]).length>0?"taken":"ok");
-    },350);
-  }
-
-  async function save() {
-    if (handleState!=="ok") return;
-    setSaving(true);
-    const r = await sbFetch(SB_URL,SB_ANON,"profiles",{method:"POST",prefer:"resolution=merge-duplicates,return=representation",token:accessToken,body:JSON.stringify({id:user.id,...form,avatar_url:user.avatar||null})});
-    const rows = r.ok?await r.json():[];
-    setSaving(false);
-    onSaved(rows[0]||{...profile,...form});
-  }
-
-  const inp = {padding:"8px 11px",border:`1px solid ${d.b}`,borderRadius:4,background:d.inp,color:d.t,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",marginBottom:8};
-  const hb = handleState==="ok"?d.a2:handleState==="taken"||handleState==="short"?d.danger:d.b;
-
-  return (
-    <div>
-      <input style={inp} placeholder="Display name" value={form.display_name} onChange={e=>setForm(f=>({...f,display_name:e.target.value}))}/>
-      <div style={{position:"relative",marginBottom:8}}>
-        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:d.t3,pointerEvents:"none"}}>@</span>
-        <input style={{...inp,marginBottom:0,paddingLeft:28,border:`1px solid ${hb}`}} placeholder="handle" value={form.handle} onChange={e=>onHandleType(e.target.value)}/>
-        {handleState==="ok"&&form.handle.length>=3&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:d.a2,fontSize:14}}>✓</span>}
-        {handleState==="taken"&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:d.danger}}>taken</span>}
-      </div>
-      <input style={inp} placeholder="Target — e.g. CFA Level II, Nov 2026" value={form.target_college} onChange={e=>setForm(f=>({...f,target_college:e.target.value}))}/>
-      <textarea style={{...inp,minHeight:54,resize:"vertical"}} placeholder="Bio" value={form.bio} onChange={e=>setForm(f=>({...f,bio:e.target.value}))}/>
-      <button className="btn btn-d" onClick={save} disabled={saving||handleState!=="ok"} style={{fontSize:12,opacity:saving||handleState!=="ok"?.4:1,letterSpacing:".03em"}}>
-        {saving?"saving…":"save changes"}
-      </button>
-    </div>
-  );
-}
-
-// ── Search View ───────────────────────────────────────────────────────────────
-function SSearchView({ user, d, SB_URL, SB_ANON, accessToken, onOpenProfile }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [all, setAll] = useState([]);
-  const [followingSet, setFollowingSet] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const inputRef = useRef(null);
-
-  useEffect(() => { inputRef.current?.focus(); fetchAll(); }, []);
-
-  async function fetchAll() {
-    const [ar,fr] = await Promise.all([
-      sbFetch(SB_URL,SB_ANON,`profiles?id=neq.${user?.id||"none"}&select=id,display_name,handle,avatar_url,target_college&order=display_name`),
-      user?.id?sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&select=following_id`):Promise.resolve({ok:true,json:()=>[]}),
-    ]);
-    const users = ar.ok?await ar.json():[];
-    const follows = fr.ok?await fr.json():[];
-    setAll(users); setResults(users);
-    setFollowingSet(new Set(follows.map(f=>f.following_id)));
-    setLoading(false);
-  }
-
-  function search(q) {
-    setQuery(q);
-    if (!q.trim()){setResults(all);return;}
-    const lq = q.toLowerCase();
-    setResults(all.filter(u=>u.handle?.toLowerCase().includes(lq)||u.display_name?.toLowerCase().includes(lq)||u.target_college?.toLowerCase().includes(lq)));
-  }
-
-  async function toggleFollow(uid) {
-    if (!user?.id) return;
-    if (followingSet.has(uid)) {
-      await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${uid}`,{method:"DELETE",token:accessToken});
-      setFollowingSet(prev=>{const s=new Set(prev);s.delete(uid);return s;});
-    } else {
-      await sbFetch(SB_URL,SB_ANON,"social_follows",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({follower_id:user.id,following_id:uid})});
-      setFollowingSet(prev=>new Set([...prev,uid]));
-    }
-  }
-
-  return (
-    <div>
-      <div style={{position:"relative",marginBottom:14}}>
-        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:16,color:d.t3,pointerEvents:"none"}}>⌕</span>
-        <input ref={inputRef} value={query} onChange={e=>search(e.target.value)} placeholder="search @handle, name, or target exam…"
-          style={{width:"100%",boxSizing:"border-box",padding:"11px 14px 11px 36px",border:`1px solid ${d.b}`,borderRadius:5,background:d.inp,color:d.t,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
-        {query&&<button onClick={()=>search("")} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:d.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>}
-      </div>
-      {loading?<div style={{padding:32,textAlign:"center",color:d.t3,fontSize:13,fontStyle:"italic"}}>loading…</div>:
-       results.length===0?<SEmptySlate d={d} icon="🔍" title="no candidates found." sub="try a different handle or name." />:
-       results.map(u=>(
-        <div key={u.id} style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",marginBottom:8}}>
-          <SAv name={u.display_name} url={u.avatar_url} size={42} d={d} onClick={()=>onOpenProfile(u.id)}/>
-          <div style={{flex:1,minWidth:0}}>
-            <button onClick={()=>onOpenProfile(u.id)} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13.5,fontWeight:700,color:d.t,padding:0,textAlign:"left"}}>{u.display_name}</button>
-            <div style={{fontSize:11,color:d.t3}}>{u.handle?`@${u.handle}`:""}{u.target_college?` · 🎯 ${u.target_college}`:""}</div>
-          </div>
-          <button onClick={()=>toggleFollow(u.id)} style={{padding:"6px 14px",borderRadius:3,border:`1px solid ${followingSet.has(u.id)?d.b:d.a1}`,background:followingSet.has(u.id)?"transparent":d.a1,color:followingSet.has(u.id)?d.t3:"#fff",fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,transition:"all .12s",letterSpacing:".02em"}}>
-            {followingSet.has(u.id)?"following":"follow"}
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 
 // ── Auth Screen ───────────────────────────────────────────────────────────────
@@ -1299,7 +474,7 @@ function AuthScreen({onAuth}) {
         access_token:session.access_token, refresh_token:session.refresh_token,
         expires_at:Date.now()+(session.expires_in||3600)*1000, user:session.user,
       };
-      localStorage.setItem("cfa_auth", JSON.stringify(stored));
+      localStorage.setItem("slothr_auth", JSON.stringify(stored));
       onAuth(stored);
     } catch(e) { setError(e.message); }
     setLoading(false);
@@ -1324,9 +499,9 @@ function AuthScreen({onAuth}) {
         <div style={{textAlign:"center", marginBottom:32}}>
           <div style={{fontSize:40, marginBottom:8}}>🦥</div>
           <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
-            Charter<span style={{color:"#c9a84c"}}>Run</span>
+            sloth<span style={{color:"#e8723c"}}>r</span>
           </div>
-          <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your smartest situationship.</div>
+          <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your CFA exam co-pilot.</div>
         </div>
         <button onClick={()=>window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`}
           style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#1a1510",
@@ -1371,18 +546,130 @@ function AuthScreen({onAuth}) {
 }
 
 
-const TABS=[
-  {id:"overview",    label:"Dashboard",  icon:"⌂"},
-  {id:"home",        label:"Home",       icon:"◉"},
-  {id:"friends",     label:"Network",    icon:"◎"},
-  {id:"leaderboard", label:"Rankings",   icon:"▲"},
-  {id:"events",      label:"Events",     icon:"◈"},
-  {id:"coach",       label:"AI Coach",   icon:"👁"},
-  {id:"goals",       label:"Today",      icon:"✦"},
-  {id:"sessions",    label:"Log",        icon:"◷"},
-  {id:"streaks",     label:"Streaks",    icon:"🔥"},
-  {id:"syllabus",    label:"Curriculum", icon:"📋"},
-];
+function buildCSS(d,dark,sideOpen,SW,subColor,sT,sW6,sOD,sOO,sOP,tBg,fsB,fsDo,sIP,sIJ){
+// sT=sideTranslate, sW6=sideW600, sOD=sbOverlayDisplay, sOO=sbOverlayOp, sOP=sbOverlayPE
+// tBg=topbarBg, fsB=fsOverlayBg, fsDo=fsDoneBg, sIP=sItemPad, sIJ=sItemJust
+var c=[];
+c.push("@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');");
+c.push("html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}");
+c.push("*{box-sizing:border-box;}");
+c.push("*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}");
+c.push("body{background:"+d.bg+";font-family:'DM Sans',sans-serif;color:"+d.t+";-webkit-font-smoothing:antialiased;}");
+c.push("*{transition:background-color .18s,border-color .18s,color .12s;}");
+c.push("::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:"+d.b+";border-radius:1px;}");
+c.push(".layout{display:block;min-height:100vh;width:100%;background:"+d.bg+";}");
+c.push(".sidebar{width:"+SW+"px;min-height:100vh;background:"+d.sb+";border-right:1px solid "+d.b+";position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}");
+c.push(".content{margin-left:"+SW+"px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - "+SW+"px);}");
+c.push(".inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;overflow-x:hidden;}");
+c.push("@media(min-width:1400px){.inner{padding:36px 60px;}.topbar{padding:0 60px;}}");
+c.push("@media(max-width:1100px){.inner{padding:28px 32px;}.topbar{padding:0 32px;}}");
+c.push("@media(max-width:900px){.content{margin-left:0!important;width:100%!important;}.inner{padding:20px 18px;}.topbar{padding:0 18px!important;}.g3{grid-template-columns:1fr 1fr!important;}.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr 1fr!important;}.stat-num{font-size:26px!important;}.sidebar{transform:translateX("+sT+");width:260px!important;}}");
+c.push("@media(max-width:600px){.content{margin-left:0!important;width:100%!important;}.inner{padding:14px 14px!important;}.topbar{padding:0 14px!important;min-height:52px;}.g2{grid-template-columns:1fr 1fr!important;}.g3,.g4{grid-template-columns:1fr 1fr!important;}.coach-grid{grid-template-columns:1fr!important;}.stat-num{font-size:20px!important;}.ptitle{font-size:15px!important;}.psub{display:none!important;}.section-head{font-size:16px!important;}.snotes{display:none;}.sidebar{transform:translateX("+sT+");width:80vw!important;max-width:280px!important;}}");
+c.push("@media(max-width:380px){.g2,.g3,.g4{grid-template-columns:1fr!important;}.inner{padding:12px 10px!important;}}");
+c.push(".sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;opacity:"+sOO+";pointer-events:"+sOP+";transition:opacity .25s;}");
+c.push("@media(min-width:901px){.sb-overlay{display:none;}}");
+c.push(".mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:"+d.hover+";border:1px solid "+d.b+";cursor:pointer;align-items:center;justify-content:center;color:"+d.t+";font-size:18px;flex-shrink:0;}");
+c.push("@media(max-width:900px){.mob-btn{display:flex;}}");
+c.push(".s-logo{padding:18px 16px 14px;border-bottom:1px solid "+d.b+";display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}");
+c.push(".s-brand{font-size:16px;font-weight:700;color:"+d.t+";letter-spacing:-.05em;white-space:nowrap;line-height:1;font-family:'DM Serif Display',serif;}");
+c.push(".s-toggle{width:26px;height:26px;border-radius:4px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;color:"+d.t3+";font-size:11px;flex-shrink:0;}");
+c.push(".s-toggle:hover{color:"+d.t+";border-color:"+d.bs+";}");
+c.push(".s-nav{padding:10px 8px;flex:1;overflow-y:auto;overflow-x:hidden;}");
+c.push(".s-sec{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:"+d.t4+";padding:0 8px;margin:14px 0 4px;font-family:'DM Sans',sans-serif;font-weight:600;}");
+c.push(".s-item{display:flex;align-items:center;gap:9px;padding:"+sIP+";border-radius:3px;cursor:pointer;color:"+d.t3+";font-size:12px;margin-bottom:1px;border:1px solid transparent;user-select:none;justify-content:"+sIJ+";font-weight:500;letter-spacing:.01em;}");
+c.push(".s-item:hover{color:"+d.t+";background:"+d.hover+";}");
+c.push(".s-item.active{color:"+d.t+";background:"+d.hover+";font-weight:600;}");
+c.push(".s-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center;opacity:.6;}");
+c.push(".s-item.active .s-icon{opacity:1;}");
+c.push(".s-label{white-space:nowrap;overflow:hidden;}");
+c.push(".s-footer{padding:12px 14px;border-top:1px solid "+d.b+";flex-shrink:0;}");
+c.push(".s-av{width:26px;height:26px;border-radius:2px;background:"+d.a1+";display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;}");
+c.push(".s-uinfo{overflow:hidden;}");
+c.push(".topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid "+d.b+";background:"+tBg+";position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;width:100%;box-sizing:border-box;}");
+c.push(".ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}");
+c.push(".psub{font-size:11px;color:"+d.t3+";margin-top:3px;letter-spacing:.01em;font-style:italic;}");
+c.push(".tbr{display:flex;align-items:center;gap:7px;}");
+c.push(".icon-btn{width:30px;height:30px;border-radius:3px;background:transparent;border:1px solid "+d.b+";cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:"+d.t3+";}");
+c.push(".icon-btn:hover{border-color:"+d.bs+";color:"+d.t+";}");
+c.push(".ghost-sm{background:transparent;color:"+d.t3+";border:1px solid "+d.b+";border-radius:3px;padding:5px 12px;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;font-weight:500;}");
+c.push(".ghost-sm:hover{color:"+d.t+";border-color:"+d.bs+";}");
+c.push(".card{background:"+d.card+";border:1px solid "+d.b+";border-radius:2px;}");
+c.push(".cp{padding:20px 22px;}");
+c.push(".cl{font-size:8.5px;color:"+d.t3+";font-weight:700;letter-spacing:.16em;text-transform:uppercase;font-family:'DM Sans',sans-serif;}");
+c.push(".g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}");
+c.push(".g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}");
+c.push(".g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}");
+c.push(".mb12{margin-bottom:12px;}.mb16{margin-bottom:16px;}");
+c.push(".field{margin-bottom:11px;}");
+c.push(".fl{display:block;font-size:10px;color:"+d.t3+";margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}");
+c.push("input.inp,textarea.inp{width:100%;padding:9px 13px;border:1px solid "+d.b+";border-radius:3px;background:"+d.inp+";font-family:'DM Sans',sans-serif;font-size:13px;color:"+d.t+";outline:none;}");
+c.push("input.inp:focus,textarea.inp:focus{border-color:"+d.a1+"66;}");
+c.push("input.inp::placeholder{color:"+d.t4+";}");
+c.push(".btn{border:none;border-radius:3px;padding:9px 18px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.02em;}");
+c.push(".btn-d{background:"+d.t+";color:"+d.bg+";}");
+c.push(".btn-d:hover{opacity:.84;}.btn-d:disabled{opacity:.25;cursor:not-allowed;}");
+c.push(".btn-full{width:100%;padding:11px;}.btn-danger{background:"+d.danger+";color:#fff;}");
+c.push(".btrack{height:2px;background:"+d.b+";border-radius:1px;overflow:hidden;}");
+c.push(".bfill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.16,1,.3,1);}");
+c.push(".dot{width:5px;height:5px;border-radius:50%;}.row{display:flex;align-items:center;}.rowb{display:flex;align-items:center;justify-content:space-between;}.f1{flex:1;}");
+c.push(".pin{animation:pin .2s ease;}@keyframes pin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}");
+c.push(".shim{border-radius:2px;height:10px;background:linear-gradient(90deg,"+d.b+" 25%,"+d.hover+" 50%,"+d.b+" 75%);background-size:200%;animation:sh 1.5s infinite;margin-bottom:8px;}@keyframes sh{0%{background-position:200%}100%{background-position:-200%}}");
+c.push(".empty{text-align:center;padding:44px 20px;}");
+c.push(".et{font-size:13px;font-weight:500;color:"+d.t3+";margin-bottom:3px;font-style:italic;font-family:'DM Serif Display',serif;}");
+c.push(".es{font-size:11px;color:"+d.t4+";}");
+c.push("hr{border:none;border-top:1px solid "+d.b+";margin:14px 0;}");
+c.push(".rec-dot{display:inline-block;width:4px;height:4px;background:"+subColor+";border-radius:50%;margin-right:5px;animation:blink 1.2s infinite;}@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}");
+c.push("@keyframes ring-pulse{0%,100%{opacity:1}50%{opacity:.3}}.ring-alert{animation:ring-pulse .75s infinite;}");
+c.push(".stat-num{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1;letter-spacing:-.02em;}");
+c.push(".stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:"+d.t3+";margin-top:5px;}");
+c.push(".stat-hint{font-size:11px;color:"+d.t3+";margin-top:4px;font-style:italic;}");
+c.push(".sec-rule{display:flex;align-items:center;gap:10px;margin-bottom:16px;}.sec-rule-line{flex:1;height:1px;background:"+d.b+";}.sec-rule-label{font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:"+d.t4+";}");
+c.push(".section-head{font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;letter-spacing:-.02em;color:"+d.t+";line-height:1.2;margin-bottom:4px;}");
+c.push(".section-sub{font-size:11px;color:"+d.t3+";margin-bottom:20px;font-style:italic;}");
+c.push(".mode-tab{display:flex;background:"+d.inp+";border:1px solid "+d.b+";border-radius:10px;padding:3px;gap:3px;margin-bottom:16px;}");
+c.push(".mode-opt{flex:1;padding:7px;border-radius:7px;border:none;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;cursor:pointer;background:none;color:"+d.t3+";}");
+c.push(".mode-opt.active{background:"+d.card+";color:"+d.t+";box-shadow:0 1px 4px rgba(0,0,0,.2);}");
+c.push(".ring-wrap{position:relative;width:200px;height:200px;margin:0 auto;}");
+c.push(".ring-svg{position:absolute;inset:0;width:100%;height:100%;}");
+c.push(".ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}");
+c.push(".ring-time{font-size:42px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}");
+c.push(".ring-sub{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:"+d.t4+";margin-top:4px;}");
+c.push(".fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:"+fsB+";}");
+c.push(".fs-exit{position:absolute;top:20px;right:22px;background:"+d.hover+";border:1px solid "+d.b+";border-radius:8px;padding:7px 13px;font-family:'DM Sans',sans-serif;font-size:12px;color:"+d.t3+";cursor:pointer;}");
+c.push(".fs-exit:hover{color:"+d.t+";}.fs-sub{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:"+subColor+";margin-bottom:6px;}");
+c.push(".fs-topic{font-size:14px;color:"+d.t2+";margin-bottom:32px;}.fs-time{font-size:100px;font-weight:200;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:"+d.t+";}");
+c.push(".fs-actions{display:flex;gap:12px;margin-top:36px;}.fs-btn{padding:12px 28px;border-radius:10px;border:none;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}");
+c.push(".fs-btn-stop{background:"+d.danger+";color:#fff;}.fs-btn-pause{background:"+d.hover+";color:"+d.t+";border:1px solid "+d.b+";}.fs-done{text-align:center;}");
+c.push(".fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}");
+c.push(".coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:16px;width:100%;}");
+c.push(".coach-card{padding:17px;border-radius:12px;border:1px solid "+d.b+";background:"+d.card+";position:relative;overflow:hidden;}");
+c.push(".coach-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}");
+c.push(".coach-card.danger::before{background:"+d.danger+";}.coach-card.success::before{background:"+d.a2+";}.coach-card.warning::before{background:"+d.gold+";}.coach-card.info::before{background:"+d.a3+";}.coach-card.primary::before{background:"+d.a1+";}");
+c.push(".cc-icon{font-size:19px;margin-bottom:9px;}.cc-title{font-size:12px;font-weight:600;color:"+d.t+";margin-bottom:7px;}");
+c.push(".cc-insight{font-size:11.5px;color:"+d.t2+";line-height:1.7;margin-bottom:9px;}");
+c.push(".cc-topics{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;}.cc-topic{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;}");
+c.push(".cc-action{font-size:11px;color:"+d.t3+";padding:8px 10px;background:"+d.hover+";border-radius:7px;line-height:1.5;border-left:2px solid "+d.a1+";}");
+c.push(".goal-item{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border-radius:9px;margin-bottom:6px;border:1px solid "+d.b+";background:"+d.card+";}");
+c.push(".goal-item.achieved{border-color:"+d.a2+"30;background:"+d.a2+"05;}");
+c.push(".goal-check{width:19px;height:19px;border-radius:50%;border:1.5px solid "+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px;cursor:pointer;}");
+c.push(".goal-check.done{background:"+d.a2+";border-color:"+d.a2+";color:white;}");
+c.push(".goal-text{font-size:13px;flex:1;line-height:1.4;}.goal-text.done{text-decoration:line-through;color:"+d.t3+";}");
+c.push(".goal-meta{font-size:10.5px;color:"+d.t3+";margin-top:2px;}");
+c.push(".goal-ai-badge{font-size:9px;padding:1px 6px;border-radius:20px;background:"+d.a3+"18;color:"+d.a3+";font-weight:500;flex-shrink:0;}");
+c.push(".goal-prog{height:2px;background:"+d.b+";border-radius:2px;overflow:hidden;margin-top:5px;}.goal-prog-fill{height:100%;border-radius:2px;background:"+d.a2+";}");
+c.push(".streak-hero{text-align:center;padding:24px 20px;border-radius:14px;background:linear-gradient(135deg,"+d.a1+"10,"+d.a3+"10);border:1px solid "+d.b+";margin-bottom:13px;}");
+c.push(".streak-num{font-size:60px;font-weight:700;letter-spacing:-.04em;line-height:1;color:"+d.a1+";}");
+c.push(".milestone-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:9px;margin-bottom:3px;border:1px solid transparent;}");
+c.push(".milestone-row.reached{background:"+d.hover+";border-color:"+d.b+";}.milestone-row:not(.reached){opacity:.38;}");
+c.push(".m-check{width:18px;height:18px;border-radius:50%;background:"+d.a2+";display:flex;align-items:center;justify-content:center;font-size:9px;color:white;flex-shrink:0;}");
+c.push(".m-lock{width:18px;height:18px;border-radius:50%;background:"+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;color:"+d.t4+";flex-shrink:0;}");
+c.push(".srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid "+d.b+";margin-bottom:0;}");
+c.push(".srow:hover{background:transparent;}.ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}");
+c.push(".stopic{font-size:13px;flex:1;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
+c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid "+d.b+";}.sdate{font-size:10px;color:"+d.t4+";flex-shrink:0;}");
+return c.join("\n");
+}
+
 
 export default function App(){
   // Tab switch — also closes sidebar on mobile
@@ -1394,10 +681,10 @@ export default function App(){
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authSession,setAuthSession]=useState(()=>{
     try{
-      const s=localStorage.getItem("cfa_auth");
+      const s=localStorage.getItem("slothr_auth");
       if(!s)return null;
       const p=JSON.parse(s);
-      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("cfa_auth");return null;}
+      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("slothr_auth");return null;}
       return p;
     }catch(e){return null;}
   });
@@ -1408,19 +695,19 @@ export default function App(){
     id:authSession.user?.id,
   }:{name:"Student",email:"",avatar:null,id:null};
   function handleAuthSuccess(stored){
-    const prev=()=>{try{return JSON.parse(localStorage.getItem("cfa_auth"));}catch(e){return null;}};
+    const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
     const p=prev();
     if(p?.user?.id&&p.user.id!==stored?.user?.id){
-      ["cfa_sessions","cfa_mocks","cfa_goals","cfa_log","cfa_completed","cfa_syllabus","cfa_level"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
-    localStorage.setItem("cfa_auth",JSON.stringify(stored));
+    localStorage.setItem("slothr_auth",JSON.stringify(stored));
     setAuthSession(stored);
   }
   function handleSignOut(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
-    setSessions([]);setMocks([]);setGoals([]);setStudyLog([]);setCompletedTests({});
-    try{["cfa_auth","cfa_sessions","cfa_mocks","cfa_goals","cfa_log","cfa_completed","cfa_syllabus","cfa_level"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
+    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
   // OAuth redirect handler
   const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
@@ -1458,29 +745,84 @@ export default function App(){
   const [dark,setDark]=useState(true);
   const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
-  const [cfaLevel,setCfaLevel]=useState(()=>{try{return localStorage.getItem("cfa_level")||null;}catch(e){return null;}});
-  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("cfa_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
-  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("cfa_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
+  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
 
-  // ── Receive completed practice test result ────────────────────────────────
-
-
+  // ── Receive completed practice test result ──────────────────────────────────
+  function handleTestComplete({mockEntry, pyqEntries}){
+    setMocks(prev=>[...prev, mockEntry]);
+    setPyqHistory(prev=>[...prev, ...pyqEntries]);
+  }
 
   // Goals
-  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("cfa_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [goalInput,setGoalInput]=useState("");
-  const [goalSub,setGoalSub]=useState("Physics");
+  const [goalSub,setGoalSub]=useState("Ethics");
   const [goalTopic,setGoalTopic]=useState("");
   const [goalType,setGoalType]=useState("study");
   const [goalTarget,setGoalTarget]=useState("");
   const [goalLoading,setGoalLoading]=useState(false);
 
-  // Practice log
-  const [studyLog,setStudyLog]=useState(()=>{try{const c=localStorage.getItem("cfa_log");return c?JSON.parse(c):[];}catch(e){return [];}});
+  // PYQ
+  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
 
   // Coach
-  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("cfa_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
+  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
+  // Revision scheduler state
+  const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
+  useEffect(()=>{try{localStorage.setItem("slothr_revision",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
+  function markStudied(sub,topic){
+    const now=today();
+    setRevisionLog(prev=>({...prev,[sub+"|"+topic]:{
+      lastStudied:now,
+      nextRevisions:[
+        addDays(now,3),
+        addDays(now,7),
+        addDays(now,14),
+        addDays(now,30),
+      ],
+      doneRevisions:[],
+    }}));
+  }
+  function markRevisionDone(sub,topic){
+    setRevisionLog(prev=>{
+      const key=sub+"|"+topic;
+      const entry=prev[key];
+      if(!entry)return prev;
+      const [next,...rest]=entry.nextRevisions;
+      return {...prev,[key]:{
+        ...entry,
+        doneRevisions:[...(entry.doneRevisions||[]),{date:today(),scheduled:next}],
+        nextRevisions:rest,
+        lastRevised:today(),
+      }};
+    });
+  }
   const [coachCards,setCoachCards]=useState(null);
+  // ── Social state ──────────────────────────────────────────────────────────
+  const [feed,setFeed]=useState([]);
+  const [feedLoading,setFeedLoading]=useState(false);
+  const [profile,setProfile]=useState(null);
+  const [profileLoading,setProfileLoading]=useState(false);
+  const [follows,setFollows]=useState(new Set()); // set of user_ids we follow
+  const [events,setEvents]=useState([]);
+  const [eventsLoading,setEventsLoading]=useState(false);
+  const [joinedEvents,setJoinedEvents]=useState(new Set());
+  const [showCreateEvent,setShowCreateEvent]=useState(false);
+  const [eventForm,setEventForm]=useState({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
+  const [postCapture,setPostCapture]=useState(null); // base64 image from camera
+  const [postText,setPostText]=useState("");
+  const [postLoading,setPostLoading]=useState(false);
+  const [cameraStream,setCameraStream]=useState(null);
+  const [showCamera,setShowCamera]=useState(false);
+  const [leaderboard,setLeaderboard]=useState([]);
+  const [feedTab,setFeedTab]=useState("following");
+  const [searchResults,setSearchResults]=useState([]);
+  const [openComments,setOpenComments]=useState(null);
+  const [viewProfile,setViewProfile]=useState(null); // userId to view
+  const videoRef=useRef(null);
+  const canvasRef=useRef(null);
   function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
   const [coachLoading,setCoachLoading]=useState(false);
 
@@ -1491,7 +833,7 @@ export default function App(){
   const [countdownSet,setCountdownSet]=useState(25);
   const [customMins,setCustomMins]=useState("");
   const [countdownSec,setCountdownSec]=useState(25*60);
-  const [timerSub,setTimerSub]=useState("Physics");
+  const [timerSub,setTimerSub]=useState("Ethics");
   const [timerTopic,setTimerTopic]=useState("");
   const [timerNotes,setTimerNotes]=useState("");
   const [fullscreen,setFullscreen]=useState(false);
@@ -1503,8 +845,25 @@ export default function App(){
   const [toast,setToast]=useState(null);
   function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
   const d=(dark?THEME.dark:THEME.light)||THEME.dark;
-  const cfaTopics=sub=>(TOPICS[sub]?.all||[]);
+  const SW=sideOpen?220:56;
+  const sideTranslate=sideOpen?"0":"-100%";
+  const sideW600=sideOpen?"80vw":"0px";
+  const sbOverlayDisplay=sideOpen?"block":"none";
+  const sbOverlayOp=sideOpen?1:0;
+  const sbOverlayPE=sideOpen?"auto":"none";
+  const topbarBg=dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)";
+  const fsOverlayBg=dark?"#0e0d0b":"#f7f4ee";
+  const fsDoneBg=dark?"#0d0d0c":"#f8f8f6";
+  const sItemPad=sideOpen?"7px 10px":"7px";
+  const sItemJust=sideOpen?"flex-start":"center";
   const subColor=SUBJECT_COLORS[timerSub]||d.a1;
+  const css=buildCSS(d,dark,sideOpen,SW,subColor,sideTranslate,sideW600,sbOverlayDisplay,sbOverlayOp,sbOverlayPE,topbarBg,fsOverlayBg,fsDoneBg,sItemPad,sItemJust);
+  useEffect(()=>{
+    let el=document.getElementById("slothr-css");
+    if(!el){el=document.createElement("style");el.id="slothr-css";document.head.appendChild(el);}
+    el.textContent=css;
+  },[css]);
+  const classTopics=sub=>TOPICS[sub]?.[jeClass]||TOPICS[sub]?.L1||[];
 
   // ── Wake Lock ─────────────────────────────────────────────────────────────
   const acquireWakeLock=useCallback(async()=>{
@@ -1523,34 +882,61 @@ export default function App(){
     else{releaseWakeLock();}
     return()=>releaseWakeLock();
   },[timerOn]);
-  // Reacquire if page becomes visible again while timer is running
+  // Reacquire wake lock when page becomes visible again
   useEffect(()=>{
     const fn=async()=>{if(document.visibilityState==="visible"&&timerOn){await acquireWakeLock();}};
     document.addEventListener("visibilitychange",fn);
     return()=>document.removeEventListener("visibilitychange",fn);
   },[timerOn]);
 
-  // ── Timer tick ────────────────────────────────────────────────────────────
+  // ── Timer tick — Date-based so it works in background ───────────────────
+  const timerStartRef=useRef(null);   // wall-clock ms when timer last started
+  const timerBaseRef=useRef(0);       // seconds already accumulated before last start
   useEffect(()=>{
     if(timerOn){
+      // Record wall-clock start + base
+      timerStartRef.current=Date.now();
+      timerBaseRef.current=timerMode==="stopwatch"?timerSecRef.current:null;
+      const cdBase=timerMode==="countdown"?countdownSec:null;
+
       timerRef.current=setInterval(()=>{
+        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
         if(timerMode==="stopwatch"){
-          setTimerSec(s=>{timerSecRef.current=s+1;return s+1;});
+          const next=(timerBaseRef.current||0)+elapsed;
+          timerSecRef.current=next;
+          setTimerSec(next);
         } else {
-          setCountdownSec(s=>{
-            if(s<=1){
-              clearInterval(timerRef.current);
-              setTimerOn(false);
-              setTimerDone(true);
-              setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
-              return 0;
-            }
-            return s-1;
-          });
+          const next=Math.max(0,(cdBase||0)-elapsed);
+          setCountdownSec(next);
+          if(next<=0){
+            clearInterval(timerRef.current);
+            setTimerOn(false);
+            setTimerDone(true);
+            setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
+          }
         }
-      },1000);
-    } else clearInterval(timerRef.current);
+      },500); // 500ms for smoother but still accurate
+    } else {
+      clearInterval(timerRef.current);
+    }
     return()=>clearInterval(timerRef.current);
+  },[timerOn,timerMode]);
+
+  // Resync timer when app comes back to foreground
+  useEffect(()=>{
+    const fn=()=>{
+      if(document.visibilityState==="visible"&&timerOn&&timerStartRef.current){
+        // Force immediate tick to resync display
+        const elapsed=Math.floor((Date.now()-timerStartRef.current)/1000);
+        if(timerMode==="stopwatch"){
+          const next=(timerBaseRef.current||0)+elapsed;
+          timerSecRef.current=next;
+          setTimerSec(next);
+        }
+      }
+    };
+    document.addEventListener("visibilitychange",fn);
+    return()=>document.removeEventListener("visibilitychange",fn);
   },[timerOn,timerMode]);
 
   useEffect(()=>{const fn=e=>{if(e.key==="Escape")setFullscreen(false);};window.addEventListener("keydown",fn);return()=>window.removeEventListener("keydown",fn);},[]);
@@ -1563,35 +949,35 @@ export default function App(){
   const weekTime=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
   const streak=calcStreak(sessions);
   const todayGoals=goals.filter(g=>g.date===today());
-  const practiceAccuracy=studyLog.length?Math.round((studyLog.filter(p=>p.correct).length/studyLog.length)*100):null;
+  const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
   // Sync all data to localStorage
-  useEffect(()=>{try{localStorage.setItem("cfa_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
-  useEffect(()=>{try{localStorage.setItem("cfa_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
-  useEffect(()=>{try{localStorage.setItem("cfa_goals",JSON.stringify(goals));}catch(e){}},[goals]);
-  useEffect(()=>{try{localStorage.setItem("cfa_log",JSON.stringify(studyLog));}catch(e){}},[studyLog]);
-  useEffect(()=>{try{localStorage.setItem("cfa_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  useEffect(()=>{try{localStorage.setItem("slothr_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
+  useEffect(()=>{try{localStorage.setItem("slothr_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
+  useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
+  useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
+  useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
   // Load from Supabase on login (only if localStorage empty)
   useEffect(()=>{
     if(!authSession?.access_token||!user?.id)return;
     const token=authSession.access_token, uid=user.id;
-    if(!localStorage.getItem("cfa_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("cfa_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("cfa_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("cfa_log"))SB_AUTH.loadData("user_study_log",uid,token).then(d=>{if(d?.length)setStudyLog(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("cfa_level"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.cfa_level){setCfaLevel(d[0].cfa_level);try{localStorage.setItem("cfa_level",d[0].cfa_level);}catch(e){}}}).catch(()=>{});
+    if(!localStorage.getItem("slothr_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
   },[authSession?.access_token]);
   useEffect(()=>{
     setGoals(prev=>prev.map(g=>{
       if(g.date!==today()) return g;
       if(g.type==="study"){const done=sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0);return{...g,achieved:done>=(g.target||60)};}
-      if(g.type==="questions"){const done=studyLog.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
+      if(g.type==="pyq"){const done=pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
       return g;
     }));
-  },[sessions,studyLog]);
+  },[sessions,pyqHistory]);
   // Auth gate — after ALL hooks
   if(authLoading)return(
     <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{fontSize:42}}>🦥</div>
+      <div style={{fontSize:42}}>📊</div>
       <div style={{fontSize:13,color:"#8a8070",letterSpacing:".06em"}}>signing you in...</div>
     </div>
   );
@@ -1610,18 +996,43 @@ export default function App(){
 
   function addGoal(){
     if(!goalTopic&&!goalInput.trim()) return;
-    setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Practice questions for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="questions"?10:60)),achieved:false,aiGenerated:false}]);
+    setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Solve PYQs for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="pyq"?10:60)),achieved:false,aiGenerated:false}]);
     setGoalInput("");setGoalTopic("");setGoalTarget("");
   }
+  const [showSharePrompt,setShowSharePrompt]=useState(false);
+  const [lastSession,setLastSession]=useState(null);
   function stopTimer(){
     setTimerOn(false);
-    const rawSec=timerSecRef.current;
+    const elapsed=timerStartRef.current?Math.floor((Date.now()-timerStartRef.current)/1000):0;
+    const rawSec=(timerBaseRef.current||0)+elapsed;
+    timerSecRef.current=rawSec;
     const m=Math.max(1,Math.round(rawSec/60));
     // Only save if at least 30 seconds elapsed — prevents 0-minute ghost sessions
     if(rawSec>=30){
       const entry={id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:m,date:today(),notes:timerNotes||"Timer session"};
       setSessions(p=>[...p,entry]);
-      if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
+      if(authSession?.access_token&&user?.id){
+        // Save session
+        fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
+        // Auto-post session to feed
+        const postContent=timerNotes||`studied ${timerSub}${timerTopic&&timerTopic!=="General"?" · "+timerTopic:""}`;
+        const postMeta={subject:timerSub,topic:timerTopic||"General",duration:m,streak,date:today()};
+        // Check if postCapture has a photo
+        const doPost=async()=>{
+          let image_url=null;
+          if(postCapture){
+            try{
+              const blob=await(await fetch(postCapture)).blob();
+              const fname=user.id+"/"+Date.now()+".jpg";
+              const up=await fetch(`${SB_URL}/storage/v1/object/post-images/${fname}`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"image/jpeg","x-upsert":"true"},body:blob});
+              if(up.ok)image_url=`${SB_URL}/storage/v1/object/public/post-images/${fname}`;
+            }catch(e){}
+            setPostCapture(null);
+          }
+          fetch(`${SB_URL}/rest/v1/posts`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,type:"session",content:postContent,image_url,metadata:postMeta,is_public:true})}).catch(()=>{});
+        };
+        doPost();
+      }
     }
     setTimerSec(0);
     timerSecRef.current=0;
@@ -1632,7 +1043,7 @@ export default function App(){
   async function callAI(sys,usr,json=false){
     const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://charterrun.app","X-Title":"CharterRun"},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://nevilete.com","X-Title":"Nevilete"},
       body:JSON.stringify({model:"anthropic/claude-sonnet-4-5",max_tokens:1500,messages:[{role:"system",content:sys},{role:"user",content:usr}]})
     });
     if(!r.ok){const e=await r.text();throw new Error("AI unavailable: "+e);}
@@ -1641,19 +1052,171 @@ export default function App(){
     if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
     return txt;
   }
+  // ── Social API helpers ────────────────────────────────────────────────────
+  async function searchUsers(){
+    if(!userSearch.trim())return;
+    const q=userSearch.replace("@","").toLowerCase().trim();
+    const r=await fetch(SB_URL+"/rest/v1/profiles?username=ilike."+encodeURIComponent("%"+q+"%")+"&select=id,username,display_name,avatar_url,je_class&limit=10&is_public=eq.true",{
+      headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setSearchResults(d.filter(u=>u.id!==user?.id));
+  }
+  async function fetchProfile(uid){
+    const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${uid}&select=*`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    return d?.[0]||null;
+  }
+  async function fetchFeed(type="following"){
+    if(!user?.id)return;
+    setFeedLoading(true);
+    try{
+      let url;
+      if(type==="following"){
+        // Posts from people we follow + our own
+        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
+      } else {
+        url=`${SB_URL}/rest/v1/posts?select=*,profiles!posts_user_id_fkey(username,display_name,avatar_url)&is_public=eq.true&order=created_at.desc&limit=50`;
+      }
+      const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}});
+      const d=await r.json();
+      setFeed(Array.isArray(d)?d:[]);
+    }catch(e){}
+    setFeedLoading(false);
+  }
+  async function fetchFollows(){
+    if(!user?.id)return;
+    const r=await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&select=following_id`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setFollows(new Set(d.map(x=>x.following_id)));
+  }
+  async function toggleFollow(targetId){
+    if(!user?.id)return;
+    const following=follows.has(targetId);
+    if(following){
+      await fetch(`${SB_URL}/rest/v1/follows?follower_id=eq.${user.id}&following_id=eq.${targetId}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      setFollows(prev=>{const s=new Set(prev);s.delete(targetId);return s;});
+    } else {
+      await fetch(`${SB_URL}/rest/v1/follows`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({follower_id:user.id,following_id:targetId})
+      });
+      setFollows(prev=>new Set([...prev,targetId]));
+    }
+  }
+  async function likePost(postId,liked){
+    if(!user?.id)return;
+    if(liked){
+      await fetch(`${SB_URL}/rest/v1/post_likes?post_id=eq.${postId}&user_id=eq.${user.id}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+    } else {
+      await fetch(`${SB_URL}/rest/v1/post_likes`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({post_id:postId,user_id:user.id})
+      });
+    }
+    setFeed(prev=>prev.map(p=>p.id===postId?{...p,like_count:liked?Math.max(0,p.like_count-1):p.like_count+1,_liked:!liked}:p));
+  }
+  // Posts auto-created when timer stops
+  async function fetchEvents(){
+    setEventsLoading(true);
+    const r=await fetch(`${SB_URL}/rest/v1/events?select=*,profiles!events_host_id_fkey(username,display_name)&is_public=eq.true&order=starts_at.asc&limit=20`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setEvents(d);
+    // Fetch joined events
+    if(user?.id){
+      const jr=await fetch(`${SB_URL}/rest/v1/event_members?user_id=eq.${user.id}&select=event_id`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      const jd=await jr.json();
+      if(Array.isArray(jd))setJoinedEvents(new Set(jd.map(x=>x.event_id)));
+    }
+    setEventsLoading(false);
+  }
+  async function joinEvent(eventId){
+    if(!user?.id)return;
+    const joined=joinedEvents.has(eventId);
+    if(joined){
+      await fetch(`${SB_URL}/rest/v1/event_members?event_id=eq.${eventId}&user_id=eq.${user.id}`,{
+        method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      setJoinedEvents(prev=>{const s=new Set(prev);s.delete(eventId);return s;});
+    } else {
+      await fetch(`${SB_URL}/rest/v1/event_members`,{
+        method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({event_id:eventId,user_id:user.id})
+      });
+      setJoinedEvents(prev=>new Set([...prev,eventId]));
+    }
+    setEvents(prev=>prev.map(e=>e.id===eventId?{...e,member_count:joined?e.member_count-1:e.member_count+1}:e));
+  }
+  async function createEvent(){
+    if(!eventForm.title||!eventForm.starts_at||!eventForm.ends_at)return;
+    await fetch(`${SB_URL}/rest/v1/events`,{
+      method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json"},
+      body:JSON.stringify({...eventForm,host_id:user.id})
+    });
+    setShowCreateEvent(false);setEventForm({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
+    fetchEvents();
+  }
+  async function openCamera(){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
+      setCameraStream(stream);setShowCamera(true);
+      setTimeout(()=>{if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();}},100);
+    }catch(e){showToast("camera access denied. check browser settings.");}
+  }
+  function capturePhoto(){
+    if(!videoRef.current||!canvasRef.current)return;
+    const v=videoRef.current,c=canvasRef.current;
+    c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext("2d").drawImage(v,0,0);
+    setPostCapture(c.toDataURL("image/jpeg",0.85));
+    closeCamera();
+  }
+  function closeCamera(){
+    cameraStream?.getTracks().forEach(t=>t.stop());
+    setCameraStream(null);setShowCamera(false);
+  }
+  async function fetchLeaderboard(){
+    const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+    });
+    const d=await r.json();
+    if(Array.isArray(d))setLeaderboard(d.slice(0,50));
+  }
+  // Load social data when feed/events/profile tab opened
+  useEffect(()=>{
+    if(tab==="feed"){fetchFeed(feedTab);fetchFollows();}
+    if(tab==="events"){fetchEvents();}
+    if(tab==="profile"){
+      fetchProfile(user.id).then(p=>setProfile(p));
+      fetchLeaderboard();
+    }
+  },[tab]);
+
   async function runCoach(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
     if(uniqueDays<3){setCoachCards({locked:true,msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});return;}
     setCoachLoading(true);setCoachCards(null);
     try{
       const ss=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(",");
-      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.ethics+m.fi+m.equity}`).join(";");
+      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.physics+m.chemistry+m.math}`).join(";");
       const tt=sessions.reduce((a,s)=>{const k=`${s.subject}-${s.topic}`;a[k]=(a[k]||0)+s.duration;return a;},{});
       const ef=Object.entries(tt).filter(([,t])=>t>120).map(([k])=>k).join(",");
-      const ps=studyLog.length?`${studyLog.length} practice Qs, ${practiceAccuracy}% accuracy`:"No practice data yet";
+      const ps=pyqHistory.length?`${pyqHistory.length} PYQs, ${pyqAccuracy}% accuracy`:"No PYQs yet";
       const cards=await callAI(`You are an elite CFA exam coach. Return ONLY valid JSON. No markdown.
 {"cards":[{"type":"effort_trap","title":"Effort vs Score Gap","icon":"⚠","color":"danger","insight":"2-3 sharp sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"strengths","title":"Your Strengths","icon":"💪","color":"success","insight":"2-3 sentences","topics":["t1"],"action":"1 sentence"},{"type":"critical_gaps","title":"Critical Gaps","icon":"🎯","color":"warning","insight":"2-3 sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"time_analysis","title":"Time Analysis","icon":"⏱","color":"info","insight":"2-3 sentences","recommendation":"1 sentence"},{"type":"pyq_analysis","title":"PYQ Performance","icon":"📝","color":"info","insight":"2-3 sentences","action":"1 sentence"},{"type":"weekly_focus","title":"This Week's Focus","icon":"📅","color":"primary","insight":"2 sentences","plan":["Mon-Tue","Wed-Thu","Fri-Sun"]}]}`,
-        `Level:${cfaLevel}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
+        `CFA Level:${jeClass}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
       setCoachCards(cards.cards);
     }catch{setCoachCards([{type:"error",title:"Error",icon:"⚠",color:"danger",insight:"broke. try again.",action:""}]);}
     setCoachLoading(false);
@@ -1684,17 +1247,17 @@ export default function App(){
       // ── BUCKET A: High-weightage chapters soon studied ─────────────────
       // These are genuine coverage gaps that cost marks
       const highWeightGaps=Object.keys(TOPICS).flatMap(sub=>
-        cfaTopics(sub)
+        classTopics(sub)
           .filter(t=>
             !sessions.some(s=>s.subject===sub&&s.topic===t) &&
-            (CFA_WEIGHTAGE[sub]?.[t]||"M")==="H"
+            (JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"
           )
           .map(t=>({subject:sub, topic:t, weight:"H"}))
       ).slice(0,6);
 
       // ── BUCKET B: Chapters studied but performing badly ───────────────────
       // Combines mock weakness + PYQ accuracy per topic
-      const topicPyqMap=studyLog.reduce((acc,p)=>{
+      const topicPyqMap=pyqHistory.reduce((acc,p)=>{
         const key=`${p.subject}||${p.topic}`;
         if(!acc[key]) acc[key]={subject:p.subject,topic:p.topic,correct:0,total:0};
         acc[key].total++;
@@ -1707,7 +1270,7 @@ export default function App(){
         .map(t=>({
           ...t,
           acc:Math.round((t.correct/t.total)*100),
-          weight: CFA_WEIGHTAGE[t.subject]?.[t.topic]||"M",
+          weight: JEE_WEIGHTAGE[t.subject]?.[t.topic]||"M",
           studied: sessions.some(s=>s.subject===t.subject&&s.topic===t.topic)
         }))
         .filter(t=>t.acc<60&&t.total>=2)
@@ -1730,7 +1293,7 @@ export default function App(){
           const topTopics=Object.entries(topicTimes)
             .sort((a,b)=>b[1]-a[1])
             .slice(0,2)
-            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${CFA_WEIGHTAGE[s.sub]?.[t]||"M"}-weight)`);
+            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${JEE_WEIGHTAGE[s.sub]?.[t]||"M"}-weight)`);
           return topTopics;
         }).flat().slice(0,4);
 
@@ -1757,7 +1320,7 @@ GOAL TYPE GUIDANCE:
 - Studied chapter with bad mock score → type: "revision" (go back and consolidate)
 - reasoning must be specific: "H-weight, 0 sessions logged" OR "44% PYQ accuracy on 6 questions" OR "Chemistry avg mock 61/100"`,
 
-        `Class: ${cfaLevel}. Streak: ${streak} days.
+        `Class: ${jeClass}. Streak: ${streak} days.
 STUDY TIME (total): ${studySummary}
 TODAY studied: ${todayStudySummary} (${fmt(todayTotalMins)} total today)
 MOCK SCORES: ${mockBySubject.map(s=>`${s.sub} avg=${s.avg}/100 latest=${s.latest}/100`).join("; ")||"no mocks yet"}
@@ -1778,332 +1341,28 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     setGoalLoading(false);
   }
 
-
   // ── CSS ───────────────────────────────────────────────────────────────────
-  const SW=sideOpen?220:56;
-  const css=`
-    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&display=swap');
-    html,body{overflow-x:hidden;margin:0;padding:0;width:100%;}
-    *{box-sizing:border-box;}
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-    body{background:${d.bg};font-family:'DM Sans',sans-serif;color:${d.t};-webkit-font-smoothing:antialiased;}
-    *{transition:background-color .18s,border-color .18s,color .12s;}
-    ::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:${d.b};border-radius:1px;}
-
-    /* ── LAYOUT ── */
-    .layout{display:block;min-height:100vh;width:100%;background:${d.bg};}
-    .sidebar{width:${SW}px;min-height:100vh;background:${d.sb};border-right:1px solid ${d.b};position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}
-    .content{margin-left:${SW}px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - ${SW}px);}
-    .inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;}
-    /* ── RESPONSIVE ── */
-    @media(min-width:1400px){
-      .inner{padding:36px 60px;}
-      .topbar{padding:0 60px;}
-    }
-    @media(max-width:1100px){
-      .inner{padding:28px 32px;}
-      .topbar{padding:0 32px;}
-    }
-    /* Tablet & mobile: sidebar floats over content, content is full width */
-    @media(max-width:900px){
-      .content{margin-left:0 !important;width:100% !important;}
-      .inner{padding:20px 18px;}
-      .topbar{padding:0 18px !important;}
-      .g3{grid-template-columns:1fr 1fr !important;}
-      .g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr 1fr !important;}
-      .stat-num{font-size:26px !important;}
-      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:260px !important;}
-    }
-    @media(max-width:600px){
-      .content{margin-left:0 !important;width:100% !important;}
-      .inner{padding:14px 14px !important;}
-      .topbar{padding:0 14px !important;min-height:52px;}
-      .g2{grid-template-columns:1fr 1fr !important;}
-      .g3,.g4{grid-template-columns:1fr 1fr !important;}
-      .coach-grid{grid-template-columns:1fr !important;}
-      .stat-num{font-size:20px !important;}
-      .ptitle{font-size:15px !important;}
-      .psub{display:none !important;}
-      .section-head{font-size:16px !important;}
-      .snotes{display:none;}
-      .sidebar{transform:translateX(${sideOpen?"0":"-100%"});width:80vw !important;max-width:280px !important;}
-    }
-    @media(max-width:380px){
-      .g2,.g3,.g4{grid-template-columns:1fr !important;}
-      .inner{padding:12px 10px !important;}
-    }
-    /* Overlay behind sidebar on mobile */
-    .sb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:45;cursor:pointer;
-      opacity:${sideOpen?1:0};pointer-events:${sideOpen?"auto":"none"};transition:opacity .25s;}
-    @media(min-width:901px){.sb-overlay{display:none;}}
-    /* Hamburger — only on mobile/tablet */
-    .mob-btn{display:none;width:34px;height:34px;border-radius:6px;background:${d.hover};border:1px solid ${d.b};cursor:pointer;align-items:center;justify-content:center;color:${d.t};font-size:18px;flex-shrink:0;}
-    @media(max-width:900px){.mob-btn{display:flex;}}
-
-    /* ── SIDEBAR ── */
-    .s-logo{padding:18px 16px 14px;border-bottom:1px solid ${d.b};display:flex;align-items:center;gap:10px;min-height:58px;flex-shrink:0;}
-    .s-brand{font-size:16px;font-weight:700;color:${d.t};letter-spacing:-.05em;white-space:nowrap;opacity:${sideOpen?1:0};transition:opacity .18s;line-height:1;font-family:'DM Serif Display',serif;}
-    .s-toggle{width:26px;height:26px;border-radius:4px;background:transparent;border:1px solid ${d.b};cursor:pointer;display:flex;align-items:center;justify-content:center;color:${d.t3};font-size:11px;flex-shrink:0;}
-    .s-toggle:hover{color:${d.t};border-color:${d.bs};}
-    .s-nav{padding:10px 8px;flex:1;overflow-y:auto;overflow-x:hidden;}
-    .s-sec{font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:${d.t4};padding:0 8px;margin:14px 0 4px;opacity:${sideOpen?1:0};transition:opacity .15s;font-family:'DM Sans',sans-serif;font-weight:600;}
-    .s-item{display:flex;align-items:center;gap:9px;padding:${sideOpen?"7px 10px":"7px"};border-radius:3px;cursor:pointer;color:${d.sm};font-size:12px;margin-bottom:1px;border:1px solid transparent;user-select:none;justify-content:${sideOpen?"flex-start":"center"};font-weight:500;letter-spacing:.01em;}
-    .s-item:hover{color:${d.t};background:${d.sa};}
-    .s-item.active{color:${d.t};background:${d.sa};border-color:${d.sab};font-weight:600;}
-    .s-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center;opacity:.6;}
-    .s-item.active .s-icon{opacity:1;}
-    .s-label{white-space:nowrap;overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
-    .s-footer{padding:12px 14px;border-top:1px solid ${d.b};flex-shrink:0;}
-    .s-av{width:26px;height:26px;border-radius:2px;background:${d.a1};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;flex-shrink:0;letter-spacing:.02em;}
-    .s-uinfo{overflow:hidden;opacity:${sideOpen?1:0};transition:opacity .15s;}
-
-    /* ── TOPBAR ── */
-    .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 40px;width:100%;box-sizing:border-box;border-bottom:1px solid ${d.b};background:${dark?"rgba(14,13,11,.92)":"rgba(247,244,238,.92)"};position:sticky;top:0;z-index:10;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);min-height:60px;}
-    .ptitle{font-size:18px;font-weight:400;letter-spacing:-.02em;font-family:'DM Serif Display',serif;line-height:1;}
-    .psub{font-size:11px;color:${d.t3};margin-top:3px;letter-spacing:.01em;font-style:italic;}
-    .tbr{display:flex;align-items:center;gap:7px;}
-    .icon-btn{width:30px;height:30px;border-radius:3px;background:transparent;border:1px solid ${d.b};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:${d.t3};}
-    .icon-btn:hover{border-color:${d.bs};color:${d.t};}
-    .ghost-sm{background:transparent;color:${d.t3};border:1px solid ${d.b};border-radius:3px;padding:5px 12px;font-family:'DM Sans',inherit;font-size:11px;cursor:pointer;font-weight:500;letter-spacing:.02em;}
-    .ghost-sm:hover{color:${d.t};border-color:${d.bs};}
-
-    /* ── CARDS ── */
-    .card{background:${d.card};border:1px solid ${d.b};border-radius:2px;}
-    .cp{padding:20px 22px;}
-    .cl{font-size:8.5px;color:${d.t3};font-weight:700;letter-spacing:.16em;text-transform:uppercase;font-family:'DM Sans',sans-serif;}
-    .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-    .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
-    .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
-    .mb12{margin-bottom:12px;}.mb16{margin-bottom:16px;}
-    .field{margin-bottom:11px;}
-    .fl{display:block;font-size:10px;color:${d.t3};margin-bottom:5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;}
-
-    /* ── INPUTS ── */
-    input.inp,textarea.inp{width:100%;padding:9px 13px;border:1px solid ${d.inpb};border-radius:3px;background:${d.inp};font-family:'DM Sans',sans-serif;font-size:13px;color:${d.t};outline:none;}
-    input.inp:focus,textarea.inp:focus{border-color:${d.a1}66;}
-    input.inp::placeholder{color:${d.t4};}
-
-    /* ── BUTTONS ── */
-    .btn{border:none;border-radius:3px;padding:9px 18px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.02em;}
-    .btn-d{background:${d.t};color:${d.bg};}
-    .btn-d:hover{opacity:.84;}
-    .btn-d:disabled{opacity:.25;cursor:not-allowed;}
-    .btn-full{width:100%;padding:11px;}
-    .btn-danger{background:${d.danger};color:#fff;}
-
-    /* ── MISC ── */
-    .btrack{height:2px;background:${d.b};border-radius:1px;overflow:hidden;}
-    .bfill{height:100%;border-radius:1px;transition:width .8s cubic-bezier(.16,1,.3,1);}
-    .dot{width:5px;height:5px;border-radius:50%;}
-    .row{display:flex;align-items:center;}
-    .rowb{display:flex;align-items:center;justify-content:space-between;}
-    .f1{flex:1;}
-    .pin{animation:pin .2s ease;}
-    @keyframes pin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes selIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-    .shim{border-radius:2px;height:10px;background:linear-gradient(90deg,${d.sh1} 25%,${d.sh2} 50%,${d.sh1} 75%);background-size:200%;animation:sh 1.5s infinite;margin-bottom:8px;}
-    @keyframes sh{0%{background-position:200%}100%{background-position:-200%}}
-    .empty{text-align:center;padding:44px 20px;}
-    .et{font-size:13px;font-weight:500;color:${d.t3};margin-bottom:3px;font-style:italic;font-family:'DM Serif Display',serif;}
-    .es{font-size:11px;color:${d.t4};}
-    hr{border:none;border-top:1px solid ${d.div};margin:14px 0;}
-    .rec-dot{display:inline-block;width:4px;height:4px;background:${subColor};border-radius:50%;margin-right:5px;animation:blink 1.2s infinite;}
-    @keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
-    @keyframes ring-pulse{0%,100%{opacity:1}50%{opacity:.3}}
-    .ring-alert{animation:ring-pulse .75s infinite;}
-
-    /* ── STAT CARDS — editorial number treatment ── */
-    .stat-num{font-family:'DM Serif Display',serif;font-size:38px;font-weight:400;line-height:1;letter-spacing:-.02em;}
-    .stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${d.t3};margin-top:5px;}
-    .stat-hint{font-size:11px;color:${d.t3};margin-top:4px;font-style:italic;}
-
-    /* ── SECTION DIVIDER — magazine rule ── */
-    .sec-rule{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
-    .sec-rule-line{flex:1;height:1px;background:${d.b};}
-    .sec-rule-label{font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${d.t4};}
-
-    /* ── SECTION heading style ── */
-    .section-head{font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;letter-spacing:-.02em;color:${d.t};line-height:1.2;margin-bottom:4px;}
-    .section-sub{font-size:11px;color:${d.t3};margin-bottom:20px;font-style:italic;}
-
-    /* ── Mode toggle ── */
-    .mode-tab{display:flex;background:${d.inp};border:1px solid ${d.inpb};border-radius:3px;padding:2px;gap:2px;margin-bottom:16px;}
-    .mode-opt{flex:1;padding:7px;border-radius:2px;border:none;font-family:'DM Sans',sans-serif;font-size:11.5px;font-weight:500;cursor:pointer;background:none;color:${d.t3};letter-spacing:.02em;}
-    .mode-opt.active{background:${d.card};color:${d.t};font-weight:600;}
-
-    /* ── Ring wrap ── */
-    .ring-wrap{position:relative;width:190px;height:190px;margin:0 auto;}
-    .ring-svg{position:absolute;inset:0;width:100%;height:100%;}
-    .ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-    .ring-time{font-family:'DM Serif Display',serif;font-size:40px;font-weight:400;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;}
-    .ring-sub{font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:${d.t4};margin-top:5px;font-weight:700;}
-
-    /* ── Fullscreen timer ── */
-    .fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${dark?"#0e0d0b":"#f7f4ee"};}
-    .fs-exit{position:absolute;top:22px;right:24px;background:transparent;border:1px solid ${d.b};border-radius:3px;padding:7px 14px;font-family:'DM Sans',sans-serif;font-size:11px;color:${d.t3};cursor:pointer;font-weight:600;letter-spacing:.04em;}
-    .fs-exit:hover{color:${d.t};border-color:${d.bs};}
-    .fs-sub{font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:${subColor};margin-bottom:8px;}
-    .fs-topic{font-size:13px;color:${d.t2};margin-bottom:40px;font-style:italic;}
-    .fs-time{font-family:'DM Serif Display',serif;font-size:104px;font-weight:400;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:${d.t};}
-    .fs-actions{display:flex;gap:12px;margin-top:38px;}
-
-    /* ── PYQ ── */
-    .pyq-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:4px;background:${d.card};border:1px solid ${d.b};}
-    .pyq-q-top{padding:16px 20px;border-bottom:1px solid ${d.b};background:${d.hover};}
-    .pyq-tag{font-size:9px;padding:2px 7px;border-radius:2px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
-    .pyq-opts{padding:16px 20px;display:flex;flex-direction:column;gap:7px;}
-    .pyq-opt{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:3px;border:1px solid ${d.b};cursor:pointer;background:${d.card};transition:all .12s;}
-    .pyq-opt:hover{border-color:${d.bs};background:${d.hover};}
-    .pyq-opt.sel{border-color:${d.a1};background:${d.a1}0e;}
-    .pyq-result-banner{margin:0 20px 14px;padding:11px 15px;border-radius:3px;display:flex;align-items:center;gap:10px;}
-    .pyq-solution{margin:0 20px 20px;padding:14px;border-radius:3px;background:${d.hover};border:1px solid ${d.b};}
-    .pyq-nav{padding:14px 20px;border-top:1px solid ${d.b};display:flex;align-items:center;gap:9px;background:${d.hover};}
-
-    /* ── Coach card ── */
-    .coach-card{position:relative;overflow:hidden;border-radius:4px;background:${d.card};border:1px solid ${d.b};padding:18px 20px;margin-bottom:12px;}
-    .coach-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
-
-    /* Session rows */
-    .srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-radius:0;border:none;border-bottom:1px solid ${d.div};margin-bottom:0;}
-    .srow:hover{background:transparent;}
-    .ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}
-    .stopic{font-size:13px;flex:1;}
-    .snotes{font-size:11px;color:${d.t3};flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .sdur{font-size:10.5px;color:${d.t3};background:${d.tag};padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid ${d.b};}
-    .sdate{font-size:10px;color:${d.t4};flex-shrink:0;}
-
-    /* Mode toggle */
-    .mode-tab{display:flex;background:${d.inp};border:1px solid ${d.inpb};border-radius:10px;padding:3px;gap:3px;margin-bottom:16px;}
-    .mode-opt{flex:1;padding:7px;border-radius:7px;border:none;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;background:none;color:${d.t3};}
-    .mode-opt.active{background:${d.card};color:${d.t};box-shadow:0 1px 4px rgba(0,0,0,.2);}
-
-    /* Ring wrap */
-    .ring-wrap{position:relative;width:200px;height:200px;margin:0 auto;}
-    .ring-svg{position:absolute;inset:0;width:100%;height:100%;}
-    .ring-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-    .ring-time{font-size:42px;font-weight:300;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}
-    .ring-sub{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:${d.t4};margin-top:4px;}
-
-    /* Fullscreen */
-    .fs-overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${dark?"#0d0d0c":"#f8f8f6"};}
-    .fs-exit{position:absolute;top:20px;right:22px;background:${d.tag};border:1px solid ${d.b};border-radius:8px;padding:7px 13px;font-family:inherit;font-size:12px;color:${d.t3};cursor:pointer;}
-    .fs-exit:hover{color:${d.t};}
-    .fs-sub{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:${subColor};margin-bottom:6px;}
-    .fs-topic{font-size:14px;color:${d.t2};margin-bottom:32px;}
-    .fs-time{font-size:100px;font-weight:200;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums;color:${d.t};}
-    .fs-actions{display:flex;gap:12px;margin-top:36px;}
-    .fs-btn{padding:12px 28px;border-radius:10px;border:none;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
-    .fs-btn-stop{background:${d.danger};color:#fff;}
-    .fs-btn-pause{background:${d.tag};color:${d.t};border:1px solid ${d.b};}
-    .fs-done{text-align:center;}
-    .fs-ring-wrap{position:relative;width:300px;height:300px;margin:0 auto 12px;}
-
-    /* Coach */
-    .coach-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:13px;margin-bottom:16px;}
-    .coach-card{padding:17px;border-radius:12px;border:1px solid ${d.b};background:${d.card};position:relative;overflow:hidden;}
-    .coach-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
-    .coach-card.danger::before{background:${d.danger};}
-    .coach-card.success::before{background:${d.a2};}
-    .coach-card.warning::before{background:${d.gold};}
-    .coach-card.info::before{background:${d.a3};}
-    .coach-card.primary::before{background:${d.a1};}
-    .cc-icon{font-size:19px;margin-bottom:9px;}
-    .cc-title{font-size:12px;font-weight:600;color:${d.t};margin-bottom:7px;}
-    .cc-insight{font-size:11.5px;color:${d.t2};line-height:1.7;margin-bottom:9px;}
-    .cc-topics{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;}
-    .cc-topic{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;}
-    .cc-action{font-size:11px;color:${d.t3};padding:8px 10px;background:${d.hover};border-radius:7px;line-height:1.5;border-left:2px solid ${d.a1};}
-
-    /* Goals */
-    .goal-item{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border-radius:9px;margin-bottom:6px;border:1px solid ${d.b};background:${d.card};}
-    .goal-item.achieved{border-color:${d.a2}30;background:${d.a2}05;}
-    .goal-check{width:19px;height:19px;border-radius:50%;border:1.5px solid ${d.b};display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;margin-top:1px;cursor:pointer;}
-    .goal-check.done{background:${d.a2};border-color:${d.a2};color:white;}
-    .goal-text{font-size:13px;flex:1;line-height:1.4;}
-    .goal-text.done{text-decoration:line-through;color:${d.t3};}
-    .goal-meta{font-size:10.5px;color:${d.t3};margin-top:2px;}
-    .goal-ai-badge{font-size:9px;padding:1px 6px;border-radius:20px;background:${d.a3}18;color:${d.a3};font-weight:500;flex-shrink:0;}
-    .goal-prog{height:2px;background:${d.b};border-radius:2px;overflow:hidden;margin-top:5px;}
-    .goal-prog-fill{height:100%;border-radius:2px;background:${d.a2};}
-
-    /* ── Streak ── */
-    .streak-hero{text-align:center;padding:24px 20px;border-radius:14px;background:linear-gradient(135deg,${d.a1}10,${d.a3}10);border:1px solid ${d.b};margin-bottom:13px;}
-    .streak-num{font-size:60px;font-weight:700;letter-spacing:-.04em;line-height:1;color:${d.a1};}
-    .milestone-row{display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:9px;margin-bottom:3px;border:1px solid transparent;}
-    .milestone-row.reached{background:${d.hover};border-color:${d.b};}
-    .milestone-row:not(.reached){opacity:.38;}
-    .m-check{width:18px;height:18px;border-radius:50%;background:${d.a2};display:flex;align-items:center;justify-content:center;font-size:9px;color:white;flex-shrink:0;}
-    .m-lock{width:18px;height:18px;border-radius:50%;background:${d.b};display:flex;align-items:center;justify-content:center;font-size:9px;color:${d.t4};flex-shrink:0;}
-
-    /* ── PYQ Examgoal style ── */
-    .pyq-shell{display:flex;flex-direction:column;gap:13px;}
-    .pyq-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-radius:12px;background:${d.card};border:1px solid ${d.b};}
-    .pyq-q-card{background:${d.card};border:1px solid ${d.b};border-radius:12px;overflow:hidden;}
-    .pyq-q-top{padding:16px 20px;border-bottom:1px solid ${d.b};background:${d.hover};}
-    .pyq-q-meta{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
-    .pyq-tag{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;letter-spacing:.03em;}
-    .pyq-q-text{font-size:15px;line-height:1.85;color:${d.t};font-weight:400;}
-    .pyq-opts{padding:16px 20px;display:flex;flex-direction:column;gap:8px;}
-    .pyq-opt{display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:10px;border:1.5px solid ${d.b};cursor:pointer;background:${d.card};transition:all .14s;}
-    .pyq-opt:hover:not(.disabled){border-color:${d.a3};background:${d.a3}09;}
-    .pyq-opt.disabled{cursor:default;}
-    .pyq-opt.opt-correct{border-color:${d.a2};background:${d.a2}0d;}
-    .pyq-opt.opt-wrong{border-color:${d.danger};background:${d.danger}0d;}
-    .pyq-opt.opt-reveal{border-color:${d.a2}60;background:${d.a2}07;}
-    .pyq-opt-key{width:30px;height:30px;border-radius:50%;border:1.5px solid ${d.b};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;color:${d.t3};}
-    .pyq-opt.opt-correct .pyq-opt-key{border-color:${d.a2};background:${d.a2};color:white;}
-    .pyq-opt.opt-wrong .pyq-opt-key{border-color:${d.danger};background:${d.danger};color:white;}
-    .pyq-opt.opt-reveal .pyq-opt-key{border-color:${d.a2};color:${d.a2};}
-    .pyq-opt-text{font-size:13.5px;color:${d.t};flex:1;line-height:1.5;}
-    .pyq-opt.opt-correct .pyq-opt-text{color:${d.a2};font-weight:500;}
-    .pyq-opt.opt-wrong .pyq-opt-text{color:${d.danger};}
-    .pyq-result-banner{margin:0 20px 16px;padding:12px 16px;border-radius:10px;display:flex;align-items:center;gap:10px;}
-    .pyq-result-banner.correct{background:${d.a2}10;border:1px solid ${d.a2}30;}
-    .pyq-result-banner.incorrect{background:${d.danger}10;border:1px solid ${d.danger}30;}
-    .pyq-solution{margin:0 20px 20px;padding:16px;border-radius:10px;background:${d.hover};border:1px solid ${d.b};}
-    .pyq-sol-title{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${d.t3};margin-bottom:10px;}
-    .pyq-sol-text{font-size:13px;line-height:1.85;color:${d.t2};white-space:pre-wrap;}
-    .pyq-tip{margin:0 20px 20px;padding:11px 14px;border-radius:9px;background:${d.gold}0a;border:1px solid ${d.gold}22;font-size:12.5px;color:${d.t2};line-height:1.6;}
-    .pyq-nav{padding:16px 20px;border-top:1px solid ${d.b};display:flex;align-items:center;gap:10px;background:${d.hover};}
-    .pyq-stat-row{display:flex;gap:6px;}
-    .pyq-stat-pill{display:flex;flex-direction:column;align-items:center;padding:10px 14px;border-radius:9px;border:1px solid ${d.b};background:${d.card};min-width:64px;}
-    .pyq-stat-v{font-size:20px;font-weight:600;letter-spacing:-.02em;line-height:1;}
-    .pyq-stat-l{font-size:9.5px;color:${d.t3};margin-top:2px;text-transform:uppercase;letter-spacing:.04em;}
-
-    /* Onboarding */
-    .onboard{min-height:100vh;background:${d.bg};display:flex;align-items:center;justify-content:center;padding:40px;}
-    .ob-box{width:100%;max-width:400px;}
-    .ob-logo{font-size:28px;font-weight:900;color:${d.t};margin-bottom:28px;letter-spacing:-.05em;line-height:1;}
-    .ob-title{font-size:22px;font-weight:600;letter-spacing:-.03em;margin-bottom:4px;}
-    .ob-sub{font-size:13px;color:${d.t3};margin-bottom:24px;line-height:1.5;}
-    .class-opt{display:flex;align-items:center;gap:13px;padding:13px 15px;border:1.5px solid ${d.b};border-radius:11px;cursor:pointer;margin-bottom:8px;background:${d.card};}
-    .class-opt:hover{border-color:${d.bs};}
-    .class-opt.sel{border-color:${d.a1};background:${d.a1}07;}
-    .co-icon{width:32px;height:32px;border-radius:8px;background:${d.tag};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
-  `;
-
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
 
-  if(!cfaLevel) return(
+  if(!jeClass) return(
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
         <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
-          <span style={{fontSize:32,marginRight:6}}>🦥</span>Charter<span style={{color:d.a1}}>Run</span>
+          <span style={{fontSize:32,marginRight:6}}>🦥</span>nevile<span style={{color:d.a1}}>te</span>
         </div>
-        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>which level are you targeting.</div>
-        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study less. rank more. nap often.</div>
-        {CFA_LEVELS.map(c=>(
+        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>which level are you studying for?</div>
+        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study smarter. pass faster.</div>
+        {CLASSES.map(c=>(
           <div key={c.id}
             style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:`1.5px solid ${d.b}`,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"}}
             onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
             onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
             onClick={()=>{
-                  setCfaLevel(c.id);
-                  try{localStorage.setItem("cfa_level",c.id);}catch(e){}
-                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:c.id})}).catch(()=>{});
+                  setJeClass(c.id);
+                  try{localStorage.setItem("slothr_class",c.id);}catch(e){}
+                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
                 }}>
             <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{c.icon}</div>
             <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
@@ -2114,15 +1373,14 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </div>
   );
 
-  const classLabel=CFA_LEVELS.find(c=>c.id===cfaLevel)?.label||'CFA Candidate';
+  const classLabel=CLASSES.find(c=>c.id===jeClass)?.label||'CFA';
 
   // ── Fullscreen render ─────────────────────────────────────────────────────
   const renderFS=()=>{
     const isCD=timerMode==="countdown";
     const FS_R=120,FS_C=2*Math.PI*FS_R;
     return(
-      <div className="fs-overlay"><style>{css}</style>
-        <button className="fs-exit" onClick={()=>setFullscreen(false)}>✕ back  <span style={{opacity:.4,fontSize:9}}>ESC</span></button>
+      <div className="fs-overlay">  <button className="fs-exit" onClick={()=>setFullscreen(false)}>✕ back  <span style={{opacity:.4,fontSize:9}}>ESC</span></button>
         {timerDone?(
           <div className="fs-done">
             
@@ -2138,7 +1396,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {isCD?(
               <div className="fs-ring-wrap">
                 <svg style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 300 300">
-                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={`${subColor}18`} strokeWidth="10"/>
+                  <circle cx="150" cy="150" r={FS_R} fill="none" stroke={subColor+"18"} strokeWidth="10"/>
                   <circle cx="150" cy="150" r={FS_R} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="10"
                     strokeDasharray={FS_C} strokeDashoffset={FS_C*(1-cdPct)}
                     strokeLinecap="round" transform="rotate(-90 150 150)"
@@ -2180,8 +1438,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     return(
       <div className="card cp">
         <div className="mode-tab">
-          <button className={`mode-opt${timerMode==="stopwatch"?" active":""}`} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
-          <button className={`mode-opt${timerMode==="countdown"?" active":""}`} onClick={()=>{if(!timerOn){setTimerMode("countdown");resetTimer();}}}>⏳ Countdown</button>
+          <button className={"mode-opt"+timerMode==="stopwatch"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
+          <button className={"mode-opt"+timerMode==="countdown"?" active":""} onClick={()=>{if(!timerOn){setTimerMode("countdown");resetTimer();}}}>⏳ Countdown</button>
         </div>
         <div className="field">
           <label className="fl">subject</label>
@@ -2189,7 +1447,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         </div>
         <div className="field">
           <label className="fl">topic</label>
-          <Select value={timerTopic} onChange={setTimerTopic} options={[{value:"",label:"General Study"},...cfaTopics(timerSub).map(t=>({value:t,label:t}))]} disabled={timerOn} d={d}/>
+          <Select value={timerTopic} onChange={setTimerTopic} options={[{value:"",label:"General Study"},...classTopics(timerSub).map(t=>({value:t,label:t}))]} disabled={timerOn} d={d}/>
         </div>
         <div className="field">
           <label className="fl">what are we doing today.</label>
@@ -2216,7 +1474,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         <div style={{margin:"10px 0 8px"}}>
           <div className="ring-wrap">
             <svg className="ring-svg" viewBox="0 0 200 200">
-              <circle cx="100" cy="100" r={RING} fill="none" stroke={`${subColor}12`} strokeWidth="7"/>
+              <circle cx="100" cy="100" r={RING} fill="none" stroke={subColor+"12"} strokeWidth="7"/>
               {isCD?(
                 <circle cx="100" cy="100" r={RING} fill="none" stroke={isLow?d.danger:subColor} strokeWidth="7"
                   strokeDasharray={CIRC} strokeDashoffset={CIRC*(1-cdPct)}
@@ -2254,6 +1512,12 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           )}
         </div>
         <button className="btn btn-full" style={{background:d.tag,border:`1px solid ${d.b}`,color:d.t3,fontSize:12,marginTop:7}} onClick={()=>setFullscreen(true)}>⛶ go fullscreen</button>
+        <div style={{marginTop:7,display:"flex",gap:7,alignItems:"center"}}>
+          <button onClick={openCamera} style={{flex:1,padding:"8px",borderRadius:3,background:d.hover,border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontFamily:"inherit",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            📷 {postCapture?"photo ready ✓":"attach photo"}
+          </button>
+          {postCapture&&<button onClick={()=>setPostCapture(null)} style={{padding:"8px 10px",borderRadius:3,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>×</button>}
+        </div>
       </div>
     );
   };
@@ -2264,111 +1528,147 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       {/* ── Ad Modals ── */}
 
       {fullscreen&&renderFS()}
-      <style>{css}</style>
       <div className="layout" style={{visibility:fullscreen?"hidden":"visible"}}>
       {/* ── Sticky Banner Ad ── */}
 
         <div className="sb-overlay" onClick={()=>setSideOpen(false)}/>
         <aside className="sidebar">
+          {/* Logo */}
           <div className="s-logo">
-            <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>{sideOpen?"‹":"›"}</button>
+            <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>
+              {sideOpen?"←":"→"}
+            </button>
             <div className="s-brand">
-              <span style={{fontSize:14,marginRight:4}}>🦥</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>Charter</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>Run</span>
+              nevile<span style={{color:d.a1}}>te</span>
             </div>
           </div>
+
+          {/* Today card */}
+          <div className="s-today" style={{margin:"0 10px 4px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:11,fontWeight:600,color:d.t2}}>{todayTime>0?fmt(todayTime)+" today":"start studying"}</span>
+              <span style={{fontSize:11,color:d.a1,fontWeight:700}}>🔥 {streak}d</span>
+            </div>
+            <div style={{height:3,background:d.b,borderRadius:2,overflow:"hidden"}}>
+              <div style={{height:"100%",width:Math.min((todayTime/360)*100,100)+"%",background:"linear-gradient(90deg,"+d.a1+","+d.a3+")",borderRadius:2,transition:"width .8s"}}/>
+            </div>
+          </div>
+
           <nav className="s-nav">
-            <div className="s-sec" style={{marginTop:6}}>navigation</div>
-            {TABS.map(t=>(
-              <React.Fragment key={t.id}>
-                {t.id==="home"&&<div className="s-sec">community</div>}
-                {t.id==="coach"&&<div className="s-sec">study tools</div>}
-                <div className={`s-item${tab===t.id?" active":""}`} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
+            {/* Study tools */}
+            {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"8px 12px 4px"}}>Study</div>}
+            {["overview","coach","goals","sessions","streaks","syllabus","revision","rank"].map(id=>{
+              const t=TABS.find(x=>x.id===id);
+              if(!t)return null;
+              return(
+                <div key={t.id}
+                  className={"s-item"+(tab===t.id?" active":"")}
+                  onClick={()=>switchTab(t.id)}
+                  title={!sideOpen?t.label:""}>
                   <span className="s-icon">{t.icon}</span>
                   <span className="s-label">{t.label}</span>
+                  {tab===t.id&&sideOpen&&<div style={{marginLeft:"auto",width:4,height:4,borderRadius:"50%",background:d.a1}}/>}
                 </div>
-              </React.Fragment>
-            ))}
-            {sideOpen&&(
-              <div style={{margin:"10px 4px 0",padding:"10px 11px",background:d.sa,borderRadius:3,border:`1px solid ${d.sab}`}}>
-                <div style={{fontSize:9,color:d.t4,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>today</div>
-                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>{todayTime>0?`${fmt(todayTime)} today`:"0m today. the exam doesn't care."}</div>
-                <div className="btrack" style={{height:3}}>
-                  <div className="bfill" style={{width:`${Math.min((todayTime/360)*100,100)}%`,background:`linear-gradient(90deg,${d.a1},${d.a3})`}}/>
+              );
+            })}
+
+            <div className="s-divider"/>
+
+            {/* Social */}
+            {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"4px 12px 4px"}}>Community</div>}
+            {["feed","events","profile"].map(id=>{
+              const t=TABS.find(x=>x.id===id);
+              if(!t)return null;
+              return(
+                <div key={t.id}
+                  className={"s-item"+(tab===t.id?" active":"")}
+                  onClick={()=>switchTab(t.id)}
+                  title={!sideOpen?t.label:""}>
+                  <span className="s-icon">{t.icon}</span>
+                  <span className="s-label">{t.label}</span>
+                  {tab===t.id&&sideOpen&&<div style={{marginLeft:"auto",width:4,height:4,borderRadius:"50%",background:d.a1}}/>}
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:d.t4,marginTop:4}}>
-                  <span>{todayGoals.filter(g=>g.achieved).length}/{todayGoals.length} goals</span>
-                  <span>🔥 {streak}d</span>
-                </div>
-              </div>
-            )}
+              );
+            })}
           </nav>
+
+          {/* Footer */}
           <div className="s-footer">
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {user?.avatar?(
-                <img src={user.avatar} style={{width:27,height:27,borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="avatar"/>
-              ):(
-                <div className="s-av">{(user?.name||"S")[0].toUpperCase()}</div>
-              )}
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 4px",borderRadius:10,cursor:"pointer"}}
+              onClick={()=>switchTab("profile")}>
+              {user?.avatar
+                ?<img src={user.avatar} style={{width:32,height:32,borderRadius:10,objectFit:"cover",flexShrink:0}} alt=""/>
+                :<div className="s-av">{(user?.name||"S")[0].toUpperCase()}</div>
+              }
               <div className="s-uinfo">
-                <div style={{fontSize:12,fontWeight:500,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:130}}>{user?.name||"Student"}</div>
-                <div style={{fontSize:10,color:d.a1}}>{classLabel||'CFA Candidate'}</div>
+                <div style={{fontSize:12,fontWeight:600,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:120}}>{user?.name||"Student"}</div>
+                <div style={{fontSize:10,color:d.t3,marginTop:1}}>@{profile?.username||"..."}</div>
               </div>
               {sideOpen&&(
-                <button onClick={handleSignOut} title="sign out"
-                  style={{marginLeft:"auto",background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:14,padding:"2px 4px",flexShrink:0}}
-                  onMouseOver={e=>e.target.style.color=d.danger} onMouseOut={e=>e.target.style.color=d.t4}>
+                <button onClick={e=>{e.stopPropagation();handleSignOut();}}
+                  style={{marginLeft:"auto",background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:16,padding:"4px",flexShrink:0,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center"}}
+                  title="sign out">
                   ⏻
                 </button>
               )}
             </div>
-
+            {sideOpen&&(
+              <div style={{display:"flex",gap:6,marginTop:8}}>
+                <button onClick={()=>setDark(p=>!p)}
+                  style={{flex:1,padding:"7px",borderRadius:8,background:d.hover,border:"none",color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                  {dark?"☀ Light":"◑ Dark"}
+                </button>
+                <button onClick={()=>setJeClass(null)}
+                  style={{flex:1,padding:"7px",borderRadius:8,background:d.hover,border:"none",color:d.t3,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                  ↺ Class
+                </button>
+              </div>
+            )}
           </div>
         </aside>
 
         <div className="content">
-          {true&&<div className="topbar">
-            {/* App logo */}
+          {tab!=="pyq"&&<div className="topbar">
+            {/* Always-visible Slothr logo */}
             <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
               <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
               <div style={{minWidth:0}}>
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
-                  {tab==="overview"&&`${new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-11-18")-new Date())/86400000))}d to the exam.`}
-                  {tab==="coach"&&"your personal CFA exam coach. i know where you're leaking marks."}
+                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2025-11-22")-new Date())/86400000))}d left. days left. tick tock.`}
+                  {tab==="coach"&&"your CFA exam co-pilot. i know things about you."}
                   {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
-                  
-                  {tab==="sessions"&&`${sessions.length} study sessions · ${fmt(totalTime)} total.`}
+                  {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
                   {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
-                  {tab==="syllabus"&&"full CFA curriculum tracker. don't leave gaps."}
+                  {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
+                  {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
+                  {tab==="rank"&&"are you ready to pass. be honest."}
+                  {tab==="feed"&&"what's everyone up to."}
+                  {tab==="events"&&"compete. suffer. grow."}
+                  {tab==="profile"&&`@${profile?.username||"..."}`}
                 </div>
               </div>
             </div>
             <div className="tbr">
               <button className="icon-btn" onClick={()=>setDark(p=>!p)}>{dark?"☀":"◑"}</button>
-              <button className="ghost-sm" onClick={()=>setCfaLevel(null)}>switch class</button>
+              <button className="ghost-sm" onClick={()=>setJeClass(null)}>switch class</button>
             </div>
           </div>}
 
 
 
-          <div className="inner" style={{display:"block"}}>
-
-            {/* ── SOCIAL TABS ── */}
-            {tab==="home"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="home"/>}
-            {tab==="friends"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="friends"/>}
-            {tab==="leaderboard"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="leaderboard"/>}
-            {tab==="events"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="events"/>}
+          <div className="inner">
 
             {/* ── OVERVIEW ── */}
             {tab==="overview"&&(
               <div className="pin">
                 {/* ── Hero stats — editorial wide layout ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:32,background:d.b}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:24,background:d.b,width:"100%"}}>
                   {[
                     {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
                     {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
                     {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
-                    {lbl:"PYQ Accuracy", val:practiceAccuracy!==null?`${practiceAccuracy}%`:"—", hint:practiceAccuracy===null?"uncharted territory.":practiceAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
+                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
                   ].map(s=>(
                     <div key={s.lbl} style={{background:d.card,padding:"28px 26px"}}>
                       <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:14}}>{s.lbl}</div>
@@ -2377,7 +1677,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   ))}
                 </div>
-                <div className="g2" style={{gap:14,marginBottom:32}}>
+                <div className="g2" style={{gap:14,marginBottom:24,minWidth:0}}>
                   <div className="card cp" style={{padding:"24px 26px"}}>
                     <div className="cl" style={{marginBottom:18,letterSpacing:".14em"}}>Subject Time</div>
                     {Object.entries(SUBJECT_COLORS).map(([sub,color])=>(
@@ -2394,10 +1694,10 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div className="cl mb12">Today's Goals</div>
                     {todayGoals.length===0?(<div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>)
                     :todayGoals.slice(0,5).map(g=>(
-                      <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`} style={{padding:"9px 11px"}}>
-                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""} style={{padding:"9px 11px"}}>
+                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div style={{flex:1}}>
-                          <div className={`goal-text${g.achieved?" done":""}`} style={{fontSize:12.5}}>{g.text}</div>
+                          <div className={"goal-text"+g.achieved?" done":""} style={{fontSize:12.5}}>{g.text}</div>
                           <div className="goal-meta">{g.subject}{g.topic?` · ${g.topic}`:""}</div>
                         </div>
                         {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
@@ -2424,16 +1724,16 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card" style={{padding:"22px 24px"}}>
                     <div className="rowb" style={{marginBottom:16}}>
                       <div className="cl" style={{letterSpacing:".14em"}}>recent practice tests</div>
-                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>switchTab("pyq")}>take a test →</button>}
+                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>{}}>take a test →</button>}
                     </div>
                     {mocks.length===0?(
                       <div className="empty" style={{padding:"14px 0"}}>
                         <div className="et">zero attempts. bold. i like the confidence.</div>
                         <div className="es">uncharted territory. take the test.</div>
-                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>switchTab("pyq")}>→ go to practice</button>
+                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>{}}>→ go to practice</button>
                       </div>
                     ):[...mocks].reverse().slice(0,4).map(m=>{
-                      const total=m.ethics+m.fi+m.equity;
+                      const total=m.physics+m.chemistry+m.math;
                       const outOf=180;
                       const pct=Math.round((total/outOf)*100);
                       const scoreC=pct>=60?d.a2:pct>=40?d.gold:d.danger;
@@ -2501,7 +1801,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 {coachCards&&(
                   <div className="coach-grid">
                     {coachCards.map((card,i)=>(
-                      <div key={i} className={`coach-card ${card.color}`}>
+                      <div key={i} className={"coach-card "+card.color}>
                         <div className="cc-icon">{card.icon}</div>
                         <div className="cc-title">{card.title}</div>
                         <div className="cc-insight">{card.insight}</div>
@@ -2526,9 +1826,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card cp">
                     <div className="cl mb12">Add Goal</div>
                     <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v=>{setGoalSub(v);setGoalTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
-                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...cfaTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
+                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...classTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
                     <div className="field"><label className="fl">Type</label><Select value={goalType} onChange={setGoalType} options={[{value:"study",label:"Study (time)"},{value:"pyq",label:"Solve PYQs (count)"},{value:"revision",label:"Revision"}]} d={d}/></div>
-                    <div className="field"><label className="fl">{goalType==="questions"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="questions"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="questions"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
+                    <div className="field"><label className="fl">{goalType==="pyq"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="pyq"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="pyq"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
                     <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/></div>
                     <button className="btn btn-d btn-full" onClick={addGoal}>+ Add Goal</button>
                   </div>
@@ -2542,8 +1842,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div style={{display:"flex",flexDirection:"column",gap:5}}>
                       <div style={{fontSize:10,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:d.t4,marginBottom:2}}>what it looks at</div>
                       {(()=>{
-                        const hGaps=Object.keys(TOPICS).flatMap(sub=>cfaTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(CFA_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
-                        const weakPyqs=studyLog.length;
+                        const hGaps=Object.keys(TOPICS).flatMap(sub=>classTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
+                        const weakPyqs=pyqHistory.length;
                         const hasMocks=mocks.length>0;
                         const sigs=[
                           {icon:"📥", label:"not started", bucket:"A", detail:`${hGaps} high-weight chapter${hGaps!==1?"s":""} soon started`, active:hGaps>0, color:d.a1},
@@ -2579,17 +1879,17 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   {todayGoals.length>0&&<div style={{marginBottom:12}}><div className="btrack" style={{height:4}}><div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/></div></div>}
                   {todayGoals.length===0&&<div className="empty" style={{padding:"22px 0"}}><div className="et">no goals yet.</div><div className="es">let me plan your day. i know exactly what you need. 😏</div></div>}
                   {todayGoals.map(g=>{
-                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="questions"?studyLog.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
+                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
                     const pct=Math.min((prog/g.target)*100,100);
                     return(
-                      <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`}>
-                        <div className={`goal-check${g.achieved?" done":""}`} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
+                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""}>
+                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
                         <div className="f1">
                           <div className="rowb">
-                            <div className={`goal-text${g.achieved?" done":""}`}>{g.text}</div>
+                            <div className={"goal-text"+g.achieved?" done":""}>{g.text}</div>
                             {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
                           </div>
-                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="questions"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
+                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
                           <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${pct}%`}}/></div>
                         </div>
                         <button onClick={()=>setGoals(p=>p.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
@@ -2657,9 +1957,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               ];
               const WT_ORDER={"H":0,"M":1,"L":2};
               const allChapters=sub=>{const s=new Set();return[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t=>{if(s.has(t))return false;s.add(t);return true;});};
-              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[CFA_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[CFA_WEIGHTAGE[sub]?.[b]||"M"]||1));
+              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
               const chHrs=(sub,t)=>sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
-              const chAcc=(sub,t)=>{const qs=studyLog.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
+              const chAcc=(sub,t)=>{const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
               const total=SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
               const done=Object.values(syllabusStatus).filter(v=>v==="done").length;
               const prog=Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
@@ -2690,8 +1990,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                         </div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:10,color:d.t3}}>JEE Advanced 2026</div>
-                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2026-11-18")-new Date())/86400000))}d left</div>
+                        <div style={{fontSize:10,color:d.t3}}>CFA Exam</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2025-11-22")-new Date())/86400000))}d left</div>
                       </div>
                     </div>
                   </div>
@@ -2711,7 +2011,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
                         </div>
                         {["H","M","L"].map(wt=>{
-                          const wtCh=chapters.filter(t=>(CFA_WEIGHTAGE[sub]?.[t]||"M")===wt);
+                          const wtCh=chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
                           if(!wtCh.length)return null;
                           const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
                           return(
@@ -2755,6 +2055,676 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               );
             })()}
 
+
+
+            {/* ── FEED ── */}
+            {tab==="feed"&&(
+              <div className="pin">
+                {/* Camera modal */}
+                {showCamera&&(
+                  <div style={{position:"fixed",inset:0,zIndex:200,background:"#000",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    <div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginBottom:12,letterSpacing:".06em"}}>frame your study space</div>
+                    <video ref={videoRef} style={{width:"100%",maxWidth:480,borderRadius:8}} playsInline muted autoPlay/>
+                    <canvas ref={canvasRef} style={{display:"none"}}/>
+                    <div style={{display:"flex",gap:12,marginTop:20}}>
+                      <button onClick={capturePhoto} style={{padding:"14px 32px",borderRadius:40,background:"#fff",color:"#111",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📸 capture</button>
+                      <button onClick={closeCamera} style={{padding:"14px 24px",borderRadius:40,background:"transparent",color:"#fff",border:"1px solid rgba(255,255,255,.3)",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* User search */}
+                <div className="card cp" style={{marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Find People</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <input className="inp" placeholder="search by @username"
+                      value={userSearch} onChange={e=>setUserSearch(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&searchUsers()}
+                      style={{flex:1}}/>
+                    <button onClick={searchUsers}
+                      style={{padding:"9px 16px",borderRadius:4,background:d.t,color:d.bg,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      search
+                    </button>
+                  </div>
+                  {searchResults.length>0&&(
+                    <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+                      {searchResults.map(u=>(
+                        <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
+                          <div style={{width:36,height:36,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0,overflow:"hidden"}}>
+                            {u.avatar_url?<img src={u.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}} alt=""/>:(u.display_name||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{u.username} · {u.je_class}</div>
+                          </div>
+                          <button onClick={()=>toggleFollow(u.id)}
+                            style={{padding:"6px 14px",borderRadius:4,background:follows.has(u.id)?d.hover:d.a1,color:follows.has(u.id)?d.t3:"#fff",border:`1px solid ${follows.has(u.id)?d.b:d.a1}`,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>
+                            {follows.has(u.id)?"following":"+ follow"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Feed tabs */}
+                <div style={{display:"flex",gap:4,marginBottom:16}}>
+                  {[["following","Following"],["discover","Discover"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>{setFeedTab(v);fetchFeed(v);}}
+                      style={{padding:"7px 18px",borderRadius:6,border:`1px solid ${feedTab===v?d.a1:d.b}`,background:feedTab===v?d.a1+"12":"transparent",color:feedTab===v?d.a1:d.t3,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                {feedLoading&&[1,2,3].map(i=>(
+                  <div key={i} className="card cp" style={{marginBottom:12}}>
+                    <div className="shim" style={{width:"40%",height:12}}/>
+                    <div className="shim" style={{width:"80%",height:10}}/>
+                  </div>
+                ))}
+
+                {!feedLoading&&feed.length===0&&(
+                  <div className="card empty">
+                    <div style={{fontSize:28,marginBottom:10}}>◉</div>
+                    <div className="et">{feedTab==="following"?"follow people to see their sessions.":"no sessions shared yet."}</div>
+                    <div className="es">search @usernames above to find study partners</div>
+                  </div>
+                )}
+
+                {feed.map(post=>{
+                  const p=post.profiles||{};
+                  const meta=post.metadata||{};
+                  const liked=post._liked||false;
+                  const [showComments,setShowComments]=useState(false);
+                  const [comments,setComments]=useState([]);
+                  const [commentText,setCommentText]=useState("");
+                  const timeAgo=t=>{const s=Math.floor((Date.now()-new Date(t))/1000);if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";if(s<86400)return Math.floor(s/3600)+"h";return Math.floor(s/86400)+"d";};
+                  async function loadComments(){
+                    const r=await fetch(SB_URL+"/rest/v1/post_comments?post_id=eq."+post.id+"&select=*,profiles!post_comments_user_id_fkey(username,display_name,avatar_url)&order=created_at.asc",{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+authSession?.access_token}});
+                    const d2=await r.json();
+                    if(Array.isArray(d2))setComments(d2);
+                  }
+                  async function submitComment(){
+                    if(!commentText.trim())return;
+                    await fetch(SB_URL+"/rest/v1/post_comments",{method:"POST",headers:{"apikey":SB_ANON,"Authorization":"Bearer "+authSession?.access_token,"Content-Type":"application/json"},body:JSON.stringify({post_id:post.id,user_id:user.id,content:commentText})});
+                    setCommentText("");
+                    loadComments();
+                  }
+                  return(
+                    <div key={post.id} className="card" style={{marginBottom:12,overflow:"hidden"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px 10px"}}>
+                        <div style={{width:38,height:38,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",flexShrink:0,fontSize:14,overflow:"hidden"}}>
+                          {p.avatar_url?<img src={p.avatar_url} style={{width:38,height:38,borderRadius:"50%",objectFit:"cover"}} alt=""/>:(p.display_name||"?")[0].toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{p.display_name||p.username}</div>
+                          <div style={{fontSize:11,color:d.t3}}>@{p.username} · {timeAgo(post.created_at)}</div>
+                        </div>
+                        {post.user_id!==user?.id&&(
+                          <button onClick={()=>toggleFollow(post.user_id)}
+                            style={{padding:"5px 12px",borderRadius:4,background:follows.has(post.user_id)?d.hover:d.a1,color:follows.has(post.user_id)?d.t3:"#fff",border:`1px solid ${follows.has(post.user_id)?d.b:d.a1}`,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>
+                            {follows.has(post.user_id)?"following":"+ follow"}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Session stats - Strava style */}
+                      {meta.duration&&(
+                        <div style={{padding:"0 16px 12px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(80px,1fr))",gap:10}}>
+                          {[
+                            {l:"Duration",v:fmt(meta.duration)},
+                            meta.subject&&{l:"Subject",v:meta.subject},
+                            meta.topic&&{l:"Topic",v:meta.topic.slice(0,16)},
+                            meta.streak&&{l:"Streak",v:meta.streak+"d 🔥"},
+                          ].filter(Boolean).map(s=>(
+                            <div key={s.l} style={{background:d.hover,borderRadius:6,padding:"8px 10px",textAlign:"center",border:`1px solid ${d.b}`}}>
+                              <div style={{fontSize:14,fontWeight:700,color:d.t,lineHeight:1}}>{s.v}</div>
+                              <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>{s.l}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {post.image_url&&(
+                        <div style={{width:"100%",maxHeight:320,overflow:"hidden"}}>
+                          <img src={post.image_url} style={{width:"100%",objectFit:"cover",maxHeight:320,display:"block"}} alt="study session"/>
+                        </div>
+                      )}
+
+                      {post.content&&<div style={{padding:"10px 16px",fontSize:13.5,color:d.t,lineHeight:1.7,fontStyle:"italic"}}>{post.content}</div>}
+
+                      <div style={{display:"flex",gap:4,padding:"10px 12px",borderTop:`1px solid ${d.b}`}}>
+                        <button onClick={()=>likePost(post.id,liked)}
+                          style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${liked?d.danger+"60":d.b}`,color:liked?d.danger:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                          {liked?"♥":"♡"} {post.like_count||0}
+                        </button>
+                        <button onClick={()=>{setShowComments(!showComments);if(!showComments)loadComments();}}
+                          style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                          ◌ {post.comment_count||0}
+                        </button>
+                      </div>
+
+                      {showComments&&(
+                        <div style={{borderTop:`1px solid ${d.b}`,padding:"12px 16px"}}>
+                          {comments.map(c=>(
+                            <div key={c.id} style={{display:"flex",gap:8,marginBottom:10}}>
+                              <div style={{width:28,height:28,borderRadius:"50%",background:d.a3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff",flexShrink:0}}>
+                                {(c.profiles?.display_name||"?")[0].toUpperCase()}
+                              </div>
+                              <div style={{flex:1,background:d.hover,borderRadius:8,padding:"7px 12px"}}>
+                                <div style={{fontSize:11,fontWeight:600,color:d.t,marginBottom:2}}>@{c.profiles?.username}</div>
+                                <div style={{fontSize:12.5,color:d.t2,lineHeight:1.5}}>{c.content}</div>
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{display:"flex",gap:8,marginTop:8}}>
+                            <input className="inp" placeholder="add a comment..." value={commentText}
+                              onChange={e=>setCommentText(e.target.value)}
+                              onKeyDown={e=>e.key==="Enter"&&submitComment()}
+                              style={{flex:1,padding:"8px 12px",fontSize:12}}/>
+                            <button onClick={submitComment}
+                              style={{padding:"8px 14px",borderRadius:4,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                              post
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+                        {/* ── EVENTS ── */}
+            {tab==="events"&&(
+              <div className="pin">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                  <div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em"}}>Events</div>
+                    <div style={{fontSize:12,color:d.t3,fontStyle:"italic",marginTop:2}}>compete. suffer. grow.</div>
+                  </div>
+                  <button onClick={()=>setShowCreateEvent(p=>!p)}
+                    style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                    + Host Event
+                  </button>
+                </div>
+
+                {/* Create event form */}
+                {showCreateEvent&&(
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:14}}>Host a New Event</div>
+                    <div className="field"><label className="fl">Title</label>
+                      <input className="inp" placeholder="e.g. Physics PYQ Marathon" value={eventForm.title} onChange={e=>setEventForm(p=>({...p,title:e.target.value}))}/>
+                    </div>
+                    <div className="field"><label className="fl">Description</label>
+                      <input className="inp" placeholder="what's the challenge?" value={eventForm.description} onChange={e=>setEventForm(p=>({...p,description:e.target.value}))}/>
+                    </div>
+                    <div className="g2" style={{gap:10,marginBottom:10}}>
+                      <div className="field">
+                        <label className="fl">Subject</label>
+                        <Select value={eventForm.subject} onChange={v=>setEventForm(p=>({...p,subject:v}))} options={["Physics","Chemistry","Mathematics","All"]} d={d}/>
+                      </div>
+                      <div className="field">
+                        <label className="fl">Type</label>
+                        <Select value={eventForm.type} onChange={v=>setEventForm(p=>({...p,type:v}))} options={["marathon","challenge","sprint"]} d={d}/>
+                      </div>
+                    </div>
+                    <div className="g2" style={{gap:10,marginBottom:14}}>
+                      <div className="field"><label className="fl">Starts At</label>
+                        <input className="inp" type="datetime-local" value={eventForm.starts_at} onChange={e=>setEventForm(p=>({...p,starts_at:e.target.value}))}/>
+                      </div>
+                      <div className="field"><label className="fl">Ends At</label>
+                        <input className="inp" type="datetime-local" value={eventForm.ends_at} onChange={e=>setEventForm(p=>({...p,ends_at:e.target.value}))}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={createEvent} style={{padding:"9px 20px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>Create Event</button>
+                      <button onClick={()=>setShowCreateEvent(false)} style={{padding:"9px 16px",borderRadius:6,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {eventsLoading&&[1,2].map(i=><div key={i} className="card cp" style={{marginBottom:12}}><div className="shim" style={{width:"60%"}}/><div className="shim" style={{width:"40%"}}/></div>)}
+
+                {!eventsLoading&&events.length===0&&(
+                  <div className="card empty">
+                    <div style={{fontSize:28,marginBottom:10}}>⚡</div>
+                    <div className="et">no events yet.</div>
+                    <div className="es">host the first one. be that person.</div>
+                  </div>
+                )}
+
+                {events.map(ev=>{
+                  const joined=joinedEvents.has(ev.id);
+                  const now=new Date();
+                  const start=new Date(ev.starts_at);
+                  const end=new Date(ev.ends_at);
+                  const isLive=now>=start&&now<=end;
+                  const isUpcoming=now<start;
+                  const isPast=now>end;
+                  const subColor=SUBJECT_COLORS[ev.subject]||d.a3;
+                  const typeEmoji={marathon:"🏃",challenge:"⚡",sprint:"🎯"}[ev.type]||"◎";
+                  return(
+                    <div key={ev.id} className="card" style={{marginBottom:12,overflow:"hidden",border:`1px solid ${isLive?d.a1+"60":d.b}`,borderTop:`3px solid ${isLive?d.a1:isPast?d.t4:subColor}`}}>
+                      <div style={{padding:"14px 16px"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:8}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4,flexWrap:"wrap"}}>
+                              <span style={{fontSize:14}}>{typeEmoji}</span>
+                              <span style={{fontSize:14,fontWeight:700,color:d.t}}>{ev.title}</span>
+                              {isLive&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${d.a1}20`,color:d.a1,fontWeight:700,letterSpacing:".06em"}}>LIVE</span>}
+                              {isUpcoming&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:`${subColor}15`,color:subColor,fontWeight:700}}>UPCOMING</span>}
+                              {isPast&&<span style={{fontSize:9,padding:"2px 7px",borderRadius:3,background:d.hover,color:d.t4,fontWeight:700}}>ENDED</span>}
+                            </div>
+                            {ev.description&&<div style={{fontSize:12,color:d.t3,marginBottom:6,lineHeight:1.5}}>{ev.description}</div>}
+                            <div style={{display:"flex",gap:10,fontSize:11,color:d.t3,flexWrap:"wrap"}}>
+                              <span>by @{ev.profiles?.username||"unknown"}</span>
+                              <span>·</span>
+                              <span style={{color:subColor}}>{ev.subject}</span>
+                              <span>·</span>
+                              <span>👥 {ev.member_count} joined</span>
+                            </div>
+                          </div>
+                          {!isPast&&(
+                            <button onClick={()=>joinEvent(ev.id)}
+                              style={{padding:"8px 16px",borderRadius:6,flexShrink:0,
+                                background:joined?d.hover:d.a1,color:joined?d.t3:"#fff",
+                                border:`1px solid ${joined?d.b:d.a1}`,cursor:"pointer",
+                                fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                              {joined?"joined ✓":"join"}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{fontSize:11,color:d.t4}}>
+                          {start.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
+                          {" → "}
+                          {end.toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── PROFILE ── */}
+            {tab==="profile"&&(
+              <div className="pin">
+                {/* Profile card */}
+                <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"28px 24px"}}>
+                  <div style={{width:64,height:64,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:24,margin:"0 auto 14px",overflow:"hidden"}}>
+                    {user?.avatar?<img src={user.avatar} style={{width:64,height:64,borderRadius:"50%",objectFit:"cover"}}/>:(user?.name||"S")[0].toUpperCase()}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:3}}>{user?.name||"Student"}</div>
+                  <div style={{fontSize:13,color:d.t3,marginBottom:4}}>@{profile?.username||"..."}</div>
+                  {profile?.bio&&<div style={{fontSize:12,color:d.t2,marginBottom:12,fontStyle:"italic"}}>{profile.bio}</div>}
+                  <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{jeClass}</span>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>🔥 {streak}d streak</span>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>⏱ {fmt(totalTime)} total</span>
+                  </div>
+                </div>
+
+                {/* Weekly leaderboard */}
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                    <div className="cl">Weekly Leaderboard</div>
+                    <div style={{fontSize:10,color:d.t3}}>top 50 · resets Monday</div>
+                  </div>
+                  {leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
+                  {leaderboard.slice(0,20).map((entry,i)=>{
+                    const isMe=entry.id===user?.id;
+                    const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
+                    return(
+                      <div key={entry.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 4px",borderBottom:`1px solid ${d.b}44`,background:isMe?`${d.a1}06`:"transparent"}}>
+                        <div style={{width:26,textAlign:"center",fontWeight:700,fontSize:i<3?16:12,color:i<3?d.gold:d.t4,flexShrink:0}}>
+                          {medal||`${i+1}`}
+                        </div>
+                        <div style={{width:32,height:32,borderRadius:"50%",background:d.a3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0,overflow:"hidden"}}>
+                          {entry.avatar_url?<img src={entry.avatar_url} style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>:(entry.display_name||"?")[0].toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12.5,fontWeight:isMe?700:500,color:isMe?d.a1:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {entry.display_name||entry.username}{isMe?" (you)":""}
+                          </div>
+                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {entry.je_class}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{fmt(entry.week_minutes)}</div>
+                          <div style={{fontSize:9,color:d.t3}}>this week</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Your stats */}
+                <div className="card cp">
+                  <div className="cl" style={{marginBottom:14}}>Your Stats</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:10}}>
+                    {[
+                      {l:"Total Hours",v:fmt(totalTime),c:d.a1},
+                      {l:"This Week",v:fmt(weekTime),c:d.a2},
+                      {l:"Streak",v:`${streak}d`,c:d.a3},
+                      {l:"Study Days",v:new Set(sessions.map(s=>s.date)).size,c:d.gold},
+                    ].map(s=>(
+                      <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.hover,borderRadius:6,border:`1px solid ${d.b}`}}>
+                        <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif",lineHeight:1}}>{s.v}</div>
+                        <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── REVISION ── */}
+            {tab==="revision"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              // Build due list
+              const allDue=[];
+              const allUpcoming=[];
+              const allNeverScheduled=[];
+              SUBS.forEach(sub=>{
+                const chapters=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,a)=>a.indexOf(t)===i);
+                chapters.forEach(topic=>{
+                  const key=sub+"|"+topic;
+                  const entry=revisionLog[key];
+                  const wt=JEE_WEIGHTAGE[sub]?.[topic]||"M";
+                  const hrs=sessions.filter(s=>s.subject===sub&&s.topic===topic).reduce((a,s)=>a+(s.duration||0),0);
+                  if(!entry){
+                    if(hrs>0) allNeverScheduled.push({sub,topic,wt,hrs});
+                  } else if(entry.nextRevisions?.length>0){
+                    const next=entry.nextRevisions[0];
+                    const item={sub,topic,wt,next,entry,hrs};
+                    if(isOverdue(next)||isDueToday(next)) allDue.push(item);
+                    else if(isDueSoon(next)) allUpcoming.push(item);
+                  }
+                });
+              });
+              // Sort overdue by weightage then overdue-ness
+              const wtO={"H":0,"M":1,"L":2};
+              allDue.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||daysBetween(b.next,today())-daysBetween(a.next,today()));
+              allUpcoming.sort((a,b)=>a.next.localeCompare(b.next));
+              allNeverScheduled.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||b.hrs-a.hrs);
+              const totalDue=allDue.length;
+              return(
+                <div className="pin">
+                  {/* Header stats */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:24}}>
+                    {[
+                      {l:"Due Today",v:allDue.length,c:allDue.length>0?d.danger:d.a2,hint:allDue.length===0?"you're up to date 🎉":"don't skip these"},
+                      {l:"Due Soon",v:allUpcoming.length,c:d.gold,hint:"next 2 days"},
+                      {l:"Scheduled",v:Object.keys(revisionLog).length,c:d.a3,hint:"chapters tracked"},
+                      {l:"Chapters Studied",v:allNeverScheduled.length+Object.keys(revisionLog).length,c:d.t3,hint:"studied at least once"},
+                    ].map(s=>(
+                      <div key={s.l} className="card cp" style={{textAlign:"center",padding:"16px 12px"}}>
+                        <div style={{fontSize:36,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:s.c,lineHeight:1}}>{s.v}</div>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:d.t3,marginTop:4}}>{s.l}</div>
+                        <div style={{fontSize:10,color:d.t4,marginTop:2,fontStyle:"italic"}}>{s.hint}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Due now */}
+                  {allDue.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.danger}}>⚠ Due for Revision</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>{allDue.length} chapter{allDue.length!==1?"s":""}</div>
+                      </div>
+                      {allDue.map(({sub,topic,wt,next,entry,hrs})=>{
+                        const overdueDays=daysBetween(next,today());
+                        const subColor=SUBJECT_COLORS[sub];
+                        const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                        return(
+                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",marginBottom:6,background:d.card,border:`1px solid ${d.danger}30`,borderLeft:`3px solid ${d.danger}`,borderRadius:4}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
+                                <span style={{fontSize:13,fontWeight:600,color:d.t}}>{topic}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
+                              </div>
+                              <div style={{fontSize:11,color:d.t3}}>
+                                {overdueDays===0?"due today":overdueDays>0?`${overdueDays}d overdue`:"due today"} · last studied {entry.lastStudied} · {fmt(hrs)} total
+                              </div>
+                            </div>
+                            <button onClick={()=>markRevisionDone(sub,topic)}
+                              style={{padding:"7px 14px",borderRadius:4,background:d.a2,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                              ✓ done
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Due soon */}
+                  {allUpcoming.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.gold}}>⏳ Coming Up</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                      </div>
+                      {allUpcoming.map(({sub,topic,wt,next,hrs})=>{
+                        const daysLeft=daysBetween(today(),next);
+                        const subColor=SUBJECT_COLORS[sub];
+                        return(
+                          <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",marginBottom:4,background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${d.gold}`,borderRadius:4}}>
+                            <div style={{flex:1}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                                <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{topic}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub}</span>
+                              </div>
+                              <div style={{fontSize:10,color:d.t3,marginTop:2}}>in {daysLeft} day{daysLeft!==1?"s":""} · {next}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Never scheduled — chapters studied but not in revision system */}
+                  {allNeverScheduled.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.t2}}>+ Add to Revision Schedule</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>studied but not tracked</div>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                        {allNeverScheduled.slice(0,12).map(({sub,topic,wt,hrs})=>{
+                          const subColor=SUBJECT_COLORS[sub];
+                          const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          return(
+                            <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderRadius:4,cursor:"pointer"}}
+                              onClick={()=>markStudied(sub,topic)}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topic}</div>
+                                <div style={{display:"flex",gap:5,marginTop:3}}>
+                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub.slice(0,4)}</span>
+                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
+                                  <span style={{fontSize:9,color:d.t3}}>{fmt(hrs)}</span>
+                                </div>
+                              </div>
+                              <span style={{fontSize:16,color:d.t3}}>+</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {Object.keys(revisionLog).length===0&&allNeverScheduled.length===0&&(
+                    <div className="card empty">
+                      <div style={{fontSize:28,marginBottom:10}}>↺</div>
+                      <div className="et">nothing to revise yet.</div>
+                      <div className="es">study a chapter, then add it here. i'll tell you when to review it.</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+
+            {/* ── RANK PREDICTOR ── */}
+            {tab==="rank"&&(()=>{
+              const SUBS=["Physics","Chemistry","Mathematics"];
+              const totalChapters=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.length;
+              },0);
+              const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
+              const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
+              const weekDays=[...new Set(sessions.filter(s=>s.date>=weekStart).map(s=>s.date))].length;
+              const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
+              const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
+              const highWtDone=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length;
+              },0);
+              const highWtTotal=SUBS.reduce((a,sub)=>{
+                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
+                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H").length;
+              },0);
+              const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
+
+              // Score each factor 0-100
+              const factors={
+                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:`${studiedChapters}/${totalChapters} chapters`},
+                consistency:{score:Math.min(100,Math.round((streak/90)*100)),weight:25,label:"Consistency (Streak)",hint:`${streak} day streak`},
+                dailyHrs:{score:Math.min(100,Math.round((avgDailyHrs/8)*100)),weight:20,label:"Daily Study Hours",hint:`${avgDailyHrs.toFixed(1)}h avg/day`},
+                highWeight:{score:highWtPct,weight:20,label:"High-Weight Chapters",hint:`${highWtDone}/${highWtTotal} done`},
+                pyqAcc:{score:pyqAcc||0,weight:15,label:"PYQ Accuracy",hint:pyqAcc!==null?`${pyqAcc}% accuracy`:"no PYQs yet"},
+              };
+              const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
+              const overallPct=Math.round(totalScore);
+
+              // Map score to rank range
+              const getRankRange=pct=>{
+                if(pct>=85)return{range:"Ready to Pass",color:d.a2,label:"above the minimum passing score"};
+                if(pct>=70)return{range:"On Track",color:d.a2,label:"tracking well for exam day"};
+                if(pct>=55)return{range:"Getting There",color:d.gold,label:"needs focused effort"};
+                if(pct>=40)return{range:"Needs Work",color:d.gold,label:"significant gaps remain"};
+                if(pct>=25)return{range:"At Risk",color:d.a1,label:"major revision required"};
+                return{range:"Not Ready",color:d.danger,label:"more preparation needed"};
+              };
+              const rankData=getRankRange(overallPct);
+              const daysLeft=Math.max(0,Math.ceil((new Date("2025-11-22")-new Date())/86400000));
+
+              // What moves the needle most
+              const improvements=Object.entries(factors)
+                .filter(([,f])=>f.score<80)
+                .sort((a,b)=>b[1].weight-a[1].weight)
+                .slice(0,3)
+                .map(([k,f])=>({
+                  key:k, label:f.label,
+                  gap:80-f.score,
+                  impact:`+${Math.round((80-f.score)*f.weight/100)} pts`,
+                  action:{
+                    coverage:"study at least 1 new chapter every 2 days",
+                    consistency:"don't break your streak. even 30 min counts",
+                    dailyHrs:"aim for 6h/day minimum in the final stretch",
+                    highWeight:"prioritise H-weight chapters — they appear every year",
+                    pyqAcc:"drill PYQs in your weakest chapters",
+                  }[k]
+                }));
+
+              const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+              const hasEnoughData=uniqueDays>=7;
+
+              return(
+                <div className="pin">
+                  {!hasEnoughData&&(
+                    <div className="card cp" style={{textAlign:"center",padding:"40px 24px",marginBottom:20}}>
+                      <div style={{fontSize:40,marginBottom:16}}>🦥</div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:8}}>readiness score unlocks in {7-uniqueDays} day{7-uniqueDays!==1?"s":""}</div>
+                      <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand. showing you 50,000+ on day one helps no one.</div>
+                      <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                        {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:streak+"d",t:"",c:d.a3}].map(s=>(
+                          <div key={s.l} style={{padding:"14px 18px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,textAlign:"center",minWidth:90}}>
+                            <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}<span style={{fontSize:12,color:d.t3}}>{s.t}</span></div>
+                            <div style={{fontSize:10,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {hasEnoughData&&<>
+
+                  {/* Main rank card */}
+                  <div className="card cp" style={{textAlign:"center",marginBottom:20,padding:"32px 24px",position:"relative",overflow:"hidden"}}>
+                    <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at 50% 0%,${rankData.color}08,transparent 70%)`,pointerEvents:"none"}}/>
+                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:12}}>CFA Exam Readiness</div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:400,color:rankData.color,lineHeight:1,letterSpacing:"-.02em",marginBottom:8}}>
+                      {rankData.range}
+                    </div>
+                    <div style={{fontSize:13,color:d.t3,marginBottom:20,fontStyle:"italic"}}>{rankData.label} · based on your current trajectory</div>
+                    {/* Score ring */}
+                    <div style={{display:"inline-flex",alignItems:"center",gap:16,padding:"12px 24px",borderRadius:40,background:d.hover,border:`1px solid ${d.b}`}}>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:rankData.color,fontFamily:"'DM Serif Display',serif"}}>{overallPct}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Prep Score</div>
+                      </div>
+                      <div style={{width:1,height:36,background:d.b}}/>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Factor breakdown */}
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div className="cl" style={{marginBottom:16}}>Score Breakdown</div>
+                    {Object.entries(factors).map(([key,f])=>(
+                      <div key={key} style={{marginBottom:14}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                          <div>
+                            <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{f.label}</span>
+                            <span style={{fontSize:10,color:d.t3,marginLeft:8,fontStyle:"italic"}}>{f.hint}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:11,color:d.t3}}>{f.weight}% weight</span>
+                            <span style={{fontSize:13,fontWeight:700,color:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,minWidth:32,textAlign:"right"}}>{f.score}</span>
+                          </div>
+                        </div>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${f.score}%`,background:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,borderRadius:3,transition:"width .6s ease"}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* What moves the needle */}
+                  {improvements.length>0&&(
+                    <div className="card cp" style={{marginBottom:20}}>
+                      <div className="cl" style={{marginBottom:12}}>What Moves Your Rank Most</div>
+                      {improvements.map((imp,i)=>(
+                        <div key={imp.key} style={{display:"flex",gap:12,padding:"12px 14px",marginBottom:6,borderRadius:4,background:d.hover,border:`1px solid ${d.b}`}}>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:`${d.a1}20`,border:`1px solid ${d.a1}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>{i+1}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                              <span style={{fontSize:12,fontWeight:600,color:d.t}}>{imp.label}</span>
+                              <span style={{fontSize:11,fontWeight:700,color:d.a2,background:`${d.a2}15`,padding:"1px 7px",borderRadius:3}}>{imp.impact}</span>
+                            </div>
+                            <div style={{fontSize:11,color:d.t3,lineHeight:1.5}}>{imp.action}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{fontSize:11,color:d.t4,textAlign:"center",fontStyle:"italic",lineHeight:1.6}}>
+                    Rank estimate is based on your study patterns, consistency, and coverage relative to CFA passers (top 50%). It updates as you log more sessions.
+                  </div>
+                  </>}
+                </div>
+              );
+            })()}
+
             {tab==="streaks"&&(
               <div className="pin">
                 <div className="streak-hero mb13">
@@ -2770,7 +2740,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     {STREAK_MILESTONES.map(b=>{
                       const reached=streak>=b.days;
                       return(
-                        <div key={b.days} className={`milestone-row${reached?" reached":""}`}>
+                        <div key={b.days} className={"milestone-row"+reached?" reached":""}>
                           <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
                           <div style={{flex:1}}>
                             <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
@@ -2796,7 +2766,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     )}
                     <div className="card cp mb12">
                       <div className="cl mb10">stats</div>
-                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:studyLog.length,c:d.gold}].map(s=>(
+                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:pyqHistory.length,c:d.gold}].map(s=>(
                         <div key={s.lbl} className="rowb" style={{marginBottom:8}}>
                           <span style={{fontSize:12,color:d.t3}}>{s.lbl}</span>
                           <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
@@ -2811,7 +2781,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           const ds=dt.toISOString().split("T")[0];
                           const mins=sessions.filter(s=>s.date===ds).reduce((a,s)=>a+s.duration,0);
                           const op=mins===0?0:mins<60?.3:mins<120?.55:mins<240?.8:1;
-                          return <div key={ds} title={`${ds}: ${fmt(mins)||"No study"}`} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
+                          return <div key={ds} title={ds+": "+fmt(mins)||"No study"} style={{width:9,height:9,borderRadius:2,background:mins>0?d.a2:d.b,opacity:mins>0?op:.4,border:ds===today()?`1.5px solid ${d.a1}`:"none"}}/>;
                         })}
                       </div>
                       <div style={{display:"flex",gap:5,marginTop:6,alignItems:"center",fontSize:9.5,color:d.t4}}>
@@ -2826,8 +2796,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           </div>
         </div>
       </div>
-      {/* Mobile bottom tabs */}
-
     </>
   );
 }
