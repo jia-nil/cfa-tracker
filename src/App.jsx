@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 const SB_URL  = import.meta.env.VITE_SB_URL;
 const SB_ANON = import.meta.env.VITE_SB_ANON;
 const OR_KEY  = import.meta.env.VITE_OR_KEY;
@@ -28,7 +28,7 @@ const SB_AUTH = {
       method:"POST",
       headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
     });
-    localStorage.removeItem("slothr_auth");
+    localStorage.removeItem("cfa_auth");
   },
   async getUser(accessToken) {
     const r = await fetch(`${SB_URL}/auth/v1/user`, {
@@ -228,28 +228,13 @@ function renderMath(text) {
 
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NTA SIMULATION — Practice Tab
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SLOTHR — NTA JEE MAINS SIMULATION
-// Plug this into slothr-v2.jsx: replace the Practice tab content with <NTAMode/>
-// Students add their own questions via the admin panel (slothr-admin.jsx)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Utility functions ────────────────────────────────────────────────────────
-const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
-const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
-const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
-
-// ── Select component ──────────────────────────────────────────────────────────
+// ── Shared Select ─────────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   return(
     <select value={value} onChange={e=>onChange(e.target.value)} disabled={disabled}
-      style={{background:d?d.inp:"#1a1816",border:`1px solid ${d?d.b:"rgba(255,255,255,0.07)"}`,
-        color:d?d.t:"#f5f0e8",borderRadius:5,padding:"7px 10px",fontSize:13,
+      style={{background:d?d.inp:"#0d0f18",border:`1px solid ${d?d.inpb:"rgba(180,185,220,0.12)"}`,
+        color:d?d.t:"#eef0f8",borderRadius:4,padding:"7px 10px",fontSize:13,
         fontFamily:"inherit",cursor:"pointer",minWidth:minWidth||120,outline:"none"}}>
       {placeholder&&<option value="">{placeholder}</option>}
       {options.map(o=><option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
@@ -257,1451 +242,48 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
-const THEME = {
-  dark:{
-    bg:"#0e0d0b",sb:"#0a0908",card:"#161410",hover:"#1c1a17",
-    b:"rgba(255,255,255,0.07)",bs:"rgba(255,255,255,0.14)",
-    t:"#f5f0e8",t2:"#c8c0b0",t3:"#8a8070",t4:"#4a4540",
-    a1:"#e8723c",a2:"#4d9e78",a3:"#7a8fc2",
-    inp:"#1a1816",ring:"#e8723c",danger:"#d4604a",
-  },
-  light:{
-    bg:"#f7f4ee",sb:"#f0ece3",card:"#ffffff",hover:"#f0ece3",
-    b:"rgba(0,0,0,0.08)",bs:"rgba(0,0,0,0.16)",
-    t:"#1a1510",t2:"#4a4035",t3:"#8a7a6a",t4:"#c0b8a8",
-    a1:"#d4612a",a2:"#3d8a63",a3:"#5b6fa8",
-    inp:"#f7f4ee",ring:"#d4612a",danger:"#c44a35",
-  },
+const SUB_C = SUBJECT_COLORS;
+const SUB_EMOJI = {
+  "Ethics & Standards":"⚖️","Quantitative Methods":"📊","Economics":"🌐",
+  "Financial Reporting":"📑","Corporate Issuers":"🏢","Equity Investments":"📈",
+  "Fixed Income":"🏦","Derivatives":"⚙️","Alternative Investments":"🔷","Portfolio Management":"💼",
 };
 
 
 
-
-
-// ── Placeholder papers — replace questions with real ones from your DB ────────
-const SUBJECT_COLORS = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
-const TOPICS = {
-  Physics:{
-    "11th":["Kinematics","Laws of Motion","Work & Energy","Rotational Motion","Gravitation","Thermodynamics","Waves","Oscillations","Properties of Matter","Kinetic Theory"],
-    "12th":["Electrostatics","Current Electricity","Magnetism","EMI & AC","Optics","Modern Physics","Semiconductors","Dual Nature","Atoms & Nuclei","Communication"],
-    dropper:["Kinematics","Laws of Motion","Work & Energy","Rotational Motion","Gravitation","Thermodynamics","Waves","Oscillations","Electrostatics","Current Electricity","Magnetism","EMI & AC","Optics","Modern Physics","Semiconductors"]
-  },
-  Chemistry:{
-    "11th":["Mole Concept","Atomic Structure","Chemical Bonding","States of Matter","Thermodynamics","Equilibrium","Redox","Organic Basics","Hydrocarbons","s-Block Elements"],
-    "12th":["Electrochemistry","Chemical Kinetics","Solutions","Surface Chemistry","p-Block Elements","d-Block Elements","Coordination Compounds","Haloalkanes","Alcohols","Amines"],
-    dropper:["Mole Concept","Atomic Structure","Chemical Bonding","Thermodynamics","Equilibrium","Electrochemistry","Chemical Kinetics","Coordination Compounds","Organic Chemistry","p-Block Elements"]
-  },
-  Mathematics:{
-    "11th":["Sets & Functions","Trigonometry","Sequences & Series","Straight Lines","Conic Sections","Permutations","Binomial Theorem","Limits","Statistics","Probability"],
-    "12th":["Matrices","Determinants","Continuity & Differentiability","Applications of Derivatives","Integrals","Differential Equations","Vectors","3D Geometry","Probability","Linear Programming"],
-    dropper:["Calculus","Algebra","Coordinate Geometry","Trigonometry","Vectors & 3D","Probability","Matrices","Complex Numbers","Sequences & Series","Differential Equations"]
-  }
-};
-const JEE_WEIGHTAGE = {
-  Physics:{"Kinematics":"M","Laws of Motion":"H","Work & Energy":"H","Rotational Motion":"H","Gravitation":"M","Thermodynamics":"H","Waves":"M","Oscillations":"H","Properties of Matter":"L","Kinetic Theory":"M","Electrostatics":"H","Current Electricity":"H","Magnetism":"H","EMI & AC":"H","Optics":"H","Modern Physics":"H","Semiconductors":"M","Dual Nature":"M","Atoms & Nuclei":"M","Communication":"L"},
-  Chemistry:{"Mole Concept":"H","Atomic Structure":"H","Chemical Bonding":"H","States of Matter":"M","Thermodynamics":"H","Equilibrium":"H","Redox":"M","Organic Basics":"H","Hydrocarbons":"H","s-Block Elements":"L","Electrochemistry":"H","Chemical Kinetics":"H","Solutions":"M","Surface Chemistry":"L","p-Block Elements":"H","d-Block Elements":"H","Coordination Compounds":"H","Haloalkanes":"M","Alcohols":"M","Amines":"M","Organic Chemistry":"H"},
-  Mathematics:{"Sets & Functions":"L","Trigonometry":"H","Sequences & Series":"M","Straight Lines":"M","Conic Sections":"H","Permutations":"M","Binomial Theorem":"M","Limits":"H","Statistics":"L","Probability":"H","Matrices":"M","Determinants":"M","Continuity & Differentiability":"H","Applications of Derivatives":"H","Integrals":"H","Differential Equations":"H","Vectors":"H","3D Geometry":"H","Linear Programming":"L","Calculus":"H","Algebra":"H","Coordinate Geometry":"H","Vectors & 3D":"H","Complex Numbers":"H"}
-};
-const CLASSES = [
-  {id:"11th", label:"Class 11th", icon:"①"},
-  {id:"12th", label:"Class 12th", icon:"②"},
-  {id:"dropper", label:"Dropper", icon:"↻"},
-];
-
-const STREAK_MILESTONES = [
-  {days:1,  icon:"🌱", label:"First Day"},
-  {days:5,  icon:"🔥", label:"5 Day Streak"},
-  {days:7,  icon:"⚡", label:"One Week"},
-  {days:10, icon:"💪", label:"10 Days"},
-  {days:15, icon:"🎯", label:"15 Days"},
-  {days:21, icon:"🏆", label:"3 Weeks"},
-  {days:30, icon:"👑", label:"30 Days"},
-  {days:50, icon:"💎", label:"50 Days"},
-  {days:100,icon:"🦥", label:"100 Days"},
-];
-
-const TABS=[
-  {id:"overview",   label:"Overview",    icon:"⌂"},
-  {id:"home",       label:"Home",        icon:"◉"},
-  {id:"friends",    label:"Friends",     icon:"◎"},
-  {id:"leaderboard",label:"Leaderboard", icon:"▲"},
-  {id:"events",     label:"Events",      icon:"◈"},
-  {id:"coach",      label:"Analytics",   icon:"👁"},
-  {id:"goals",      label:"Today",       icon:"✦"},
-  {id:"pyq",        label:"Practice",    icon:"◆"},
-  {id:"sessions",   label:"Sessions",    icon:"◷"},
-  {id:"streaks",    label:"Streaks",     icon:"🔥"},
-  {id:"syllabus",   label:"Syllabus",    icon:"📋"},
-];
-
-const PAPERS = [
-  // ── 2024 ─────────────────────────────────────────────────────────────────
-  {
-    id:"adv-2024-p1",
-    year:"2024", exam:"JEE Advanced", session:"Paper 1",
-    shift:"Morning (9:00 AM – 12:00 PM)", date:"26 May 2024",
-    duration:180, status:"available",
-  },
-  {
-    id:"adv-2024-p2",
-    year:"2024", exam:"JEE Advanced", session:"Paper 2",
-    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"26 May 2024",
-    duration:180, status:"available",
-  },
-  // ── 2023 ─────────────────────────────────────────────────────────────────
-  {
-    id:"adv-2023-p1",
-    year:"2023", exam:"JEE Advanced", session:"Paper 1",
-    shift:"Morning (9:00 AM – 12:00 PM)", date:"04 Jun 2023",
-    duration:180, status:"available",
-  },
-  {
-    id:"adv-2023-p2",
-    year:"2023", exam:"JEE Advanced", session:"Paper 2",
-    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"04 Jun 2023",
-    duration:180, status:"available",
-  },
-  // ── 2022 ─────────────────────────────────────────────────────────────────
-  {
-    id:"adv-2022-p1",
-    year:"2022", exam:"JEE Advanced", session:"Paper 1",
-    shift:"Morning (9:00 AM – 12:00 PM)", date:"28 Aug 2022",
-    duration:180, status:"available",
-  },
-  {
-    id:"adv-2022-p2",
-    year:"2022", exam:"JEE Advanced", session:"Paper 2",
-    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"28 Aug 2022",
-    duration:180, status:"available",
-  },
-  // ── 2025 ─────────────────────────────────────────────────────────────────
-  {
-    id:"adv-2025-p1",
-    year:"2025", exam:"JEE Advanced", session:"Paper 1",
-    shift:"Morning (9:00 AM – 12:00 PM)", date:"18 May 2025",
-    duration:180, status:"available",
-  },
-  {
-    id:"adv-2025-p2",
-    year:"2025", exam:"JEE Advanced", session:"Paper 2",
-    shift:"Afternoon (2:30 PM – 5:30 PM)", date:"18 May 2025",
-    duration:180, status:"available",
-  },
-
-];
-
-// ── Placeholder questions — you'll populate these from Supabase ───────────────
-// Each question: { id, section, type:"mcq"|"numerical", text, options:{A,B,C,D}, correct, solution }
-// ── PLACEHOLDER QUESTIONS ────────────────────────────────────────────────────
-// Replace these with real questions fetched from Supabase.
-// IMPORTANT: every real question MUST include a `topic` field (chapter name).
-// This is how the Analytics tab and AI coach know which chapter you got wrong.
-// Supabase schema: { id, paper_id, section, qno, type, text, options, correct, solution, topic, difficulty }
 // ─────────────────────────────────────────────────────────────────────────────
-
-const SECTIONS = ["Physics","Chemistry","Mathematics"];
-const SEC_COLOR = {Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8"};
-const SEC_SHORT = {Physics:"PHY", Chemistry:"CHEM", Mathematics:"MATH"};
-
-// NTA palette — intentionally clinical/utilitarian (matches real NTA UI)
-// ── NTA Theme — light matches real NTA exactly, dark is adapted ──────────────
-function getNTA(dark){
-  if(!dark) return {
-    // Real NTA colours
-    bg:"#f5f5f5",
-    header:"#1a7c3e",        // NTA green
-    headerText:"#ffffff",
-    subBar:"#f47920",        // NTA orange
-    subBarText:"#ffffff",
-    subBarActive:"#ffffff",
-    subBarActiveBg:"rgba(255,255,255,.18)",
-    card:"#ffffff",
-    border:"#d0d0d0",
-    border2:"#aaaaaa",
-    text:"#1a1a1a",
-    text2:"#333333",
-    text3:"#666666",
-    text4:"#999999",
-    hover:"#f0f0f0",
-    // Palette (NTA official)
-    notVisited:"#9e9e9e",
-    notAnswered:"#e53935",
-    answered:"#43a047",
-    markedReview:"#7b1fa2",
-    answeredMarked:"#7b1fa2",
-    // Timer
-    timerNormal:"#1a7c3e",
-    timerWarn:"#e53935",
-    // Buttons
-    btnPrimary:"#1a7c3e",
-    btnSave:"#43a047",
-    btnClear:"#e53935",
-    btnMark:"#7b1fa2",
-    btnNext:"#1a7c3e",
-    btnSecondary:"#ffffff",
-    btnSecondaryText:"#333333",
-    // Result
-    scoreGood:"#1a7c3e",
-    scoreMid:"#f47920",
-    scoreBad:"#e53935",
-  };
-  // Dark mode — same identity, darker surfaces
-  return {
-    bg:"#0d0d0c",
-    header:"#1a5c2e",
-    headerText:"#ffffff",
-    subBar:"#c45e0a",
-    subBarText:"#ffffff",
-    subBarActive:"#ffffff",
-    subBarActiveBg:"rgba(255,255,255,.15)",
-    card:"#1a1a18",
-    border:"#2a2a28",
-    border2:"#3a3a38",
-    text:"#f0f0ee",
-    text2:"#ccccca",
-    text3:"#888886",
-    text4:"#555553",
-    hover:"#222220",
-    notVisited:"#555553",
-    notAnswered:"#c62828",
-    answered:"#2e7d32",
-    markedReview:"#6a1b9a",
-    answeredMarked:"#6a1b9a",
-    timerNormal:"#4caf50",
-    timerWarn:"#ef5350",
-    btnPrimary:"#1a5c2e",
-    btnSave:"#2e7d32",
-    btnClear:"#c62828",
-    btnMark:"#6a1b9a",
-    btnNext:"#1a5c2e",
-    btnSecondary:"#2a2a28",
-    btnSecondaryText:"#ccccca",
-    scoreGood:"#4caf50",
-    scoreMid:"#ff9800",
-    scoreBad:"#ef5350",
-  };
-}
-
-function fmtTime(secs) {
-  const h = Math.floor(secs/3600);
-  const m = Math.floor((secs%3600)/60);
-  const s = secs%60;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-}
-
-// ── Question Status ───────────────────────────────────────────────────────────
-// notVisited | notAnswered | answered | markedReview | answeredMarked
-function getStatus(state) {
-  if (!state.visited) return "notVisited";
-  if (state.markedReview && state.answer !== null) return "answeredMarked";
-  if (state.markedReview) return "markedReview";
-  if (state.answer !== null) return "answered";
-  return "notAnswered";
-}
-
-function statusColor(status, nta) {
-  return {
-    notVisited: nta.notVisited,
-    notAnswered: nta.notAnswered,
-    answered: nta.answered,
-    markedReview: nta.markedReview,
-    answeredMarked: nta.answeredMarked,
-  }[status] || nta.notVisited;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PAPER LIST — card view
-// ─────────────────────────────────────────────────────────────────────────────
-function PaperList({onStart,onExit,nta,completedTests,onReview}){
-  const years=[...new Set(PAPERS.map(p=>p.year))].sort().reverse();
-  return(
-    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
-      {/* NTA-style green header */}
-      <div style={{background:nta.header,padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:18}}>🦥</span>
-          <div>
-            <div style={{fontSize:14,fontWeight:700,color:"#fff",letterSpacing:"-.01em"}}>sloth<span style={{color:"#f47920"}}>r</span></div>
-            <div style={{fontSize:10,color:"rgba(255,255,255,.65)",letterSpacing:".04em",textTransform:"uppercase"}}>Mock Test Papers — JEE Advanced</div>
-          </div>
-        </div>
-        <button onClick={onExit}
-          style={{padding:"7px 16px",borderRadius:5,background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer",letterSpacing:".02em"}}>
-          ← Back to slothr
-        </button>
-      </div>
-      {/* Warning banner */}
-      <div style={{background:nta.card,borderBottom:`2px solid #f47920`,padding:"8px 20px",display:"flex",alignItems:"center",gap:8}}>
-        <span>⚠️</span>
-        <span style={{fontSize:12,color:nta.text2}}>Once you click <strong>Attempt Test</strong>, the 3-hour timer starts immediately. Do not refresh the page.</span>
-      </div>
-      <div style={{padding:"20px"}}>
-        <div style={{fontSize:16,fontWeight:700,color:nta.text,marginBottom:4}}>JEE Advanced — Mock Test Papers</div>
-        <div style={{fontSize:12,color:nta.text3,marginBottom:20}}>54 questions · 3 hours · 180 marks per paper</div>
-        {years.map(year=>(
-          <div key={year} style={{marginBottom:28}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-              <div style={{fontSize:15,fontWeight:700,color:nta.header}}>{year}</div>
-              <div style={{flex:1,height:1,background:nta.border}}/>
-              <div style={{fontSize:10,color:nta.text3}}>{PAPERS.filter(p=>p.year===year).length} papers</div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-              {PAPERS.filter(p=>p.year===year&&p.status==="available").map(paper=>(
-                <PaperCard key={paper.id} paper={paper} onStart={onStart} nta={nta} completedTest={completedTests?.[paper.id]} onReview={onReview}/>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PaperCard({paper,onStart,nta,completedTest,onReview}){
-  const [hov,setHov]=useState(false);
-  const avail=paper.status==="available";
-  return(
-    <div onMouseOver={()=>setHov(true)} onMouseOut={()=>setHov(false)}
-      style={{background:nta.card,borderRadius:3,border:`1.5px solid ${hov&&avail?nta.header:nta.border}`,
-        padding:"16px 18px",transition:"all .15s",boxShadow:hov&&avail?"0 4px 16px rgba(0,0,0,.12)":"0 1px 4px rgba(0,0,0,.06)"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-        <div style={{fontSize:10,fontWeight:700,letterSpacing:".05em",textTransform:"uppercase",
-          color:nta.header,background:`${nta.header}12`,padding:"3px 8px",borderRadius:3}}>
-          {paper.session}
-        </div>
-        {!avail&&<div style={{fontSize:10,color:nta.text3,background:nta.hover,padding:"3px 7px",borderRadius:3,border:`1px solid ${nta.border}`}}>coming soon</div>}
-      </div>
-      <div style={{fontSize:13,fontWeight:700,color:nta.text,marginBottom:2}}>{paper.shift}</div>
-      <div style={{fontSize:11,color:nta.text3,marginBottom:12}}>{paper.date}</div>
-      <div style={{display:"flex",gap:6,marginBottom:12}}>
-        {[["54 Qs","Qs"],["3 hrs","Time"],["180","Marks"]].map(([v,l])=>(
-          <div key={l} style={{flex:1,textAlign:"center",background:nta.hover,borderRadius:5,padding:"6px 4px",border:`1px solid ${nta.border}`}}>
-            <div style={{fontSize:12,fontWeight:700,color:nta.header}}>{v}</div>
-            <div style={{fontSize:9,color:nta.text3,textTransform:"uppercase",letterSpacing:".04em"}}>{l}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{display:"flex",gap:4,marginBottom:12}}>
-        {SECTIONS.map(s=>(
-          <div key={s} style={{flex:1,textAlign:"center",fontSize:9,fontWeight:700,color:SEC_COLOR[s],
-            background:`${SEC_COLOR[s]}15`,padding:"3px 4px",borderRadius:3,border:`1px solid ${SEC_COLOR[s]}25`}}>
-            {SEC_SHORT[s]}
-          </div>
-        ))}
-      </div>
-      <div style={{display:"flex",gap:7}}>
-        <button disabled={!avail} onClick={()=>avail&&onStart(paper)}
-          style={{flex:1,padding:"10px",borderRadius:5,
-            background:avail?nta.btnPrimary:"#888",
-            color:"#fff",border:"none",fontFamily:"Arial",
-            fontSize:12,fontWeight:700,cursor:avail?"pointer":"not-allowed",letterSpacing:".02em"}}>
-          {completedTest?"try again":avail?"▶ Attempt":"soon"}
-        </button>
-        {completedTest&&(
-          <button onClick={()=>onReview(paper,completedTest)}
-            style={{padding:"10px 14px",borderRadius:5,flexShrink:0,
-              background:"transparent",color:nta.header,
-              border:`1.5px solid ${nta.header}`,fontFamily:"Arial",
-              fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-            Review ↗
-          </button>
-        )}
-      </div>
-      {completedTest&&(
-        <div style={{marginTop:8,fontSize:10,color:nta.text3,textAlign:"center",fontStyle:"italic"}}>
-          attempted {completedTest.date} · open the report card 🩻
-        </div>
-      )}
-    </div>
-  );
-}
-
-function InstructionsScreen({paper,user,onBegin,onBack,nta}){
-  const [agreed,setAgreed]=useState(false);
-  return(
-    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
-      <NTAHeader paper={paper} user={user} timerSecs={null} nta={nta} onExit={onBack}/>
-      <div style={{maxWidth:860,margin:"0 auto",padding:"18px 16px"}}>
-        {/* Instructions card */}
-        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,overflow:"hidden",marginBottom:14}}>
-          <div style={{background:nta.header,color:"#fff",padding:"9px 16px",fontSize:13,fontWeight:700}}>General Instructions</div>
-          <div style={{padding:"14px 18px",lineHeight:1.9,color:nta.text,fontSize:12.5}}>
-            {[
-              "Total duration of JEE Advanced is 180 minutes (3 hours) per paper.",
-              "The countdown timer at the top right shows the remaining time. The paper auto-submits when it reaches 00:00:00.",
-              "There are 54 questions — 18 per section (Physics, Chemistry, Mathematics).",
-              "Question types vary by section: Single Correct MCQ (+3/−1), Multiple Correct MCQ (+4/−2 partial), Numerical (+3/0). Check the question type label before answering.",
-              "Click an option to select it. For numerical, type your integer/decimal answer in the input box.",
-              "Click flag & next to flag a question. You can come back to it later.",
-              "You can freely switch between sections and questions at any time.",
-              "Click save & next to save your response and move forward.",
-            ].map((line,i)=>(
-              <div key={i} style={{display:"flex",gap:8,marginBottom:3}}>
-                <span style={{color:nta.header,fontWeight:700,flexShrink:0}}>{i+1}.</span>
-                <span>{line}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Palette legend */}
-        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,padding:"12px 18px",marginBottom:14}}>
-          <div style={{fontWeight:700,marginBottom:10,color:nta.text,fontSize:13}}>Question Palette Legend</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
-            {[
-              {c:"notVisited",  l:"Not Visited",       d:"You have not visited the question yet"},
-              {c:"notAnswered", l:"Not Answered",       d:"Visited but no answer saved"},
-              {c:"answered",    l:"Answered",           d:"Response saved"},
-              {c:"markedReview",l:"Marked for Review",  d:"Flagged, no answer saved"},
-              {c:"answeredMarked",l:"Answered + Marked",d:"Answered and flagged for review"},
-            ].map(item=>(
-              <div key={item.l} style={{display:"flex",alignItems:"center",gap:8,minWidth:220}}>
-                <div style={{width:28,height:28,borderRadius:3,background:nta[item.c],flexShrink:0,
-                  display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:700}}>1</div>
-                <div>
-                  <div style={{fontWeight:600,fontSize:11.5,color:nta.text}}>{item.l}</div>
-                  <div style={{fontSize:10.5,color:nta.text3}}>{item.d}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Agree */}
-        <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:4,padding:"12px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
-          <input type="checkbox" id="agree" checked={agreed} onChange={e=>setAgreed(e.target.checked)}
-            style={{width:15,height:15,cursor:"pointer",accentColor:nta.header}}/>
-          <label htmlFor="agree" style={{cursor:"pointer",fontSize:13,fontWeight:500,color:nta.text}}>
-            I have read all instructions carefully and I am ready to begin the test.
-          </label>
-        </div>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onBack}
-            style={{padding:"9px 22px",borderRadius:4,background:nta.btnSecondary,color:nta.btnSecondaryText,
-              border:`1px solid ${nta.border2}`,fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-            ← Back
-          </button>
-          <button disabled={!agreed} onClick={onBegin}
-            style={{padding:"9px 28px",borderRadius:4,background:agreed?nta.btnSave:"#888",
-              color:"#fff",border:"none",fontFamily:"Arial",fontSize:12,fontWeight:700,
-              cursor:agreed?"pointer":"not-allowed"}}>
-            i'm ready
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NTAHeader({paper,user,timerSecs,nta,onExit}){
-  const warn=timerSecs!==null&&timerSecs<=900;
-  return(
-    <div style={{background:nta.header,color:"#fff",fontFamily:"Arial,sans-serif",flexShrink:0}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,.15)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:16}}>🦥</span>
-          <div>
-            <div style={{fontSize:13,fontWeight:700}}>sloth<span style={{color:"#f47920"}}>r</span></div>
-            <div style={{fontSize:10,opacity:.7}}>{paper?.exam} — {paper?.session} · {paper?.date}</div>
-          </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:14}}>
-          {timerSecs!==null&&(
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:9,opacity:.7,letterSpacing:".06em",textTransform:"uppercase",marginBottom:1}}>Time Remaining</div>
-              <div style={{fontSize:20,fontWeight:700,fontFamily:"'Courier New',monospace",
-                color:warn?"#ff6b6b":"#fff",letterSpacing:".06em",
-                animation:warn&&timerSecs%2===0?"ntaPulse .8s ease":undefined}}>
-                {fmtTime(timerSecs)}
-              </div>
-            </div>
-          )}
-          {onExit&&(
-            <button onClick={onExit}
-              style={{padding:"6px 12px",borderRadius:4,background:"rgba(255,255,255,.15)",color:"#fff",
-                border:"1px solid rgba(255,255,255,.3)",fontFamily:"Arial",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-              ✕ Exit
-            </button>
-          )}
-        </div>
-      </div>
-      {/* Candidate bar */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"5px 14px",background:"rgba(0,0,0,.2)",fontSize:11}}>
-        <div style={{width:24,height:24,borderRadius:"50%",background:"rgba(255,255,255,.2)",
-          display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>
-          {(user?.name||"S")[0].toUpperCase()}
-        </div>
-        <div>
-          <span style={{fontWeight:600}}>{user?.name||"Student"}</span>
-          <span style={{opacity:.6,marginLeft:8,fontSize:10}}>{user?.email||""}</span>
-        </div>
-        <div style={{marginLeft:"auto",fontSize:10,opacity:.75}}>
-          {paper?.shift} · 54 Questions · 180 Marks
-        </div>
-      </div>
-      <style>{`@keyframes ntaPulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-    </div>
-  );
-}
-
-function ExamInterface({paper,user,questions,onSubmit,onExit,nta}){
-  const TOTAL_SECS=paper.duration*60;
-  const [timerSecs,setTimerSecs]=useState(TOTAL_SECS);
-  const timerRef=useRef(null);
-  const [section,setSection]=useState("Physics");
-  const [qIndex,setQIndex]=useState(0);
-  const [showPalette,setShowPalette]=useState(()=>typeof window!=="undefined"&&window.innerWidth>600);
-  const [showSubmitModal,setShowSubmitModal]=useState(false);
-  const [showExitModal,setShowExitModal]=useState(false);
-  const [numericalInput,setNumericalInput]=useState("");
-  const [qState,setQState]=useState(()=>{
-    const s={};
-    questions.forEach(q=>{s[q.id]={visited:false,answer:null,markedReview:false};});
-    return s;
-  });
-
-  useEffect(()=>{
-    timerRef.current=setInterval(()=>{
-      setTimerSecs(t=>{
-        if(t<=1){clearInterval(timerRef.current);onSubmit(qState);return 0;}
-        return t-1;
-      });
-    },1000);
-    return()=>clearInterval(timerRef.current);
-  },[]);
-
-  const sectionQs=questions.filter(q=>q.section===section);
-  const currentQ=sectionQs[qIndex];
-  const currentState=currentQ?qState[currentQ.id]:null;
-
-  useEffect(()=>{
-    if(!currentQ)return;
-    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],visited:true}}));
-    setNumericalInput(qState[currentQ.id]?.answer||"");
-  },[currentQ?.id]);
-
-  function setAnswer(ans){
-    if(!currentQ)return;
-    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],answer:ans,visited:true}}));
-  }
-  function clearResponse(){
-    if(!currentQ)return;
-    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],answer:null}}));
-    setNumericalInput("");
-  }
-  function markForReview(){
-    if(!currentQ)return;
-    setQState(prev=>({...prev,[currentQ.id]:{...prev[currentQ.id],markedReview:true,visited:true}}));
-    goNext();
-  }
-  function saveAndNext(){
-    if(currentQ?.type==="numerical")setAnswer(numericalInput||null);
-    goNext();
-  }
-  function goNext(){
-    if(qIndex<sectionQs.length-1)setQIndex(q=>q+1);
-    else{const ns=SECTIONS[(SECTIONS.indexOf(section)+1)%SECTIONS.length];setSection(ns);setQIndex(0);}
-  }
-  function goPrev(){if(qIndex>0)setQIndex(q=>q-1);}
-  function jumpTo(sec,idx){setSection(sec);setQIndex(idx);}
-
-  const stats=Object.values(qState);
-  const answered=stats.filter(s=>s.answer!==null).length;
-  const notAnswered=stats.filter(s=>s.visited&&s.answer===null&&!s.markedReview).length;
-  const marked=stats.filter(s=>s.markedReview&&s.answer===null).length;
-  const answeredMarked=stats.filter(s=>s.markedReview&&s.answer!==null).length;
-  const notVisited=stats.filter(s=>!s.visited).length;
-
-  return(
-    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",display:"flex",flexDirection:"column",minHeight:"80vh"}}>
-      <style>{`
-        .nta-btn{padding:7px 16px;border-radius:3px;border:none;font-family:Arial,sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.02em;transition:opacity .1s;}
-        .nta-btn:hover{opacity:.85;}
-        .nta-btn:disabled{opacity:.4;cursor:not-allowed;}
-        .nta-num-input{width:110px;padding:7px 10px;border:2px solid ${nta.border2};border-radius:3px;font-size:13px;font-family:Arial;text-align:center;outline:none;background:${nta.card};color:${nta.text};}
-        .nta-num-input:focus{border-color:${nta.header};}
-        .pal-btn{width:34px;height:34px;border-radius:3px;border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .1s;font-family:Arial;}
-        .pal-btn:hover{transform:scale(1.1);}
-        .nta-opt{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1.5px solid ${nta.border};border-radius:3px;cursor:pointer;margin-bottom:7px;transition:all .1s;background:${nta.card};}
-        .nta-opt:hover{border-color:${nta.header};background:${nta.hover};}
-        .nta-opt.sel{border-color:${nta.header};background:${nta.hover};}
-        .sec-tab-nta{padding:7px 18px;border:none;border-bottom:3px solid transparent;background:transparent;font-family:Arial;font-size:12px;font-weight:700;cursor:pointer;color:rgba(255,255,255,.7);transition:all .15s;}
-        .sec-tab-nta.active{border-bottom-color:#fff;color:#fff;background:rgba(255,255,255,.15);}
-        .sec-tab-nta:hover{color:#fff;background:rgba(255,255,255,.1);}
-      `}</style>
-
-      <NTAHeader paper={paper} user={user} timerSecs={timerSecs} nta={nta} onExit={()=>setShowExitModal(true)}/>
-
-      {/* Section tabs — NTA orange bar */}
-      <div style={{background:nta.subBar,display:"flex",alignItems:"center",flexShrink:0}}>
-        {SECTIONS.map(sec=>{
-          const secAns=questions.filter(q=>q.section===sec&&qState[q.id]?.answer!==null).length;
-          const secTotal=questions.filter(q=>q.section===sec).length;
-          return(
-            <button key={sec} className={`sec-tab-nta${section===sec?" active":""}`}
-              onClick={()=>{setSection(sec);setQIndex(0);}}>
-              {sec} <span style={{fontSize:10,opacity:.8}}>({secAns}/{secTotal})</span>
-            </button>
-          );
-        })}
-        <button onClick={()=>setShowPalette(p=>!p)}
-          style={{marginLeft:"auto",padding:"7px 14px",background:"rgba(0,0,0,.2)",border:"none",
-            color:"#fff",fontFamily:"Arial",fontSize:11,cursor:"pointer",fontWeight:700}}>
-          {showPalette?"hide":"show"}
-        </button>
-      </div>
-
-      {/* Main 2-col layout */}
-      <div style={{display:"flex",flex:1,overflow:"hidden",minHeight:0}}>
-
-        {/* ── Question area ── */}
-        <div style={{flex:1,overflow:"auto",padding:"14px 18px"}}>
-          {currentQ&&(
-            <>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontWeight:700,color:nta.header,fontSize:13}}>
-                  Question {currentQ.qno}
-                  <span style={{marginLeft:8,fontSize:10.5,fontWeight:400,color:nta.text3,
-                    padding:"2px 7px",background:nta.hover,borderRadius:3,border:`1px solid ${nta.border}`}}>
-                    {currentQ.type==="mcq"?"MCQ · +4 / −1":"Integer · +4 / 0"}
-                  </span>
-                </div>
-                <span style={{fontSize:11,color:SEC_COLOR[section],fontWeight:600}}>{section}</span>
-              </div>
-
-              {/* Question box */}
-              <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:3,
-                padding:"16px 18px",marginBottom:14,lineHeight:1.85,color:nta.text,fontSize:13.5,fontFamily:"serif"}}>
-                <MathText t={currentQ.text}/>
-              </div>
-
-              {/* MCQ options */}
-              {currentQ.type==="mcq"&&currentQ.options&&(
-                <div style={{marginBottom:14}}>
-                  {Object.entries(currentQ.options).map(([opt,text])=>(
-                    <div key={opt} className={`nta-opt${currentState?.answer===opt?" sel":""}`}
-                      onClick={()=>setAnswer(opt)}>
-                      <div style={{width:26,height:26,borderRadius:"50%",
-                        background:currentState?.answer===opt?nta.header:nta.hover,
-                        color:currentState?.answer===opt?"#fff":nta.text2,
-                        border:`1.5px solid ${currentState?.answer===opt?nta.header:nta.border2}`,
-                        display:"flex",alignItems:"center",justifyContent:"center",
-                        fontWeight:700,fontSize:12,flexShrink:0}}>
-                        {opt}
-                      </div>
-                      <span style={{fontSize:13,color:nta.text,lineHeight:1.5,fontFamily:"serif"}}><MathText t={text}/></span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Numerical input */}
-              {currentQ.type==="numerical"&&(
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:12,color:nta.text2,marginBottom:7}}>Enter your integer answer:</div>
-                  <input className="nta-num-input" type="number" placeholder="—"
-                    value={numericalInput}
-                    onChange={e=>{setNumericalInput(e.target.value);setAnswer(e.target.value||null);}}/>
-                </div>
-              )}
-
-              {/* Action buttons — exact NTA layout */}
-              <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:10,paddingTop:10,borderTop:`1px solid ${nta.border}`}}>
-                <button className="nta-btn" onClick={markForReview}
-                  style={{background:nta.btnMark,color:"#fff"}}>
-                  flag & next
-                </button>
-                <button className="nta-btn" onClick={clearResponse}
-                  style={{background:nta.btnSecondary,color:nta.btnClear,border:`1.5px solid ${nta.btnClear}`}}>
-                  Clear Response
-                </button>
-                <button className="nta-btn" onClick={saveAndNext}
-                  style={{background:nta.btnSave,color:"#fff",marginLeft:"auto"}}>
-                  save & next
-                </button>
-              </div>
-
-              {/* Prev / Next / Submit */}
-              <div style={{display:"flex",gap:7}}>
-                <button className="nta-btn" onClick={goPrev}
-                  disabled={qIndex===0&&section===SECTIONS[0]}
-                  style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`}}>
-                  ◀ Previous
-                </button>
-                <button className="nta-btn" onClick={goNext}
-                  style={{background:nta.btnNext,color:"#fff"}}>
-                  next
-                </button>
-                <button className="nta-btn" onClick={()=>setShowSubmitModal(true)}
-                  style={{marginLeft:"auto",background:nta.btnClear,color:"#fff",padding:"7px 20px"}}>
-                  Submit Paper
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* ── Question palette ── */}
-        {showPalette&&(
-          <div style={{width:240,background:nta.card,borderLeft:`1px solid ${nta.border}`,display:"flex",flexDirection:"column",overflow:"hidden",flexShrink:0}}>
-            {/* Legend summary */}
-            <div style={{padding:"9px 11px",borderBottom:`1px solid ${nta.border}`,background:nta.hover}}>
-              <div style={{fontWeight:700,fontSize:11.5,color:nta.text,marginBottom:7}}>Question Palette</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:10}}>
-                {[
-                  {c:nta.answered,     l:"Answered",    v:answered},
-                  {c:nta.notAnswered,  l:"Not Answered",v:notAnswered},
-                  {c:nta.markedReview, l:"For Review",  v:marked},
-                  {c:nta.answeredMarked,l:"Ans+Review", v:answeredMarked},
-                  {c:nta.notVisited,   l:"Not Visited", v:notVisited},
-                ].map(s=>(
-                  <div key={s.l} style={{display:"flex",alignItems:"center",gap:5}}>
-                    <div style={{width:18,height:18,borderRadius:3,background:s.c,flexShrink:0,
-                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:"#fff"}}>{s.v}</div>
-                    <span style={{color:nta.text3,fontSize:9.5}}>{s.l}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* Palette grid per section */}
-            <div style={{flex:1,overflow:"auto",padding:"9px 11px"}}>
-              {SECTIONS.map(sec=>{
-                const secQs=questions.filter(q=>q.section===sec);
-                return(
-                  <div key={sec} style={{marginBottom:14}}>
-                    <div style={{fontSize:10,fontWeight:700,color:SEC_COLOR[sec],marginBottom:7,
-                      textTransform:"uppercase",letterSpacing:".05em"}}>{sec}</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                      {secQs.map((q,idx)=>{
-                        const st=qState[q.id];
-                        const status=getStatus(st);
-                        const isActive=section===sec&&qIndex===idx;
-                        return(
-                          <button key={q.id} className="pal-btn"
-                            onClick={()=>jumpTo(sec,idx)}
-                            style={{
-                              background:statusColor(status,nta),
-                              outline:isActive?`2.5px solid ${nta.text}`:"none",
-                              outlineOffset:"2px",
-                              position:"relative",
-                            }}>
-                            {q.qno}
-                            {status==="answeredMarked"&&(
-                              <div style={{position:"absolute",top:2,right:2,width:5,height:5,borderRadius:"50%",background:"#fff"}}/>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Submit modal */}
-      {showSubmitModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999}}>
-          <div style={{background:nta.card,borderRadius:3,padding:"26px 30px",maxWidth:420,width:"90%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
-            <div style={{fontSize:32,marginBottom:10}}>⚠️</div>
-            <div style={{fontSize:17,fontWeight:700,color:nta.text,marginBottom:8}}>Submit Paper?</div>
-            <div style={{fontSize:12.5,color:nta.text2,marginBottom:18,lineHeight:1.75}}>
-              Answered: <strong style={{color:nta.answered}}>{answered}</strong> ·{" "}
-              Not answered: <strong style={{color:nta.notAnswered}}>{notAnswered}</strong> ·{" "}
-              Not visited: <strong style={{color:nta.notVisited}}>{notVisited}</strong><br/>
-              This action cannot be undone.
-            </div>
-            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-              <button onClick={()=>setShowSubmitModal(false)} className="nta-btn"
-                style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`,padding:"9px 22px"}}>Cancel</button>
-              <button onClick={()=>{clearInterval(timerRef.current);onSubmit(qState);}} className="nta-btn"
-                style={{background:nta.btnClear,color:"#fff",padding:"9px 26px",fontSize:13}}>Yes, Submit</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Exit mid-exam modal */}
-      {showExitModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999}}>
-          <div style={{background:nta.card,borderRadius:3,padding:"26px 30px",maxWidth:400,width:"90%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
-            <div style={{fontSize:32,marginBottom:10}}>🚪</div>
-            <div style={{fontSize:17,fontWeight:700,color:nta.text,marginBottom:8}}>Exit the exam?</div>
-            <div style={{fontSize:12.5,color:nta.text2,marginBottom:18,lineHeight:1.75}}>
-              Your progress will be lost. This test will not be counted.
-            </div>
-            <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-              <button onClick={()=>setShowExitModal(false)} className="nta-btn"
-                style={{background:nta.btnSave,color:"#fff",padding:"9px 22px"}}>stay</button>
-              <button onClick={()=>{clearInterval(timerRef.current);onExit();}} className="nta-btn"
-                style={{background:nta.btnSecondary,color:nta.btnSecondaryText,border:`1px solid ${nta.border2}`,padding:"9px 22px"}}>leave</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ResultScreen({paper,questions,qState,user,onRetry,onBack,nta,dark}){
-  const [activeTab,setActiveTab]=useState("overview"); // overview | chapters | key
-  const [keySection,setKeySection]=useState("Physics");
-  const [keyFilter,setKeyFilter]=useState("all"); // all | wrong | unattempted
-  const [expandedQ,setExpandedQ]=useState(null);
-  const [fullscreenQ,setFullscreenQ]=useState(null);
-
-  function calcScore(section=null){
-    const qs=section?questions.filter(q=>q.section===section):questions;
-    let correct=0,wrong=0,unattempted=0,marks=0;
-    qs.forEach(q=>{
-      const ans=qState[q.id]?.answer;
-      if(!ans){unattempted++;}
-      else if(ans===q.correct){correct++;marks+=4;}
-      else{wrong++;if(q.type==="mcq")marks-=1;}
-    });
-    return{correct,wrong,unattempted,marks,total:qs.length};
-  }
-
-  const overall=calcScore();
-  const secScores=SECTIONS.reduce((a,s)=>({...a,[s]:calcScore(s)}),{});
-  const pct=Math.max(0,Math.round((overall.marks/180)*100));
-  const scoreColor=pct>=60?nta.scoreGood:pct>=40?nta.scoreMid:nta.scoreBad;
-
-  // ── Chapter breakdown — group wrong answers by topic ─────────────────────
-  const chapterBreakdown=SECTIONS.reduce((acc,sec)=>{
-    const secQs=questions.filter(q=>q.section===sec);
-    const byTopic={};
-    secQs.forEach(q=>{
-      const topic=q.topic||"General";
-      if(!byTopic[topic]) byTopic[topic]={topic,section:sec,correct:0,wrong:0,unattempted:0,total:0,questions:[]};
-      const ans=qState[q.id]?.answer;
-      byTopic[topic].total++;
-      byTopic[topic].questions.push(q);
-      if(!ans) byTopic[topic].unattempted++;
-      else if(ans===q.correct) byTopic[topic].correct++;
-      else byTopic[topic].wrong++;
-    });
-    acc[sec]=Object.values(byTopic).sort((a,b)=>b.wrong-a.wrong);
-    return acc;
-  },{});
-
-  // Questions for answer key with filter
-  const keyQs=questions.filter(q=>{
-    if(q.section!==keySection) return false;
-    const ans=qState[q.id]?.answer;
-    if(keyFilter==="wrong") return ans!=null && ans!==q.correct;
-    if(keyFilter==="unattempted") return !ans;
-    return true;
-  });
-
-  const tabs=[
-    {id:"overview",label:"Score Overview"},
-    {id:"chapters",label:"Chapter Analysis"},
-    {id:"key",label:"Answer Key & Solutions"},
-  ];
-
-  return(
-    <div style={{background:nta.bg,fontFamily:"Arial,sans-serif",minHeight:"80vh"}}>
-      <NTAHeader paper={paper} user={user} timerSecs={null} nta={nta} onExit={onBack}/>
-
-      {/* ── Score banner — always visible ── */}
-      <div style={{background:nta.header,padding:"16px 24px",display:"flex",alignItems:"center",gap:28,flexWrap:"wrap"}}>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontSize:11,color:"rgba(255,255,255,.65)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:2}}>Total Score</div>
-          <div style={{fontSize:44,fontWeight:800,color:"#fff",lineHeight:1}}>{overall.marks}<span style={{fontSize:18,fontWeight:400,opacity:.6}}>/180</span></div>
-        </div>
-        <div style={{width:1,height:50,background:"rgba(255,255,255,.2)"}}/>
-        {[{v:overall.correct,l:"Correct",c:"#81c784"},{v:overall.wrong,l:"Wrong",c:"#e57373"},{v:overall.unattempted,l:"Skipped",c:"rgba(255,255,255,.5)"}].map(s=>(
-          <div key={s.l} style={{textAlign:"center"}}>
-            <div style={{fontSize:24,fontWeight:700,color:s.c}}>{s.v}</div>
-            <div style={{fontSize:10,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
-          </div>
-        ))}
-        <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button onClick={onRetry} className="nta-btn"
-            style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",padding:"8px 16px"}}>
-            try again
-          </button>
-          <button onClick={onBack} className="nta-btn"
-            style={{background:"rgba(255,255,255,.15)",color:"#fff",border:"1px solid rgba(255,255,255,.3)",padding:"8px 16px"}}>
-            ← All Papers
-          </button>
-        </div>
-      </div>
-
-      {/* ── Tab bar ── */}
-      <div style={{background:nta.subBar,display:"flex",borderBottom:`1px solid ${nta.border}`}}>
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setActiveTab(t.id)}
-            style={{padding:"10px 20px",border:"none",borderBottom:`3px solid ${activeTab===t.id?"#fff":"transparent"}`,
-              background:"transparent",color:activeTab===t.id?"#fff":"rgba(255,255,255,.6)",
-              fontFamily:"Arial",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .15s"}}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div style={{maxWidth:900,margin:"0 auto",padding:"20px 16px",boxSizing:"border-box",width:"100%"}}>
-
-        {/* ── TAB: SCORE OVERVIEW ── */}
-        {activeTab==="overview"&&(
-          <div>
-            {/* Section cards */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12,marginBottom:20}}>
-              {SECTIONS.map(sec=>{
-                const s=secScores[sec];
-                const sp=Math.max(0,(s.marks/Math.max(s.total*4,1))*100);
-                const wrongQs=questions.filter(q=>q.section===sec&&qState[q.id]?.answer&&qState[q.id].answer!==q.correct);
-                return(
-                  <div key={sec} style={{background:nta.card,border:`1px solid ${nta.border}`,borderTop:`3px solid ${SEC_COLOR[sec]}`,borderRadius:3,padding:"16px"}}>
-                    <div style={{fontSize:10,fontWeight:700,color:SEC_COLOR[sec],textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{sec}</div>
-                    <div style={{fontSize:32,fontWeight:800,color:nta.text,lineHeight:1}}>{s.marks}</div>
-                    <div style={{fontSize:10,color:nta.text3,marginBottom:10}}>out of {s.total*4} marks</div>
-                    <div style={{height:3,background:nta.border,marginBottom:10}}>
-                      <div style={{height:"100%",width:`${sp}%`,background:SEC_COLOR[sec]}}/>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:10}}>
-                      <span style={{color:nta.answered}}>✓ {s.correct} correct</span>
-                      <span style={{color:nta.notAnswered}}>✗ {s.wrong} wrong</span>
-                      <span style={{color:nta.text3}}>— {s.unattempted} skipped</span>
-                    </div>
-                    {wrongQs.length>0&&(
-                      <div style={{fontSize:10,color:nta.text3,borderTop:`1px solid ${nta.border}`,paddingTop:8}}>
-                        <div style={{fontWeight:700,marginBottom:4,color:nta.notAnswered}}>Chapters with errors:</div>
-                        {[...new Set(wrongQs.map(q=>q.topic||"General"))].slice(0,3).map(t=>(
-                          <div key={t} style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                            <span>{t}</span>
-                            <span style={{color:nta.notAnswered,fontWeight:700}}>
-                              {wrongQs.filter(q=>(q.topic||"General")===t).length} wrong
-                            </span>
-                          </div>
-                        ))}
-                        {[...new Set(wrongQs.map(q=>q.topic||"General"))].length>3&&(
-                          <div style={{color:nta.text3,marginTop:2}}>+{[...new Set(wrongQs.map(q=>q.topic||"General"))].length-3} more → see Chapter Analysis</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {/* Marks breakdown */}
-            <div style={{background:nta.card,border:`1px solid ${nta.border}`,borderRadius:3,padding:"16px 20px"}}>
-              <div style={{fontWeight:700,fontSize:12,color:nta.text,marginBottom:12,letterSpacing:".04em",textTransform:"uppercase"}}>Marks Breakdown</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,textAlign:"center"}}>
-                {[
-                  {v:`+${overall.correct*4}`,l:"From Correct",c:nta.answered},
-                  {v:`-${questions.filter(q=>qState[q.id]?.answer&&qState[q.id].answer!==q.correct&&q.type==="mcq").length}`,l:"Negative Marks",c:nta.notAnswered},
-                  {v:`${overall.marks}`,l:"Net Score",c:scoreColor},
-                  {v:`${pct}%`,l:"Percentile Est.",c:nta.text2},
-                ].map(s=>(
-                  <div key={s.l} style={{padding:"12px",background:nta.hover,borderRadius:3}}>
-                    <div style={{fontSize:22,fontWeight:800,color:s.c}}>{s.v}</div>
-                    <div style={{fontSize:10,color:nta.text3,marginTop:3}}>{s.l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── TAB: CHAPTER ANALYSIS ── */}
-        {activeTab==="chapters"&&(
-          <div>
-            <div style={{fontSize:12,color:nta.text3,marginBottom:16,fontStyle:"italic"}}>
-              sorted by damage. fix the red ones first.
-            </div>
-            {SECTIONS.map(sec=>{
-              const topics=chapterBreakdown[sec]||[];
-              const hasErrors=topics.some(t=>t.wrong>0);
-              return(
-                <div key={sec} style={{marginBottom:20}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,paddingBottom:8,borderBottom:`2px solid ${SEC_COLOR[sec]}`}}>
-                    <div style={{fontSize:13,fontWeight:700,color:SEC_COLOR[sec]}}>{sec}</div>
-                    <div style={{fontSize:11,color:nta.text3}}>{secScores[sec].marks}/{secScores[sec].total*4} marks · {secScores[sec].wrong} wrong</div>
-                  </div>
-                  {!hasErrors&&(
-                    <div style={{fontSize:12,color:nta.answered,padding:"10px 0",fontStyle:"italic"}}>✓ No wrong answers in {sec}. clean.</div>
-                  )}
-                  {topics.filter(t=>t.wrong>0||t.unattempted>0).map(t=>{
-                    const pctRight=t.total?Math.round((t.correct/t.total)*100):0;
-                    const statusC=t.wrong>0?nta.notAnswered:nta.text3;
-                    return(
-                      <div key={t.topic} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",
-                        marginBottom:5,background:t.wrong>0?`${nta.notAnswered}0a`:nta.card,
-                        border:"1px solid "+(t.wrong>0?nta.notAnswered+"30":nta.border),borderRadius:3}}>
-                        <div style={{width:36,height:36,borderRadius:3,background:t.wrong>0?`${nta.notAnswered}15`:nta.hover,
-                          display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          <span style={{fontSize:14,fontWeight:800,color:statusC}}>{t.wrong||"—"}</span>
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:12.5,fontWeight:600,color:nta.text,marginBottom:3}}>{t.topic}</div>
-                          <div style={{display:"flex",gap:10,fontSize:10.5}}>
-                            <span style={{color:nta.answered}}>✓ {t.correct} correct</span>
-                            {t.wrong>0&&<span style={{color:nta.notAnswered,fontWeight:700}}>✗ {t.wrong} wrong</span>}
-                            {t.unattempted>0&&<span style={{color:nta.text3}}>— {t.unattempted} skipped</span>}
-                          </div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontSize:16,fontWeight:700,color:pctRight>=70?nta.answered:pctRight>=40?nta.scoreMid:nta.notAnswered}}>{pctRight}%</div>
-                          <div style={{fontSize:9,color:nta.text3}}>accuracy</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {topics.filter(t=>t.wrong===0&&t.unattempted===0&&t.correct>0).map(t=>(
-                    <div key={t.topic} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 14px",
-                      marginBottom:3,opacity:.5}}>
-                      <span style={{fontSize:11,color:nta.answered}}>✓</span>
-                      <span style={{fontSize:11.5,color:nta.text2}}>{t.topic}</span>
-                      <span style={{fontSize:10.5,color:nta.answered,marginLeft:"auto"}}>{t.correct}/{t.total} correct</span>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── TAB: ANSWER KEY ── */}
-        {activeTab==="key"&&(
-          <div>
-            {/* Section + filter bar */}
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                {SECTIONS.map(sec=>(
-                  <button key={sec} onClick={()=>setKeySection(sec)}
-                    style={{padding:"6px 14px",borderRadius:3,border:`1px solid ${keySection===sec?SEC_COLOR[sec]:nta.border}`,
-                      background:keySection===sec?`${SEC_COLOR[sec]}15`:"transparent",
-                      color:keySection===sec?SEC_COLOR[sec]:nta.text3,
-                      fontFamily:"Arial",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                    {sec}
-                  </button>
-                ))}
-              </div>
-              <div style={{display:"flex",gap:4,marginLeft:"auto",flexWrap:"wrap"}}>
-                {[["all","All"],["wrong","Wrong Only"],["unattempted","Skipped"]].map(([v,l])=>(
-                  <button key={v} onClick={()=>setKeyFilter(v)}
-                    style={{padding:"5px 12px",borderRadius:3,border:`1px solid ${keyFilter===v?nta.header:nta.border}`,
-                      background:keyFilter===v?`${nta.header}15`:"transparent",
-                      color:keyFilter===v?nta.header:nta.text3,
-                      fontFamily:"Arial",fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {keyQs.length===0&&(
-              <div style={{textAlign:"center",padding:"32px",color:nta.text3,fontStyle:"italic"}}>
-                okay you're actually good. don't let it go to your head. nothing to fix.
-              </div>
-            )}
-            {keyQs.map(q=>{
-              const userAns=qState[q.id]?.answer;
-              const isCorrect=userAns===q.correct;
-              const attempted=userAns!=null;
-              const statusC=!attempted?nta.text3:isCorrect?nta.answered:nta.notAnswered;
-              const statusLabel=!attempted?"skipped":isCorrect?"✓ correct":"✗ wrong";
-              const marksLabel=!attempted?"±0":isCorrect?"+4":q.type==="mcq"?"−1":"±0";
-              return(
-                <div key={q.id}
-                  onClick={()=>setFullscreenQ(q.id)}
-                  style={{marginBottom:6,border:`1px solid ${nta.border}`,borderLeft:`4px solid ${statusC}`,
-                    borderRadius:3,background:nta.card,cursor:"pointer",transition:"all .12s"}}
-                  onMouseEnter={e=>{e.currentTarget.style.background=dark?"rgba(255,255,255,.03)":"rgba(0,0,0,.015)";e.currentTarget.style.borderColor=statusC+"66";}}
-                  onMouseLeave={e=>{e.currentTarget.style.background=nta.card;e.currentTarget.style.borderColor=nta.border;}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px"}}>
-                    <span style={{fontSize:11,fontWeight:700,color:nta.text3,flexShrink:0,width:26,textAlign:"right"}}>Q{q.qno}</span>
-                    <span style={{flex:1,fontSize:12.5,color:nta.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{q.text}</span>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                      {q.topic&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:3,background:`${SEC_COLOR[q.section]}18`,color:SEC_COLOR[q.section],fontWeight:700,whiteSpace:"nowrap"}}>{q.topic}</span>}
-                      <span style={{fontSize:10,fontWeight:700,color:"#fff",background:statusC,padding:"2px 8px",borderRadius:3,whiteSpace:"nowrap"}}>{marksLabel}</span>
-                      <span style={{fontSize:10.5,color:statusC,fontWeight:600,whiteSpace:"nowrap",minWidth:64,textAlign:"right"}}>{statusLabel}</span>
-                      <span style={{fontSize:11,color:nta.text3,opacity:.4}}>↗</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── FULLSCREEN QUESTION MODAL ── */}
-        {(()=>{
-          if(!fullscreenQ)return null;
-          const q=questions.find(x=>x.id===fullscreenQ);
-          if(!q)return null;
-          const userAns=qState[q.id]?.answer;
-          const isCorrect=userAns===q.correct;
-          const attempted=userAns!=null;
-          const currentIdx=keyQs.findIndex(x=>x.id===fullscreenQ);
-          const goPrev=()=>{if(currentIdx>0)setFullscreenQ(keyQs[currentIdx-1].id);};
-          const goNext=()=>{if(currentIdx<keyQs.length-1)setFullscreenQ(keyQs[currentIdx+1].id);};
-          const statusC=!attempted?nta.text3:isCorrect?nta.answered:nta.notAnswered;
-          const bgC=dark?"#0e0d0b":"#f7f4ee";
-          return(
-            <div style={{position:"fixed",inset:0,zIndex:200,background:bgC,display:"flex",flexDirection:"column",overflowY:"auto"}}>
-              {/* ── Sticky header ── */}
-              <div style={{position:"sticky",top:0,zIndex:10,background:bgC,borderBottom:`1px solid ${nta.border}`,
-                display:"flex",alignItems:"center",gap:10,padding:"11px 20px",flexShrink:0,flexWrap:"wrap"}}>
-                <button onClick={()=>setFullscreenQ(null)}
-                  style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 14px",
-                    color:nta.text3,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"Arial",flexShrink:0}}>
-                  ← Back
-                </button>
-                <div style={{flex:1,display:"flex",alignItems:"center",gap:7,overflow:"hidden",flexWrap:"wrap"}}>
-                  <span style={{fontSize:12,fontWeight:700,color:nta.text3,flexShrink:0}}>Q{q.qno}</span>
-                  {q.topic&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:`${SEC_COLOR[q.section]}18`,color:SEC_COLOR[q.section],fontWeight:700,flexShrink:0}}>{q.topic}</span>}
-                  <span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:nta.hover,color:nta.text3,fontWeight:600,flexShrink:0}}>{q.section}</span>
-                  <span style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:nta.hover,color:nta.text3,fontWeight:600,flexShrink:0}}>{q.type==="mcq"?"MCQ":"Integer"}</span>
-                </div>
-                <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-                  <button onClick={goPrev} disabled={currentIdx<=0}
-                    style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 12px",
-                      color:currentIdx<=0?nta.text3+"33":nta.text2,cursor:currentIdx<=0?"default":"pointer",fontSize:12,fontFamily:"Arial",transition:"all .1s"}}>
-                    ← Prev
-                  </button>
-                  <span style={{fontSize:11,color:nta.text3,minWidth:40,textAlign:"center"}}>{currentIdx+1}/{keyQs.length}</span>
-                  <button onClick={goNext} disabled={currentIdx>=keyQs.length-1}
-                    style={{background:"transparent",border:`1px solid ${nta.border}`,borderRadius:3,padding:"6px 12px",
-                      color:currentIdx>=keyQs.length-1?nta.text3+"33":nta.text2,cursor:currentIdx>=keyQs.length-1?"default":"pointer",fontSize:12,fontFamily:"Arial",transition:"all .1s"}}>
-                    Next →
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Body ── */}
-              <div style={{maxWidth:760,width:"100%",margin:"0 auto",padding:"32px 20px 80px",flex:1,boxSizing:"border-box"}}>
-
-                {/* Status banner */}
-                <div style={{padding:"12px 18px",borderRadius:4,marginBottom:28,
-                  background:!attempted?`${nta.text3}0e`:isCorrect?`${nta.answered}12`:`${nta.notAnswered}12`,
-                  border:`1.5px solid ${!attempted?nta.text3+"30":isCorrect?nta.answered+"60":nta.notAnswered+"60"}`,
-                  display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                  <span style={{fontSize:22,lineHeight:1}}>{!attempted?"—":isCorrect?"✓":"✗"}</span>
-                  <span style={{fontSize:13,fontWeight:700,color:statusC,flex:1}}>
-                    {!attempted?"skipped."
-                      :isCorrect?"correct."
-                      :"wrong."+(q.type==="mcq"?" −1 mark.":" no penalty.")}
-                  </span>
-                  {attempted&&!isCorrect&&(
-                    <div style={{display:"flex",gap:16,fontSize:12,flexShrink:0}}>
-                      <span style={{color:nta.text3}}>you marked: <strong style={{color:nta.notAnswered}}>{userAns}</strong></span>
-                      <span style={{color:nta.text3}}>correct: <strong style={{color:nta.answered}}>{q.correct}</strong></span>
-                    </div>
-                  )}
-                  {!attempted&&q.correct&&(
-                    <span style={{fontSize:12,color:nta.text3,flexShrink:0}}>answer: <strong style={{color:nta.answered}}>{q.correct}</strong></span>
-                  )}
-                </div>
-
-                {/* Question text */}
-                <div style={{fontSize:16,color:nta.text,lineHeight:2.1,fontWeight:400,marginBottom:28,letterSpacing:"-.01em",fontFamily:"serif"}}>
-                  <MathText t={q.text}/>
-                </div>
-
-                {/* MCQ options */}
-                {q.type==="mcq"&&q.options&&(
-                  <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:36}}>
-                    {Object.entries(q.options).map(([key,val])=>{
-                      const isCorrectOpt=key===q.correct;
-                      const isUserOpt=key===userAns;
-                      let bdr=`1.5px solid ${nta.border}`,optBg="transparent",textC=nta.text2,keyBg="transparent",keyC=nta.text3;
-                      if(isCorrectOpt){bdr=`1.5px solid ${nta.answered}`;optBg=`${nta.answered}10`;textC=nta.answered;keyBg=nta.answered;keyC="#fff";}
-                      if(isUserOpt&&!isCorrectOpt){bdr=`1.5px solid ${nta.notAnswered}`;optBg=`${nta.notAnswered}10`;textC=nta.notAnswered;keyBg=nta.notAnswered;keyC="#fff";}
-                      return(
-                        <div key={key} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"14px 16px",borderRadius:4,border:bdr,background:optBg,transition:"none"}}>
-                          <div style={{width:32,height:32,borderRadius:4,background:keyBg,
-                            border:`1.5px solid ${isCorrectOpt?nta.answered:isUserOpt&&!isCorrectOpt?nta.notAnswered:nta.border}`,
-                            display:"flex",alignItems:"center",justifyContent:"center",
-                            fontSize:13,fontWeight:700,color:keyC,flexShrink:0,marginTop:2}}>{key}</div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:14,color:textC,lineHeight:1.8,fontFamily:"serif"}}><MathText t={val}/></div>
-                            {isCorrectOpt&&<div style={{fontSize:10,color:nta.answered,fontWeight:700,marginTop:5,letterSpacing:".05em",textTransform:"uppercase"}}>correct answer</div>}
-                            {isUserOpt&&!isCorrectOpt&&<div style={{fontSize:10,color:nta.notAnswered,fontWeight:700,marginTop:5,letterSpacing:".05em",textTransform:"uppercase"}}>your answer</div>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Integer answer */}
-                {q.type==="numerical"&&(
-                  <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:36}}>
-                    <div style={{padding:"14px 24px",borderRadius:4,border:`1.5px solid ${nta.answered}`,background:`${nta.answered}10`,minWidth:120}}>
-                      <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:nta.text3,marginBottom:6}}>Correct</div>
-                      <div style={{fontSize:24,fontWeight:700,color:nta.answered,fontVariantNumeric:"tabular-nums"}}>{q.correct}</div>
-                    </div>
-                    {attempted&&!isCorrect&&(
-                      <div style={{padding:"14px 24px",borderRadius:4,border:`1.5px solid ${nta.notAnswered}`,background:`${nta.notAnswered}10`,minWidth:120}}>
-                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:nta.text3,marginBottom:6}}>You Entered</div>
-                        <div style={{fontSize:24,fontWeight:700,color:nta.notAnswered,fontVariantNumeric:"tabular-nums"}}>{userAns}</div>
-                      </div>
-                    )}
-                    {!attempted&&<div style={{fontSize:13,color:nta.text3,fontStyle:"italic",alignSelf:"center"}}>you didn't attempt this.</div>}
-                  </div>
-                )}
-
-                {/* Divider */}
-                <div style={{height:1,background:nta.border,marginBottom:28}}/>
-
-                {/* Solution block */}
-                <div>
-                  <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:nta.text3,marginBottom:16}}>Solution</div>
-                  {q.solution?(
-                    <div style={{fontSize:14,color:nta.text2,lineHeight:2.1,whiteSpace:"pre-wrap",
-                      background:nta.hover,padding:"22px 24px",borderRadius:4,
-                      borderLeft:`4px solid ${nta.header}`}}>
-                      {q.solution.split("\n").map((line,i)=><div key={i}><MathText t={line}/></div>)}
-                    </div>
-                  ):(
-                    <div style={{padding:"24px",borderRadius:4,border:`1px dashed ${nta.border}`,textAlign:"center",background:nta.hover}}>
-                      <div style={{fontSize:24,marginBottom:10,opacity:.4}}>📝</div>
-                      <div style={{fontSize:13,color:nta.text3,marginBottom:4}}>no solution yet.</div>
-                      <div style={{fontSize:11,color:nta.text3,opacity:.6}}>add it in the admin panel.</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-    </div>
-  );
-}
-
-function NTAMode({user,dark,onExit,onTestComplete,completedTests,onStoreTest}){
-  const nta=getNTA(dark);
-  const [screen,setScreen]=useState("list");
-  const [selectedPaper,setSelectedPaper]=useState(null);
-  const [finalQState,setFinalQState]=useState(null);
-  const [questions,setQuestions]=useState([]);
-  const [qLoading,setQLoading]=useState(false);
-  const [qError,setQError]=useState(null);
-
-  async function fetchQuestions(paperId){
-    setQLoading(true); setQError(null); setQuestions([]);
-    try {
-      // paperId e.g. "adv-2024-p1" — matches slug prefix in Supabase
-      // We derive year + paper from the id
-      const parts = paperId.split("-"); // ["adv","2024","p1"]
-      const year  = parseInt(parts[1]);
-      const paper = parts[2].toUpperCase(); // "P1" or "P2"
-      const shift = paper==="P1"?"Morning":"Evening";
-
-      const params = [
-        "select=*",
-        `year=eq.${year}`,
-        `shift=eq.${shift}`,
-        "exam=eq.JEE%20Advanced",
-        "is_active=eq.true",
-        "is_verified=eq.true",
-        "order=qno.asc",
-      ].join("&");
-      const r = await fetch(`${SB_URL}/rest/v1/questions?${params}`, {
-        headers:{"apikey":SB_ANON,"Authorization":"Bearer "+SB_ANON}
-      });
-      if(!r.ok) throw new Error(await r.text());
-      const raw = await r.json();
-
-      // Map Supabase columns → NTA question shape
-      const mapped = raw.map(q=>({
-        id:       q.id,
-        section:  q.subject,           // Physics / Chemistry / Mathematics
-        qno:      q.qno || 1,
-        type:     q.question_type==="SCQ"?"mcq":
-                  q.question_type==="MSQ"?"msq":
-                  q.question_type==="Integer"||q.question_type==="Decimal"?"numerical":"mcq",
-        text:     q.question_text,
-        options:  q.option_a?{A:q.option_a,B:q.option_b,C:q.option_c,D:q.option_d}:null,
-        correct:  q.correct,
-        solution: q.solution,
-        topic:    q.topic,
-        difficulty: q.difficulty,
-        diagram_url: q.diagram_url||null,
-        answer_type: q.answer_type||"text",
-        partial_marks: q.partial_marks||null,
-      }));
-
-      if(mapped.length===0) setQError("No questions found for this paper yet. Add them in the admin panel.");
-      else setQuestions(mapped);
-    } catch(e){ setQError("Failed to load questions: "+e.message); }
-    setQLoading(false);
-  }
-
-  function handleStart(p){
-    setSelectedPaper(p);
-    fetchQuestions(p.id);
-    setScreen("instructions");
-  }
-  function handleBegin(){setScreen("exam");}
-  function handleSubmit(qs){
-    setFinalQState(qs);
-    setScreen("result");
-    // Store completed test for later review
-    if(onStoreTest && selectedPaper){
-      onStoreTest(selectedPaper.id, {qState:qs, questions, date:new Date().toISOString().slice(0,10)});
-    }
-    // ── Calculate result and bubble up to App ──────────────────────────────
-    if(onTestComplete && selectedPaper){
-      const secScores={};
-      let totalCorrect=0, totalWrong=0;
-      ["Physics","Chemistry","Mathematics"].forEach(sec=>{
-        const secQs=questions.filter(q=>q.section===sec);
-        let correct=0,wrong=0,marks=0;
-        secQs.forEach(q=>{
-          const ans=qs[q.id]?.answer;
-          if(!ans){}
-          else if(ans===q.correct){correct++;marks+=4;totalCorrect++;}
-          else{wrong++;totalWrong++;if(q.type==="mcq")marks-=1;}
-        });
-        secScores[sec]={correct,wrong,marks,outOf:secQs.length*4};
-      });
-      // Score out of 100 per section (for coach analysis compat)
-      const toHundred=(sec)=>Math.max(0,Math.round((secScores[sec].marks/Math.max(1,secScores[sec].outOf))*100));
-      onTestComplete({
-        paper: selectedPaper,
-        qState: qs,
-        questions,
-        secScores,
-        // mock-compatible shape for coach
-        mockEntry:{
-          id: Date.now(),
-          date: new Date().toISOString().slice(0,10),
-          name: `${selectedPaper.exam} — ${selectedPaper.session} (${selectedPaper.shift.split(" ")[0]})`,
-          physics: toHundred("Physics"),
-          chemistry: toHundred("Chemistry"),
-          math: toHundred("Mathematics"),
-          source: "slothr_practice",
-        },
-        // pyqHistory entries — one per answered question
-        pyqEntries: questions
-          .filter(q=>qs[q.id]?.answer!=null)
-          .map(q=>({
-            qid: q.id,
-            subject: q.section,
-            topic: q.topic||"General",
-            correct: qs[q.id].answer===q.correct,
-            date: new Date().toISOString().slice(0,10),
-            source: "nta_sim",
-          })),
-      });
-    }
-  }
-  function handleRetry(){setFinalQState(null);setScreen("instructions");}
-  function handleBack(){setSelectedPaper(null);setFinalQState(null);setScreen("list");}
-
-  if(screen==="list")         return <PaperList onStart={handleStart} onExit={onExit} nta={nta} completedTests={completedTests} onReview={(paper,result)=>{setSelectedPaper(paper);setFinalQState(result.qState);if(result.questions?.length)setQuestions(result.questions);setScreen("result");}}/>;
-  if(screen==="instructions"){
-    if(qLoading) return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:nta.bg}}>
-        <div style={{fontSize:22,animation:"pulse 1.2s infinite",color:nta.text1}}>loading questions...</div>
-        <div style={{fontSize:12,color:nta.text3}}>fetching from database</div>
-      </div>
-    );
-    if(qError) return(
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:nta.bg,padding:32,textAlign:"center"}}>
-        <div style={{fontSize:32}}>😶</div>
-        <div style={{fontSize:15,color:nta.text1,fontWeight:600}}>couldn't load questions</div>
-        <div style={{fontSize:13,color:nta.text3,maxWidth:400}}>{qError}</div>
-        <button onClick={()=>{fetchQuestions(selectedPaper.id);}} style={{padding:"10px 24px",background:nta.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,cursor:"pointer",marginTop:8}}>retry</button>
-        <button onClick={handleBack} style={{padding:"8px 20px",background:"transparent",color:nta.text3,border:`1px solid ${nta.border}`,borderRadius:8,fontSize:13,cursor:"pointer"}}>← back</button>
-      </div>
-    );
-    return <InstructionsScreen paper={selectedPaper} user={user} onBegin={handleBegin} onBack={handleBack} nta={nta}/>;
-  }
-  if(screen==="exam")         return <ExamInterface paper={selectedPaper} user={user} questions={questions} onSubmit={handleSubmit} onExit={handleBack} nta={nta}/>;
-  if(screen==="result")       return <ResultScreen paper={selectedPaper} user={user} questions={questions} qState={finalQState} onRetry={handleRetry} onBack={handleBack} nta={nta} dark={dark}/>;
-  return null;
-}
-
-
-
-
-
-
-
-// ── HomeGate — handles username setup then routes to the right social view ───
-function HomeGate({ user, d, dark, SB_URL, SB_ANON, sessions, streak, fmt, today, view }) {
-  const [myHandle, setMyHandle] = useState(null);
-  const [checked, setChecked] = useState(false);
-  const [profileView, setProfileView] = useState(null); // uid being viewed
-
-  useEffect(() => {
-    if (!user?.id) return;
-    sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${user.id}&select=handle`)
-      .then(r => r.ok ? r.json() : [])
-      .then(rows => { setMyHandle(rows[0]?.handle || null); setChecked(true); });
-  }, [user?.id]);
-
-  function openProfile(uid) { setProfileView(uid); }
-  function closeProfile()  { setProfileView(null); }
-
-  if (!checked) return <div style={{ padding:40, textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>;
-  if (!myHandle) return <UsernameSetupModal user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} onDone={h => setMyHandle(h)} />;
-
-  // Profile overlay takes over any view
-  if (profileView) return (
-    <div style={{ maxWidth:680, margin:"0 auto" }}>
-      <ProfileView user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-        viewingUid={profileView}
-        isOwn={profileView === user?.id}
-        onOpenProfile={openProfile}
-        sessions={sessions}
-        onBack={closeProfile}
-      />
-    </div>
-  );
-
-  const props = { user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHandle, onOpenProfile: openProfile };
-
-  return (
-    <div style={{ maxWidth:680, margin:"0 auto" }}>
-      {view === "home"        && <HomeView        {...props} />}
-      {view === "friends"     && <FriendsView     {...props} />}
-      {view === "leaderboard" && <LeaderboardView {...props} />}
-      {view === "events"      && <EventsView      {...props} myHandle={myHandle} />}
-    </div>
-  );
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SOCIAL — Instagram-style: Home · Friends · Leaderboard · Events · Search · Me
+// SOCIAL — Home · Network · Rankings · Events · Search · Profile
+// Premium CFA candidate social layer
 // ─────────────────────────────────────────────────────────────────────────────
 
 function sbFetch(SB_URL, SB_ANON, path, opts = {}) {
+  const token = opts.token || SB_ANON;
+  const { token: _t, prefer, ...rest } = opts;
   return fetch(`${SB_URL}/rest/v1/${path}`, {
-    ...opts,
+    ...rest,
     headers: {
       apikey: SB_ANON,
-      Authorization: `Bearer ${SB_ANON}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      Prefer: opts.prefer || "",
+      Prefer: prefer || "",
       ...(opts.headers || {}),
     },
   });
 }
 
-// ── tiny helpers ──────────────────────────────────────────────────────────────
-const AV_PALETTE = ["#e8845c","#5eaa8a","#7b8ec8","#c47d96","#8a9e5c","#b08ec2","#c29d5a","#6ba8c4"];
-const SUB_C = { Physics:"#e8845c", Chemistry:"#5eaa8a", Mathematics:"#7b8ec8" };
-const SUB_EMOJI = { Physics:"⚡", Chemistry:"🧪", Mathematics:"📐" };
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const AV_PALETTE = ["#c9a84c","#4a8fc4","#7b6fb5","#4aab8a","#c97a4a","#5a9fb5","#8f7ab5","#b54a6a"];
 function avColor(str) {
   if (!str) return AV_PALETTE[0];
   let h = 0;
   for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
   return AV_PALETTE[Math.abs(h) % AV_PALETTE.length];
 }
-function initials(name) {
+function sInitials(name) {
   if (!name) return "?";
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
-function ago(iso) {
+function sAgo(iso) {
   const d = Date.now() - new Date(iso).getTime();
   const m = Math.floor(d / 60000);
   if (m < 1) return "now";
@@ -1709,26 +291,27 @@ function ago(iso) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
   const day = Math.floor(h / 24);
-  if (day < 7) return `${day}d`;
-  return new Date(iso).toLocaleDateString("en-IN", { day:"numeric", month:"short" });
+  return day < 7 ? `${day}d` : new Date(iso).toLocaleDateString("en-GB", { day:"numeric", month:"short" });
 }
-function fmtS(s) {
+function sFmtS(s) {
   if (!s || s <= 0) return "0m";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h > 0 ? `${h}h ${m > 0 ? m + "m" : ""}`.trim() : `${m}m`;
 }
+const CFA_TOPICS_LIST = Object.keys(SUBJECT_COLORS);
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
-function Av({ name, url, size = 36, d, onClick, ring = false, ringColor }) {
+function SAv({ name, url, size = 36, d, onClick, ring = false }) {
   const bg = avColor(name);
   const base = {
-    width: size, height: size, borderRadius: "50%",
-    background: bg, color: "#fff", flexShrink: 0, overflow: "hidden",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: Math.round(size * 0.38), fontWeight: 700,
-    ...(ring ? { outline: `2.5px solid ${ringColor || bg}`, outlineOffset: 2 } : {}),
+    width: size, height: size, borderRadius: "50%", background: bg, color: "#fff",
+    flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center",
+    justifyContent: "center", fontSize: Math.round(size * 0.38), fontWeight: 700,
+    ...(ring ? { outline: `2.5px solid ${bg}`, outlineOffset: 2 } : {}),
   };
-  const img = url ? <img src={url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} /> : initials(name);
+  const img = url
+    ? <img src={url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+    : sInitials(name);
   if (onClick) return (
     <button onClick={onClick} style={{ background:"none", border:"none", padding:0, cursor:"pointer", flexShrink:0, borderRadius:"50%", display:"inline-flex" }}>
       <div style={base}>{img}</div>
@@ -1737,10 +320,10 @@ function Av({ name, url, size = 36, d, onClick, ring = false, ringColor }) {
   return <div style={base}>{img}</div>;
 }
 
-// ── Username Setup ────────────────────────────────────────────────────────────
-function UsernameSetupModal({ user, d, SB_URL, SB_ANON, onDone }) {
+// ── Username setup modal ──────────────────────────────────────────────────────
+function UsernameSetupModal({ user, d, SB_URL, SB_ANON, accessToken, onDone }) {
   const [handle, setHandle] = useState("");
-  const [state, setState] = useState("idle"); // idle | checking | taken | ok
+  const [state, setState] = useState("idle");
   const debounceRef = useRef(null);
 
   function onType(v) {
@@ -1760,7 +343,7 @@ function UsernameSetupModal({ user, d, SB_URL, SB_ANON, onDone }) {
   async function save() {
     if (state !== "ok") return;
     await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method: "POST", prefer: "resolution=merge-duplicates,return=minimal",
+      method: "POST", prefer: "resolution=merge-duplicates,return=minimal", token: accessToken,
       body: JSON.stringify({ id: user.id, display_name: user.name, handle, avatar_url: user.avatar || null }),
     });
     onDone(handle);
@@ -1769,48 +352,252 @@ function UsernameSetupModal({ user, d, SB_URL, SB_ANON, onDone }) {
   const borderC = state === "ok" ? d.a2 : state === "taken" ? d.danger : d.b;
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:999, background:"rgba(0,0,0,.75)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"32px 28px", width:"100%", maxWidth:380, textAlign:"center" }}>
-        <div style={{ fontSize:36, marginBottom:12 }}>🦥</div>
-        <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:24, color:d.t, marginBottom:6 }}>pick your @handle.</div>
-        <div style={{ fontSize:12.5, color:d.t3, marginBottom:24, lineHeight:1.6 }}>this is how people find you. make it yours.</div>
-        <div style={{ position:"relative", marginBottom:12 }}>
+    <div style={{ position:"fixed", inset:0, zIndex:999, background:"rgba(0,0,0,.8)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:10, padding:"36px 30px", width:"100%", maxWidth:380, textAlign:"center" }}>
+        <div style={{ fontSize:13, fontWeight:700, letterSpacing:".18em", textTransform:"uppercase", color:d.a1, marginBottom:20 }}>CharterRun</div>
+        <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:24, color:d.t, marginBottom:8 }}>pick your @handle.</div>
+        <div style={{ fontSize:13, color:d.t3, marginBottom:28, lineHeight:1.65 }}>this is how fellow candidates find you. choose wisely.</div>
+        <div style={{ position:"relative", marginBottom:10 }}>
           <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", color:d.t3, fontSize:14, pointerEvents:"none" }}>@</span>
-          <input value={handle} onChange={e => onType(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && save()}
+          <input value={handle} onChange={e => onType(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
             placeholder="your_handle" maxLength={24}
-            style={{
-              width:"100%", boxSizing:"border-box", padding:"11px 14px 11px 30px",
-              border:`1.5px solid ${borderC}`, borderRadius:5,
-              background:d.inp, color:d.t, fontFamily:"inherit", fontSize:14, outline:"none",
-              transition:"border-color .15s",
-            }} />
+            style={{ width:"100%", boxSizing:"border-box", padding:"11px 14px 11px 32px", border:`1.5px solid ${borderC}`, borderRadius:5, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:14, outline:"none", transition:"border-color .15s" }} />
           {state === "checking" && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:11, color:d.t3 }}>…</span>}
-          {state === "ok" && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:15, color:d.a2 }}>✓</span>}
-          {state === "taken" && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:11, color:d.danger }}>taken</span>}
+          {state === "ok"       && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:15, color:d.a2 }}>✓</span>}
+          {state === "taken"    && <span style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:11, color:d.danger }}>taken</span>}
         </div>
-        <div style={{ fontSize:10.5, color:d.t4, marginBottom:20 }}>3–24 chars · letters, numbers, _ and . only</div>
+        <div style={{ fontSize:10.5, color:d.t4, marginBottom:22 }}>3–24 chars · letters, numbers, _ and . only</div>
         <button onClick={save} disabled={state !== "ok"}
-          style={{
-            width:"100%", padding:"12px", borderRadius:5, border:"none",
-            background: state === "ok" ? d.a1 : d.b,
-            color: state === "ok" ? "#fff" : d.t4,
-            fontFamily:"inherit", fontSize:13, fontWeight:700,
-            cursor: state === "ok" ? "pointer" : "not-allowed",
-            transition:"all .15s",
-          }}>
-          lock it in →
+          style={{ width:"100%", padding:"12px", borderRadius:5, border:"none", background:state==="ok"?d.a1:d.b, color:state==="ok"?"#fff":d.t4, fontFamily:"inherit", fontSize:13, fontWeight:700, cursor:state==="ok"?"pointer":"not-allowed", transition:"all .15s", letterSpacing:".03em" }}>
+          confirm handle →
         </button>
       </div>
     </div>
   );
 }
 
+// ── HomeGate — username check + routes to correct social view ─────────────────
+function HomeGate({ user, d, dark, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, view }) {
+  const [myHandle, setMyHandle] = useState(null);
+  const [checked, setChecked] = useState(false);
+  const [profileUid, setProfileUid] = useState(null);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HOME — global feed + always-visible compose bar + story row
-// ─────────────────────────────────────────────────────────────────────────────
-function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHandle, onOpenProfile }) {
+  useEffect(() => {
+    if (!user?.id) return;
+    sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${user.id}&select=handle`)
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => { setMyHandle(rows[0]?.handle || null); setChecked(true); });
+  }, [user?.id]);
+
+  function openProfile(uid) { setProfileUid(uid); }
+  function closeProfile() { setProfileUid(null); }
+
+  if (!checked) return <div style={{ padding:40, textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div>;
+  if (!myHandle) return <UsernameSetupModal user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onDone={h => setMyHandle(h)} />;
+
+  const props = { user, d, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, myHandle, onOpenProfile: openProfile };
+
+  if (profileUid) return (
+    <div style={{ maxWidth:680, margin:"0 auto" }}>
+      <SProfileView {...props} viewingUid={profileUid} isOwn={profileUid === user?.id} onBack={closeProfile} />
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth:680, margin:"0 auto" }}>
+      {view === "home"        && <SHomeView        {...props} />}
+      {view === "friends"     && <SFriendsView     {...props} />}
+      {view === "leaderboard" && <SLeaderboardView {...props} />}
+      {view === "events"      && <SEventsView      {...props} />}
+    </div>
+  );
+}
+
+// ── Post Card ─────────────────────────────────────────────────────────────────
+function SPostCard({ post, user, d, onKudos, onOpenProfile, onRefresh, SB_URL, SB_ANON, accessToken }) {
+  const profile = post.profiles || {};
+  const sc = SUBJECT_COLORS[post.subject] || d.a1;
+  const isOwn = post.user_id === user?.id;
+  const [showMenu, setShowMenu] = useState(false);
+
+  async function deletePost() {
+    await sbFetch(SB_URL, SB_ANON, `social_posts?id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
+    onRefresh?.();
+  }
+
+  return (
+    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, overflow:"hidden" }}>
+      {/* Gold accent bar for high-weight topics */}
+      {CFA_WEIGHTAGE[post.subject] === "H" && (
+        <div style={{ height:2, background:`linear-gradient(90deg,${sc},${sc}30)` }} />
+      )}
+      {/* Header */}
+      <div style={{ padding:"13px 15px 10px", display:"flex", alignItems:"center", gap:10 }}>
+        <SAv name={profile.display_name} url={profile.avatar_url} size={36} d={d} onClick={() => onOpenProfile(post.user_id)} />
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
+            <button onClick={() => onOpenProfile(post.user_id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, color:d.t, padding:0 }}>
+              {profile.display_name || "Candidate"}
+            </button>
+            {profile.handle && <span style={{ fontSize:10.5, color:d.t4 }}>@{profile.handle}</span>}
+            <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${sc}18`, color:sc, letterSpacing:".02em" }}>
+              {SUB_EMOJI[post.subject] || "📚"} {post.subject}
+            </span>
+          </div>
+          <div style={{ fontSize:10.5, color:d.t4, marginTop:1 }}>{sAgo(post.created_at)}</div>
+        </div>
+        {isOwn && (
+          <div style={{ position:"relative" }}>
+            <button onClick={() => setShowMenu(v => !v)} style={{ background:"none", border:"none", color:d.t4, cursor:"pointer", fontSize:18, padding:"2px 6px" }}>⋯</button>
+            {showMenu && (
+              <div style={{ position:"absolute", right:0, top:"100%", zIndex:20, background:d.card, border:`1px solid ${d.b}`, borderRadius:6, padding:4, boxShadow:"0 8px 30px rgba(0,0,0,.25)", minWidth:110 }}>
+                <button onClick={deletePost} style={{ display:"block", width:"100%", padding:"8px 12px", background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:12, color:d.danger, textAlign:"left" }}>delete post</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {/* Content */}
+      <div style={{ padding:"0 15px 12px" }}>
+        <div style={{ fontSize:14, fontWeight:600, color:d.t, marginBottom:post.notes ? 6 : 10, lineHeight:1.4 }}>{post.title}</div>
+        {post.notes && <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{post.notes}</div>}
+        <div style={{ display:"flex", gap:6 }}>
+          {[
+            { label:"Duration", val:sFmtS(post.duration_seconds) },
+            { label:"Questions", val:post.problems_solved ?? "—" },
+            { label:"Accuracy",  val:post.accuracy_pct != null ? `${post.accuracy_pct}%` : "—" },
+          ].map(s => (
+            <div key={s.label} style={{ flex:1, textAlign:"center", background:d.hover, borderRadius:4, padding:"7px 4px", border:`1px solid ${d.b}` }}>
+              <div style={{ fontSize:14, fontWeight:700, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
+              <div style={{ fontSize:9, color:d.t4, textTransform:"uppercase", letterSpacing:".07em", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Actions */}
+      <div style={{ padding:"9px 15px", borderTop:`1px solid ${d.b}`, display:"flex", alignItems:"center", gap:4, background:d.hover }}>
+        <button onClick={onKudos} disabled={isOwn} style={{
+          display:"flex", alignItems:"center", gap:5, padding:"5px 9px", border:"none",
+          background: post.kudos_given ? `${d.danger}12` : "transparent", borderRadius:4,
+          fontFamily:"inherit", fontSize:12, color:post.kudos_given ? d.danger : d.t3,
+          cursor:isOwn ? "default" : "pointer", opacity:isOwn ? .4 : 1, transition:"all .12s",
+        }}>
+          <span style={{ fontSize:15, lineHeight:1 }}>{post.kudos_given ? "♥" : "♡"}</span>
+          {post.kudos_count} {post.kudos_count === 1 ? "kudo" : "kudos"}
+        </button>
+        <span style={{ marginLeft:"auto", fontSize:10.5, color:d.t4 }}>{sAgo(post.created_at)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Post Composer ─────────────────────────────────────────────────────────────
+function SPostComposer({ user, d, SB_URL, SB_ANON, accessToken, onPosted }) {
+  const [form, setForm] = useState({ title:"", subject:CFA_TOPICS_LIST[0], dur:"", problems:"", accuracy:"", notes:"" });
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!form.title.trim() || !user?.id) return;
+    setSaving(true);
+    await sbFetch(SB_URL, SB_ANON, "profiles", {
+      method:"POST", prefer:"resolution=merge-duplicates,return=minimal", token:accessToken,
+      body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
+    });
+    await sbFetch(SB_URL, SB_ANON, "social_posts", {
+      method:"POST", prefer:"return=minimal", token:accessToken,
+      body: JSON.stringify({
+        user_id:user.id, title:form.title.trim(), subject:form.subject,
+        duration_seconds: form.dur ? parseInt(form.dur)*60 : null,
+        problems_solved: form.problems ? parseInt(form.problems) : null,
+        accuracy_pct: form.accuracy ? parseInt(form.accuracy) : null,
+        notes: form.notes.trim() || null,
+      }),
+    });
+    setSaving(false);
+    onPosted();
+  }
+
+  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:4, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+
+  return (
+    <div>
+      <input style={{ ...inp, marginBottom:8 }} placeholder="what did you study? e.g. Fixed Income — duration and convexity"
+        value={form.title} onChange={e => setForm(f => ({ ...f, title:e.target.value }))} />
+      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:7, marginBottom:8 }}>
+        <select style={{ ...inp, cursor:"pointer" }} value={form.subject} onChange={e => setForm(f => ({ ...f, subject:e.target.value }))}>
+          {CFA_TOPICS_LIST.map(t => <option key={t}>{t}</option>)}
+        </select>
+        <input style={inp} type="number" min="1" placeholder="Mins" value={form.dur} onChange={e => setForm(f => ({ ...f, dur:e.target.value }))} />
+        <input style={inp} type="number" min="0" placeholder="Questions" value={form.problems} onChange={e => setForm(f => ({ ...f, problems:e.target.value }))} />
+        <input style={inp} type="number" min="0" max="100" placeholder="Acc %" value={form.accuracy} onChange={e => setForm(f => ({ ...f, accuracy:e.target.value }))} />
+      </div>
+      <textarea style={{ ...inp, resize:"vertical", minHeight:52, marginBottom:10 }}
+        placeholder="any insights? what clicked, what didn't?"
+        value={form.notes} onChange={e => setForm(f => ({ ...f, notes:e.target.value }))} />
+      <div style={{ display:"flex", justifyContent:"flex-end" }}>
+        <button className="btn btn-d" onClick={submit} disabled={saving || !form.title.trim()}
+          style={{ fontSize:12, opacity:saving || !form.title.trim() ? .4 : 1, letterSpacing:".03em" }}>
+          {saving ? "posting…" : "post session →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Skeleton loaders ──────────────────────────────────────────────────────────
+function SSkeletonFeed({ d }) {
+  return (
+    <div>
+      {[1,2,3].map(i => (
+        <div key={i} style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, padding:"14px 15px" }}>
+          <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+            <div style={{ width:36, height:36, borderRadius:"50%", background:d.b, flexShrink:0 }}/>
+            <div style={{ flex:1 }}>
+              <div className="shim" style={{ height:10, width:"45%", marginBottom:6 }}/>
+              <div className="shim" style={{ height:8, width:"28%" }}/>
+            </div>
+          </div>
+          <div className="shim" style={{ height:12, width:"70%", marginBottom:10 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+            {[1,2,3].map(j => <div key={j} className="shim" style={{ height:42 }}/>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SEmptySlate({ d, icon, title, sub }) {
+  return (
+    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, textAlign:"center", padding:"48px 24px" }}>
+      <div style={{ fontSize:32, marginBottom:12 }}>{icon}</div>
+      <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:18, color:d.t, marginBottom:6 }}>{title}</div>
+      <div style={{ fontSize:13, color:d.t3, lineHeight:1.65 }}>{sub}</div>
+    </div>
+  );
+}
+
+function SSuggestRow({ s, d, isFollowing, onFollow, onOpenProfile }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+      <SAv name={s.display_name} url={s.avatar_url} size={32} d={d} onClick={() => onOpenProfile(s.id)} />
+      <div style={{ flex:1, minWidth:0 }}>
+        <button onClick={() => onOpenProfile(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:600, color:d.t, padding:0, textAlign:"left", display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"100%" }}>
+          {s.display_name}
+        </button>
+        <div style={{ fontSize:10.5, color:d.t3 }}>{s.handle ? `@${s.handle}` : ""}{s.target_college ? ` · ${s.target_college}` : ""}</div>
+      </div>
+      {!isFollowing && (
+        <button onClick={onFollow} style={{ fontSize:10, fontWeight:700, padding:"4px 10px", borderRadius:3, background:`${d.a1}15`, color:d.a1, border:`1px solid ${d.a1}30`, cursor:"pointer", fontFamily:"inherit", flexShrink:0, letterSpacing:".03em" }}>
+          follow
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Home View — global feed ────────────────────────────────────────────────────
+function SHomeView({ user, d, SB_URL, SB_ANON, accessToken, sessions, streak, fmt, today, myHandle, onOpenProfile }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCompose, setShowCompose] = useState(false);
@@ -1830,16 +617,15 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
       kudos_count: (p.social_kudos || []).length,
       kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
     })));
-
-    const now = new Date(); now.setHours(0,0,0,0);
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const tr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?select=user_id,duration_seconds,profiles:user_id(id,display_name,handle,avatar_url)&created_at=gte.${now.toISOString()}&limit=100`
+      `social_posts?select=user_id,duration_seconds,profiles:user_id(id,display_name,avatar_url)&created_at=gte.${todayStart.toISOString()}&limit=100`
     );
     const td = tr.ok ? await tr.json() : [];
     const map = {};
     td.forEach(p => {
       if (!p.profiles) return;
-      if (!map[p.user_id]) map[p.user_id] = { profile: p.profiles, secs: 0 };
+      if (!map[p.user_id]) map[p.user_id] = { profile:p.profiles, secs:0 };
       map[p.user_id].secs += p.duration_seconds || 0;
     });
     setTopStudiers(Object.values(map).sort((a,b) => b.secs - a.secs).slice(0, 10));
@@ -1849,71 +635,50 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
   async function toggleKudos(post) {
     if (!user?.id || post.user_id === user.id) return;
     if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE" });
+      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
     } else {
-      await sbFetch(SB_URL, SB_ANON, "social_kudos", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({ post_id: post.id, user_id: user.id }),
-      });
+      await sbFetch(SB_URL, SB_ANON, "social_kudos", { method:"POST", prefer:"return=minimal", token:accessToken, body: JSON.stringify({ post_id:post.id, user_id:user.id }) });
     }
-    setPosts(prev => prev.map(p => p.id === post.id ? {
-      ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
-    } : p));
+    setPosts(prev => prev.map(p => p.id === post.id ? { ...p, kudos_given:!p.kudos_given, kudos_count:p.kudos_count+(p.kudos_given?-1:1) } : p));
   }
 
   return (
     <div>
-      {/* ── Always-visible compose bar ── */}
-      <div className="card" style={{ marginBottom: 12, overflow:"hidden" }}>
+      {/* Compose bar — always visible */}
+      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:12, overflow:"hidden" }}>
         <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:10 }}>
-          <Av name={user?.name} url={user?.avatar} size={34} d={d} />
-          <button
-            onClick={() => setShowCompose(v => !v)}
-            style={{
-              flex:1, padding:"9px 14px", background:d.hover,
-              border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
-              borderRadius:4, color: showCompose ? d.t : d.t3,
-              fontSize:13, fontFamily:"inherit", cursor:"pointer",
-              textAlign:"left", transition:"all .15s",
-            }}
-          >
-            {showCompose ? "▲ never mind" : `what did you just study, @${myHandle}?`}
+          <SAv name={user?.name} url={user?.avatar} size={34} d={d} />
+          <button onClick={() => setShowCompose(v => !v)} style={{
+            flex:1, padding:"9px 14px", background:d.hover,
+            border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
+            borderRadius:4, color:showCompose ? d.t : d.t3,
+            fontSize:12.5, fontFamily:"inherit", cursor:"pointer", textAlign:"left", transition:"all .15s",
+          }}>
+            {showCompose ? "▲ close" : `log a study session, @${myHandle}…`}
           </button>
-          <button
-            onClick={() => setShowCompose(v => !v)}
-            style={{
-              width:34, height:34, borderRadius:"50%",
-              background: showCompose ? d.danger : d.a1,
-              border:"none", color:"#fff", fontSize:20, lineHeight:1,
-              cursor:"pointer", display:"flex", alignItems:"center",
-              justifyContent:"center", flexShrink:0, transition:"all .15s",
-            }}
-          >
-            {showCompose ? "×" : "+"}
-          </button>
+          <button onClick={() => setShowCompose(v => !v)} style={{
+            width:34, height:34, borderRadius:"50%",
+            background:showCompose ? d.danger : d.a1,
+            border:"none", color:"#fff", fontSize:20, lineHeight:1,
+            cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all .15s",
+          }}>{showCompose ? "×" : "+"}</button>
         </div>
-
         {showCompose && (
           <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${d.b}`, paddingTop:12, animation:"selIn .15s ease" }}>
-            <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
+            <SPostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken}
               onPosted={() => { setShowCompose(false); fetchHome(); }} />
           </div>
         )}
       </div>
 
-      {/* ── Story row — only if someone studied today ── */}
+      {/* Story row */}
       {topStudiers.length > 0 && (
         <div style={{ marginBottom:14 }}>
           <div style={{ display:"flex", gap:14, overflowX:"auto", paddingBottom:6, scrollbarWidth:"none" }}>
             {topStudiers.map(({ profile, secs }) => (
-              <div key={profile.id}
-                style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, flexShrink:0, cursor:"pointer" }}
-                onClick={() => onOpenProfile(profile.id)}>
-                <Av name={profile.display_name} url={profile.avatar_url} size={48} d={d}
-                  ring={true} ringColor={avColor(profile.display_name)} />
-                <span style={{ fontSize:9.5, color:d.t3, maxWidth:48, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"center" }}>
-                  {fmtS(secs)}
-                </span>
+              <div key={profile.id} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, flexShrink:0, cursor:"pointer" }} onClick={() => onOpenProfile(profile.id)}>
+                <SAv name={profile.display_name} url={profile.avatar_url} size={48} d={d} ring={true} />
+                <span style={{ fontSize:9.5, color:d.t3, maxWidth:48, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{sFmtS(secs)}</span>
               </div>
             ))}
           </div>
@@ -1921,27 +686,21 @@ function HomeView({ user, d, SB_URL, SB_ANON, sessions, streak, fmt, today, myHa
         </div>
       )}
 
-      {/* ── Feed ── */}
-      {loading ? <SkeletonFeed d={d} /> :
-       posts.length === 0 ? (
-        <EmptySlate d={d} icon="📭" title="nothing posted yet."
-          sub="be the first — hit the + button above and log your session." />
-      ) : posts.map(post => (
-        <PostCard key={post.id} post={post} user={user} d={d}
+      {loading ? <SSkeletonFeed d={d} /> :
+       posts.length === 0 ? <SEmptySlate d={d} icon="📭" title="no sessions posted yet." sub="be the first — hit + above to log your session." /> :
+       posts.map(post => (
+        <SPostCard key={post.id} post={post} user={user} d={d}
           onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
-          onRefresh={fetchHome} SB_URL={SB_URL} SB_ANON={SB_ANON} />
+          onRefresh={fetchHome} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} />
       ))}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FRIENDS — following feed + always-visible compose + suggestions
-// ─────────────────────────────────────────────────────────────────────────────
-function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
+// ── Friends/Network View ──────────────────────────────────────────────────────
+function SFriendsView({ user, d, SB_URL, SB_ANON, accessToken, myHandle, onOpenProfile }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCompose, setShowCompose] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [followingSet, setFollowingSet] = useState(new Set());
 
@@ -1950,29 +709,18 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
   async function fetchFriends() {
     setLoading(true);
     if (!user?.id) { setLoading(false); return; }
-
     const fr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`);
     const follows = fr.ok ? await fr.json() : [];
     const followIds = follows.map(f => f.following_id);
     setFollowingSet(new Set(followIds));
-
     if (followIds.length > 0) {
       const idsQ = followIds.map(id => `user_id=eq.${id}`).join(",");
-      const pr = await sbFetch(SB_URL, SB_ANON,
-        `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`
-      );
+      const pr = await sbFetch(SB_URL, SB_ANON, `social_posts?or=(${idsQ})&select=*,social_kudos(user_id),profiles:user_id(id,display_name,handle,avatar_url)&order=created_at.desc&limit=40`);
       const raw = pr.ok ? await pr.json() : [];
-      setPosts(raw.map(p => ({
-        ...p,
-        kudos_count: (p.social_kudos || []).length,
-        kudos_given: (p.social_kudos || []).some(k => k.user_id === user?.id),
-      })));
+      setPosts(raw.map(p => ({ ...p, kudos_count:(p.social_kudos||[]).length, kudos_given:(p.social_kudos||[]).some(k=>k.user_id===user?.id) })));
     }
-
-    const excStr = [user.id, ...followIds].map(id => `id.neq.${id}`).join(",");
-    const sr = await sbFetch(SB_URL, SB_ANON,
-      `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url&limit=5&order=created_at.desc`
-    );
+    const excStr = [user.id,...followIds].map(id=>`id.neq.${id}`).join(",");
+    const sr = await sbFetch(SB_URL, SB_ANON, `profiles?and=(${excStr})&select=id,display_name,handle,avatar_url,target_college&limit=5&order=created_at.desc`);
     setSuggestions(sr.ok ? await sr.json() : []);
     setLoading(false);
   }
@@ -1980,23 +728,15 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
   async function toggleKudos(post) {
     if (!user?.id || post.user_id === user.id) return;
     if (post.kudos_given) {
-      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE" });
+      await sbFetch(SB_URL, SB_ANON, `social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
     } else {
-      await sbFetch(SB_URL, SB_ANON, "social_kudos", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({ post_id: post.id, user_id: user.id }),
-      });
+      await sbFetch(SB_URL, SB_ANON, "social_kudos", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({post_id:post.id,user_id:user.id}) });
     }
-    setPosts(prev => prev.map(p => p.id === post.id ? {
-      ...p, kudos_given: !p.kudos_given, kudos_count: p.kudos_count + (p.kudos_given ? -1 : 1),
-    } : p));
+    setPosts(prev => prev.map(p => p.id===post.id ? {...p,kudos_given:!p.kudos_given,kudos_count:p.kudos_count+(p.kudos_given?-1:1)} : p));
   }
 
   async function follow(uid) {
-    await sbFetch(SB_URL, SB_ANON, "social_follows", {
-      method:"POST", prefer:"return=minimal",
-      body: JSON.stringify({ follower_id: user.id, following_id: uid }),
-    });
+    await sbFetch(SB_URL, SB_ANON, "social_follows", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({follower_id:user.id,following_id:uid}) });
     setFollowingSet(prev => new Set([...prev, uid]));
     setSuggestions(prev => prev.filter(s => s.id !== uid));
     fetchFriends();
@@ -2006,90 +746,31 @@ function FriendsView({ user, d, SB_URL, SB_ANON, myHandle, onOpenProfile }) {
 
   return (
     <div>
-      {/* ── Always-visible compose bar ── */}
-      <div className="card" style={{ marginBottom:12, overflow:"hidden" }}>
-        <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:10 }}>
-          <Av name={user?.name} url={user?.avatar} size={34} d={d} />
-          <button
-            onClick={() => setShowCompose(v => !v)}
-            style={{
-              flex:1, padding:"9px 14px", background:d.hover,
-              border:`1.5px solid ${showCompose ? d.a1 : d.b}`,
-              borderRadius:4, color: showCompose ? d.t : d.t3,
-              fontSize:13, fontFamily:"inherit", cursor:"pointer",
-              textAlign:"left", transition:"all .15s",
-            }}
-          >
-            {showCompose ? "▲ never mind" : `what did you just finish, @${myHandle}?`}
-          </button>
-          <button
-            onClick={() => setShowCompose(v => !v)}
-            style={{
-              width:34, height:34, borderRadius:"50%",
-              background: showCompose ? d.danger : d.a1,
-              border:"none", color:"#fff", fontSize:20, lineHeight:1,
-              cursor:"pointer", display:"flex", alignItems:"center",
-              justifyContent:"center", flexShrink:0, transition:"all .15s",
-            }}
-          >
-            {showCompose ? "×" : "+"}
-          </button>
-        </div>
-
-        {showCompose && (
-          <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${d.b}`, paddingTop:12, animation:"selIn .15s ease" }}>
-            <PostComposer user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-              onPosted={() => { setShowCompose(false); fetchFriends(); }} />
-          </div>
-        )}
-      </div>
-
-      {/* Suggestions when no friends yet */}
       {noFriends && suggestions.length > 0 && (
-        <div className="card cp" style={{ marginBottom:12 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>
-            find people to follow
-          </div>
-          {suggestions.map(s => (
-            <SuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)}
-              onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />
-          ))}
+        <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px", marginBottom:12 }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>find candidates to follow</div>
+          {suggestions.map(s => <SSuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)} onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />)}
         </div>
       )}
-
-      {/* Posts */}
-      {loading ? <SkeletonFeed d={d} /> :
-       posts.length === 0 && !noFriends ? (
-        <EmptySlate d={d} icon="👀" title="your friends haven't posted yet."
-          sub="they're slacking. you're not — hit + above to post." />
-      ) : noFriends && posts.length === 0 ? (
-        <EmptySlate d={d} icon="👋" title="follow someone first."
-          sub="their sessions will show up here." />
-      ) : posts.map(post => (
-        <PostCard key={post.id} post={post} user={user} d={d}
+      {loading ? <SSkeletonFeed d={d} /> :
+       posts.length === 0 ? <SEmptySlate d={d} icon="👥" title={noFriends?"follow fellow candidates.":"network is quiet."} sub={noFriends?"their study sessions will appear here.":"your connections haven't posted yet."} /> :
+       posts.map(post => (
+        <SPostCard key={post.id} post={post} user={user} d={d}
           onKudos={() => toggleKudos(post)} onOpenProfile={onOpenProfile}
-          onRefresh={fetchFriends} SB_URL={SB_URL} SB_ANON={SB_ANON} />
+          onRefresh={fetchFriends} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} />
       ))}
-
-      {/* Bottom suggestions strip */}
       {!noFriends && suggestions.length > 0 && (
-        <div className="card cp" style={{ marginTop:8 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>suggested</div>
-          {suggestions.map(s => (
-            <SuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)}
-              onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />
-          ))}
+        <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px", marginTop:8 }}>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:".14em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>suggested candidates</div>
+          {suggestions.map(s => <SSuggestRow key={s.id} s={s} d={d} isFollowing={followingSet.has(s.id)} onFollow={() => follow(s.id)} onOpenProfile={onOpenProfile} />)}
         </div>
       )}
     </div>
   );
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LEADERBOARD
-// ─────────────────────────────────────────────────────────────────────────────
-function LeaderboardView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
+// ── Leaderboard ───────────────────────────────────────────────────────────────
+function SLeaderboardView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
   const [board, setBoard] = useState([]);
   const [period, setPeriod] = useState("week");
   const [subject, setSubject] = useState("All");
@@ -2100,114 +781,76 @@ function LeaderboardView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
   async function fetchBoard() {
     setLoading(true);
     let q = `social_posts?select=user_id,duration_seconds,subject,created_at,profiles:user_id(id,display_name,handle,avatar_url)`;
-    if (subject !== "All") q += `&subject=eq.${subject}`;
-    if (period === "week") {
-      const s = new Date(); s.setDate(s.getDate() - 7); q += `&created_at=gte.${s.toISOString()}`;
-    } else if (period === "month") {
-      const s = new Date(); s.setMonth(s.getMonth() - 1); q += `&created_at=gte.${s.toISOString()}`;
-    }
+    if (subject !== "All") q += `&subject=eq.${encodeURIComponent(subject)}`;
+    if (period === "week") { const s = new Date(); s.setDate(s.getDate()-7); q += `&created_at=gte.${s.toISOString()}`; }
+    else if (period === "month") { const s = new Date(); s.setMonth(s.getMonth()-1); q += `&created_at=gte.${s.toISOString()}`; }
     q += `&limit=500`;
     const r = await sbFetch(SB_URL, SB_ANON, q);
     const data = r.ok ? await r.json() : [];
     const map = {};
     data.forEach(s => {
       if (!s.profiles) return;
-      const uid = s.user_id;
-      if (!map[uid]) map[uid] = { profile:s.profiles, secs:0, sessions:0 };
-      map[uid].secs += s.duration_seconds || 0;
-      map[uid].sessions++;
+      if (!map[s.user_id]) map[s.user_id] = { profile:s.profiles, secs:0, sessions:0 };
+      map[s.user_id].secs += s.duration_seconds || 0;
+      map[s.user_id].sessions++;
     });
-    setBoard(Object.values(map).filter(e => e.profile).sort((a,b) => b.secs - a.secs).slice(0, 50));
+    setBoard(Object.values(map).filter(e=>e.profile).sort((a,b)=>b.secs-a.secs).slice(0,50));
     setLoading(false);
   }
 
   const myRank = board.findIndex(e => e.profile.id === user?.id) + 1;
   const myEntry = board.find(e => e.profile.id === user?.id);
-  const prevEntry = myRank > 1 ? board[myRank - 2] : null;
+  const prevEntry = myRank > 1 ? board[myRank-2] : null;
   const MEDAL = ["🥇","🥈","🥉"];
 
   const Pill = ({ label, active, onClick }) => (
-    <button onClick={onClick} style={{
-      padding:"5px 12px", border:`1px solid ${active ? d.a1 : d.b}`, borderRadius:3,
-      background: active ? `${d.a1}18` : "transparent", color: active ? d.a1 : d.t3,
-      fontFamily:"inherit", fontSize:11, fontWeight: active ? 700 : 400, cursor:"pointer",
-    }}>{label}</button>
+    <button onClick={onClick} style={{ padding:"5px 12px", border:`1px solid ${active?d.a1:d.b}`, borderRadius:3, background:active?`${d.a1}15`:"transparent", color:active?d.a1:d.t3, fontFamily:"inherit", fontSize:11, fontWeight:active?700:400, cursor:"pointer", transition:"all .12s" }}>{label}</button>
   );
 
   return (
     <div>
-      {/* My rank hero */}
       {myEntry && (
-        <div style={{
-          padding:"18px 20px", marginBottom:14, borderRadius:6,
-          background:`linear-gradient(135deg,${d.a1}12,${d.a3}08)`,
-          border:`1px solid ${d.a1}25`, display:"flex", alignItems:"center", gap:16,
-        }}>
+        <div style={{ padding:"18px 20px", marginBottom:14, borderRadius:8, background:`linear-gradient(135deg,${d.a1}10,${d.a2}08)`, border:`1px solid ${d.a1}20`, display:"flex", alignItems:"center", gap:16 }}>
           <div style={{ textAlign:"center", minWidth:60 }}>
-            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:44, fontWeight:400, color:d.a1, lineHeight:1 }}>
-              #{myRank}
-            </div>
-            <div style={{ fontSize:10, color:d.t3, marginTop:3 }}>your rank</div>
+            <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:46, fontWeight:400, color:d.a1, lineHeight:1 }}>#{myRank}</div>
+            <div style={{ fontSize:10, color:d.t3, marginTop:3, letterSpacing:".06em", textTransform:"uppercase" }}>your rank</div>
           </div>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:13, fontWeight:600, color:d.t, marginBottom:4 }}>{fmtS(myEntry.secs)} studied</div>
-            {prevEntry && (
-              <div style={{ fontSize:11.5, color:d.t3 }}>
-                {fmtS(prevEntry.secs - myEntry.secs)} behind #{myRank - 1} · keep going
-              </div>
-            )}
-            <div style={{ height:4, background:d.b, borderRadius:2, overflow:"hidden", marginTop:8 }}>
-              <div style={{
-                height:"100%", borderRadius:2, background:d.a1,
-                width:`${board[0]?.secs > 0 ? (myEntry.secs/board[0].secs)*100 : 0}%`,
-                transition:"width .6s ease",
-              }}/>
+            <div style={{ fontSize:13, fontWeight:600, color:d.t, marginBottom:4 }}>{sFmtS(myEntry.secs)} studied</div>
+            {prevEntry && <div style={{ fontSize:12, color:d.t3 }}>{sFmtS(prevEntry.secs - myEntry.secs)} behind #{myRank-1}</div>}
+            <div style={{ height:3, background:d.b, borderRadius:2, overflow:"hidden", marginTop:10 }}>
+              <div style={{ height:"100%", borderRadius:2, background:d.a1, width:`${board[0]?.secs>0?(myEntry.secs/board[0].secs)*100:0}%`, transition:"width .6s ease" }}/>
             </div>
           </div>
         </div>
       )}
-
-      {/* Filters */}
       <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:7 }}>
-        {[["week","This week"],["month","This month"],["all","All time"]].map(([v,l]) => (
-          <Pill key={v} label={l} active={period===v} onClick={() => setPeriod(v)} />
-        ))}
+        {[["week","This week"],["month","This month"],["all","All time"]].map(([v,l]) => <Pill key={v} label={l} active={period===v} onClick={() => setPeriod(v)} />)}
       </div>
       <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:14 }}>
-        {["All","Physics","Chemistry","Mathematics"].map(s => (
-          <Pill key={s} label={s} active={subject===s} onClick={() => setSubject(s)} />
-        ))}
+        {["All",...CFA_TOPICS_LIST.slice(0,5)].map(s => <Pill key={s} label={s==="All"?"All":s.split(" ")[0]} active={subject===s} onClick={() => setSubject(s)} />)}
       </div>
-
-      <div className="card">
-        {loading ? <SkeletonList d={d} /> : board.length === 0 ? (
-          <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>
-            no data yet. post a session to get ranked.
-          </div>
+      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, overflow:"hidden" }}>
+        {loading ? (
+          <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading rankings…</div>
+        ) : board.length === 0 ? (
+          <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>no data yet. post a session to get ranked.</div>
         ) : board.map((entry, i) => {
           const isMe = entry.profile.id === user?.id;
-          const pct = board[0]?.secs > 0 ? (entry.secs / board[0].secs) * 100 : 0;
+          const pct = board[0]?.secs > 0 ? (entry.secs/board[0].secs)*100 : 0;
           return (
-            <div key={entry.profile.id} style={{
-              display:"flex", alignItems:"center", gap:10, padding:"11px 16px",
-              borderBottom: i < board.length - 1 ? `1px solid ${d.b}` : "none",
-              background: isMe ? `${d.a1}07` : "transparent", position:"relative",
-            }}>
-              <div style={{ position:"absolute", left:0, top:0, bottom:0, width:`${pct}%`, background:`${d.a1}05`, pointerEvents:"none", borderRadius:"3px 0 0 3px" }}/>
-              <span style={{ fontSize: i<3 ? 18 : 13, fontWeight:700, width:26, textAlign:"center", color: i<3 ? "inherit" : d.t4, flexShrink:0, zIndex:1 }}>
-                {i < 3 ? MEDAL[i] : i+1}
-              </span>
-              <Av name={entry.profile.display_name} url={entry.profile.avatar_url} size={32} d={d}
-                onClick={() => onOpenProfile(entry.profile.id)} />
+            <div key={entry.profile.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 16px", borderBottom:i<board.length-1?`1px solid ${d.b}`:"none", background:isMe?`${d.a1}06`:"transparent", position:"relative" }}>
+              <div style={{ position:"absolute", left:0, top:0, bottom:0, width:`${pct}%`, background:`${d.a1}04`, pointerEvents:"none" }}/>
+              <span style={{ fontSize:i<3?17:13, fontWeight:700, width:26, textAlign:"center", color:i<3?"inherit":d.t4, flexShrink:0, zIndex:1 }}>{i<3?MEDAL[i]:i+1}</span>
+              <SAv name={entry.profile.display_name} url={entry.profile.avatar_url} size={30} d={d} onClick={() => onOpenProfile(entry.profile.id)} />
               <div style={{ flex:1, minWidth:0, zIndex:1 }}>
-                <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight: isMe?700:500, color: isMe?d.a1:d.t, padding:0 }}>
-                  {entry.profile.display_name}
-                  {isMe && <span style={{ fontSize:9, marginLeft:6, background:`${d.a1}18`, color:d.a1, padding:"1px 5px", borderRadius:2 }}>you</span>}
+                <button onClick={() => onOpenProfile(entry.profile.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:isMe?700:500, color:isMe?d.a1:d.t, padding:0 }}>
+                  {entry.profile.display_name}{isMe&&<span style={{ fontSize:9, marginLeft:6, background:`${d.a1}18`, color:d.a1, padding:"1px 5px", borderRadius:2 }}>you</span>}
                 </button>
                 {entry.profile.handle && <div style={{ fontSize:10, color:d.t4 }}>@{entry.profile.handle}</div>}
               </div>
               <div style={{ textAlign:"right", zIndex:1 }}>
-                <div style={{ fontSize:13, fontWeight:700, color: isMe?d.a1:d.t }}>{fmtS(entry.secs)}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:isMe?d.a1:d.t }}>{sFmtS(entry.secs)}</div>
                 <div style={{ fontSize:9, color:d.t4 }}>{entry.sessions} post{entry.sessions!==1?"s":""}</div>
               </div>
             </div>
@@ -2218,10 +861,8 @@ function LeaderboardView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EVENTS — public + private, create your own
-// ─────────────────────────────────────────────────────────────────────────────
-function EventsView({ user, d, SB_URL, SB_ANON, myHandle }) {
+// ── Events ────────────────────────────────────────────────────────────────────
+function SEventsView({ user, d, SB_URL, SB_ANON, accessToken, myHandle }) {
   const [events, setEvents] = useState([]);
   const [registered, setRegistered] = useState(new Set());
   const [loading, setLoading] = useState(true);
@@ -2233,15 +874,14 @@ function EventsView({ user, d, SB_URL, SB_ANON, myHandle }) {
   async function fetchEvents() {
     setLoading(true);
     const now = new Date().toISOString();
-    let q = tab === "mine"
+    const q = tab === "mine"
       ? `study_events?created_by=eq.${user?.id}&select=*,study_event_registrations(count)&order=starts_at.desc`
       : `study_events?ends_at=gte.${now}&or=(is_private.eq.false,created_by.eq.${user?.id})&select=*,study_event_registrations(count)&order=starts_at.asc&limit=30`;
     const er = await sbFetch(SB_URL, SB_ANON, q);
     setEvents(er.ok ? await er.json() : []);
     if (user?.id) {
       const rr = await sbFetch(SB_URL, SB_ANON, `study_event_registrations?user_id=eq.${user.id}&select=event_id`);
-      const regs = rr.ok ? await rr.json() : [];
-      setRegistered(new Set(regs.map(r => r.event_id)));
+      setRegistered(new Set((rr.ok ? await rr.json() : []).map(r => r.event_id)));
     }
     setLoading(false);
   }
@@ -2249,95 +889,66 @@ function EventsView({ user, d, SB_URL, SB_ANON, myHandle }) {
   async function toggleReg(evtId) {
     if (!user?.id) return;
     if (registered.has(evtId)) {
-      await sbFetch(SB_URL, SB_ANON, `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`, { method:"DELETE" });
+      await sbFetch(SB_URL, SB_ANON, `study_event_registrations?event_id=eq.${evtId}&user_id=eq.${user.id}`, { method:"DELETE", token:accessToken });
       setRegistered(prev => { const s = new Set(prev); s.delete(evtId); return s; });
     } else {
-      await sbFetch(SB_URL, SB_ANON, "study_event_registrations", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({ event_id:evtId, user_id:user.id }),
-      });
+      await sbFetch(SB_URL, SB_ANON, "study_event_registrations", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({event_id:evtId,user_id:user.id}) });
       setRegistered(prev => new Set([...prev, evtId]));
     }
   }
 
-  const isLive = e => { const now = new Date(); return new Date(e.starts_at)<=now && new Date(e.ends_at)>=now; };
+  const isLive = e => { const now = new Date(); return new Date(e.starts_at)<=now&&new Date(e.ends_at)>=now; };
 
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
         <div style={{ display:"flex", gap:4 }}>
           {[["upcoming","Upcoming"],["mine","My Events"]].map(([v,l]) => (
-            <button key={v} onClick={() => setTab(v)} style={{
-              padding:"5px 12px", border:`1px solid ${tab===v?d.a1:d.b}`,
-              borderRadius:3, background:tab===v?`${d.a1}18`:"transparent",
-              color:tab===v?d.a1:d.t3, fontFamily:"inherit", fontSize:11,
-              fontWeight:tab===v?700:400, cursor:"pointer",
-            }}>{l}</button>
+            <button key={v} onClick={() => setTab(v)} style={{ padding:"5px 12px", border:`1px solid ${tab===v?d.a1:d.b}`, borderRadius:3, background:tab===v?`${d.a1}15`:"transparent", color:tab===v?d.a1:d.t3, fontFamily:"inherit", fontSize:11, fontWeight:tab===v?700:400, cursor:"pointer" }}>{l}</button>
           ))}
         </div>
-        <button onClick={() => setShowCreate(v=>!v)} style={{
-          padding:"7px 14px", border:`1px solid ${showCreate?d.danger:d.a1}`,
-          borderRadius:3, background:showCreate?`${d.danger}10`:`${d.a1}10`,
-          color:showCreate?d.danger:d.a1, fontFamily:"inherit",
-          fontSize:11, fontWeight:700, cursor:"pointer",
-        }}>
+        <button onClick={() => setShowCreate(v=>!v)} style={{ padding:"7px 14px", border:`1px solid ${showCreate?d.danger:d.a1}`, borderRadius:3, background:showCreate?`${d.danger}10`:`${d.a1}10`, color:showCreate?d.danger:d.a1, fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer" }}>
           {showCreate ? "✕ cancel" : "+ create event"}
         </button>
       </div>
-
       {showCreate && (
         <div style={{ marginBottom:12 }}>
-          <CreateEventForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-            onCreated={() => { setShowCreate(false); fetchEvents(); }} />
+          <SCreateEventForm user={user} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onCreated={() => { setShowCreate(false); fetchEvents(); }} />
         </div>
       )}
-
-      {loading ? <SkeletonList d={d} /> : events.length === 0 ? (
-        <EmptySlate d={d} icon="🗓" title={tab==="mine" ? "no events created yet." : "no upcoming events."} sub="create one above." />
-      ) : events.map(evt => {
+      {loading ? <div style={{ padding:"32px", textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading…</div> :
+       events.length === 0 ? <SEmptySlate d={d} icon="🗓" title={tab==="mine"?"no events created yet.":"no upcoming events."} sub="create a study group event above." /> :
+       events.map(evt => {
         const live = isLive(evt);
-        const sc = SUB_C[evt.subject] || d.a3;
+        const sc = SUBJECT_COLORS[evt.subject] || d.a1;
         const count = evt.study_event_registrations?.[0]?.count || 0;
         const reg = registered.has(evt.id);
         const isOwn = evt.created_by === user?.id;
         return (
-          <div key={evt.id} className="card" style={{ marginBottom:10, overflow:"hidden" }}>
-            {/* Color accent bar */}
-            <div style={{ height:3, background:`linear-gradient(90deg,${sc},${sc}40)` }}/>
-            <div style={{ padding:"14px 16px 12px" }}>
+          <div key={evt.id} style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, marginBottom:10, overflow:"hidden" }}>
+            <div style={{ height:2, background:`linear-gradient(90deg,${sc},${sc}30)` }}/>
+            <div style={{ padding:"14px 16px 13px" }}>
               <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:8 }}>
                 <div style={{ flex:1 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:5 }}>
                     <span style={{ fontSize:15, fontWeight:700, color:d.t }}>{evt.name}</span>
-                    {live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:"#d4604a18", color:"#d4604a" }}>🔴 Live</span>}
-                    {!live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:`${d.a3}15`, color:d.a3 }}>Upcoming</span>}
-                    {evt.is_private && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:2, background:`${d.t4}12`, color:d.t4 }}>🔒 Private</span>}
-                    {isOwn && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:2, background:`${d.a2}15`, color:d.a2 }}>yours</span>}
+                    {live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:"#c45a5a18", color:"#c45a5a" }}>🔴 Live</span>}
+                    {!live && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${d.a2}15`, color:d.a2 }}>Upcoming</span>}
+                    {evt.is_private && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:`${d.t4}12`, color:d.t4 }}>🔒 Private</span>}
+                    {isOwn && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:3, background:`${d.a1}15`, color:d.a1 }}>yours</span>}
                   </div>
-                  <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:2, background:`${sc}15`, color:sc }}>
-                    {SUB_EMOJI[evt.subject] || "📚"} {evt.subject}
-                  </span>
+                  <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:3, background:`${sc}15`, color:sc }}>{SUB_EMOJI[evt.subject]||"📚"} {evt.subject}</span>
                 </div>
               </div>
               {evt.description && <div style={{ fontSize:12.5, color:d.t2, lineHeight:1.75, marginBottom:10 }}>{evt.description}</div>}
               <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:12 }}>
-                <span style={{ fontSize:11, color:d.t3 }}>
-                  📅 {new Date(evt.starts_at).toLocaleString("en-IN",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
-                </span>
-                <span style={{ fontSize:11, color:d.t3 }}>
-                  ⏱ {(() => { const m=Math.round((new Date(evt.ends_at)-new Date(evt.starts_at))/60000); const h=Math.floor(m/60); return h>0?`${h}h${m%60>0?" "+(m%60)+"m":""}`:m+"m"; })()}
-                </span>
-                <span style={{ fontSize:11, color:d.t3 }}>👥 {count} joined</span>
+                <span style={{ fontSize:11, color:d.t3 }}>📅 {new Date(evt.starts_at).toLocaleString("en-GB",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
+                <span style={{ fontSize:11, color:d.t3 }}>⏱ {(()=>{const m=Math.round((new Date(evt.ends_at)-new Date(evt.starts_at))/60000);const h=Math.floor(m/60);return h>0?`${h}h${m%60>0?" "+(m%60)+"m":""}`:m+"m";})()}</span>
+                <span style={{ fontSize:11, color:d.t3 }}>👥 {count} registered</span>
               </div>
               {!isOwn && (
-                <button onClick={() => toggleReg(evt.id)} style={{
-                  padding:"8px 20px", borderRadius:3, border:"none",
-                  background: reg ? d.hover : live ? "#d4604a" : d.a1,
-                  color: reg ? d.t3 : "#fff",
-                  border: reg ? `1px solid ${d.b}` : "none",
-                  fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer",
-                }}>
-                  {reg ? (live?"✓ joined":"✓ registered — cancel?") : (live?"join live":"register")}
+                <button onClick={() => toggleReg(evt.id)} style={{ padding:"8px 20px", borderRadius:3, border:`1px solid ${reg?d.b:live?"#c45a5a":d.a1}`, background:reg?"transparent":live?"#c45a5a":d.a1, color:reg?d.t3:"#fff", fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer", transition:"all .12s", letterSpacing:".02em" }}>
+                  {reg?(live?"✓ joined":"✓ registered — cancel?"):(live?"join live":"register")}
                 </button>
               )}
             </div>
@@ -2348,167 +959,54 @@ function EventsView({ user, d, SB_URL, SB_ANON, myHandle }) {
   );
 }
 
-// ── Create Event Form ─────────────────────────────────────────────────────────
-function CreateEventForm({ user, d, SB_URL, SB_ANON, onCreated }) {
-  const now = new Date();
-  now.setMinutes(Math.ceil(now.getMinutes()/15)*15, 0, 0);
+function SCreateEventForm({ user, d, SB_URL, SB_ANON, accessToken, onCreated }) {
+  const now = new Date(); now.setMinutes(Math.ceil(now.getMinutes()/15)*15,0,0);
   const localISO = dt => new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  const [form, setForm] = useState({ name:"", subject:"Physics", description:"", starts_at:localISO(now), duration_hours:"2", is_private:false });
+  const [form, setForm] = useState({ name:"", subject:CFA_TOPICS_LIST[0], description:"", starts_at:localISO(now), duration_hours:"2", is_private:false });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
   async function submit() {
-    if (!form.name.trim()) { setError("name it first."); return; }
-    setSaving(true); setError("");
+    if (!form.name.trim()) return;
+    setSaving(true);
     const starts = new Date(form.starts_at);
-    const ends = new Date(starts.getTime() + parseFloat(form.duration_hours)*3600000);
-    const r = await sbFetch(SB_URL, SB_ANON, "study_events", {
-      method:"POST", prefer:"return=minimal",
-      body: JSON.stringify({ name:form.name.trim(), subject:form.subject, description:form.description.trim()||null, starts_at:starts.toISOString(), ends_at:ends.toISOString(), is_private:form.is_private, created_by:user?.id }),
-    });
-    setSaving(false);
-    if (r.ok) onCreated(); else setError("something went wrong.");
+    const ends = new Date(starts.getTime()+parseFloat(form.duration_hours)*3600000);
+    await sbFetch(SB_URL, SB_ANON, "study_events", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({name:form.name.trim(),subject:form.subject,description:form.description.trim()||null,starts_at:starts.toISOString(),ends_at:ends.toISOString(),is_private:form.is_private,created_by:user?.id}) });
+    setSaving(false); onCreated();
   }
 
-  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
-
+  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:4, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
   return (
-    <div className="card cp" style={{ animation:"selIn .18s ease" }}>
-      <div style={{ fontSize:12, fontWeight:700, color:d.t, marginBottom:12 }}>new event</div>
-      <input style={{ ...inp, marginBottom:8 }} placeholder="Event name" maxLength={60} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:8 }}>
+    <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, padding:"16px" }}>
+      <div style={{ fontSize:12, fontWeight:700, color:d.t, marginBottom:12, letterSpacing:".04em" }}>new study event</div>
+      <input style={{ ...inp, marginBottom:8 }} placeholder="Event name — e.g. Fixed Income Marathon" maxLength={60} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
+      <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr", gap:8, marginBottom:8 }}>
         <select style={{ ...inp, cursor:"pointer" }} value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))}>
-          <option>Physics</option><option>Chemistry</option><option>Mathematics</option><option>All Subjects</option>
+          {CFA_TOPICS_LIST.map(t=><option key={t}>{t}</option>)}
         </select>
         <input style={inp} type="datetime-local" value={form.starts_at} onChange={e=>setForm(f=>({...f,starts_at:e.target.value}))}/>
         <select style={{ ...inp, cursor:"pointer" }} value={form.duration_hours} onChange={e=>setForm(f=>({...f,duration_hours:e.target.value}))}>
           {["0.5","1","1.5","2","3","4","6"].map(h=><option key={h} value={h}>{h==="0.5"?"30 min":`${h}h`}</option>)}
         </select>
       </div>
-      <textarea style={{ ...inp, resize:"vertical", minHeight:50, marginBottom:10 }} placeholder="Description (optional)" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
-      {/* Toggle */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:"10px 12px", background:d.hover, borderRadius:3, border:`1px solid ${d.b}` }}>
-        <button onClick={()=>setForm(f=>({...f,is_private:!f.is_private}))} style={{
-          width:36, height:20, borderRadius:10, background:form.is_private?d.a1:d.b,
-          border:"none", cursor:"pointer", position:"relative", flexShrink:0, transition:"background .2s",
-        }}>
-          <span style={{ position:"absolute", top:2, left:form.is_private?18:2, width:16, height:16, borderRadius:"50%", background:"#fff", transition:"left .2s" }}/>
+      <textarea style={{ ...inp, resize:"vertical", minHeight:48, marginBottom:10 }} placeholder="What will you cover? Any rules?" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, padding:"10px 12px", background:d.hover, borderRadius:4, border:`1px solid ${d.b}` }}>
+        <button onClick={()=>setForm(f=>({...f,is_private:!f.is_private}))} style={{ width:36,height:20,borderRadius:10,background:form.is_private?d.a1:d.b,border:"none",cursor:"pointer",position:"relative",flexShrink:0,transition:"background .2s" }}>
+          <span style={{ position:"absolute",top:2,left:form.is_private?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s" }}/>
         </button>
         <div>
-          <div style={{ fontSize:12, fontWeight:600, color:d.t }}>{form.is_private?"🔒 Private":"🌐 Public"}</div>
-          <div style={{ fontSize:10.5, color:d.t3 }}>{form.is_private?"only visible to you":"anyone can find and join"}</div>
+          <div style={{ fontSize:12,fontWeight:600,color:d.t }}>{form.is_private?"🔒 Private event":"🌐 Public event"}</div>
+          <div style={{ fontSize:10.5,color:d.t3 }}>{form.is_private?"invite only":"visible to all candidates"}</div>
         </div>
       </div>
-      {error && <div style={{ fontSize:11, color:d.danger, marginBottom:8 }}>{error}</div>}
-      <button className="btn btn-d" onClick={submit} disabled={saving||!form.name.trim()} style={{ fontSize:12, opacity:saving||!form.name.trim()?0.4:1 }}>
-        {saving?"creating…":"create →"}
+      <button className="btn btn-d" onClick={submit} disabled={saving||!form.name.trim()} style={{ fontSize:12,opacity:saving||!form.name.trim()?.4:1,letterSpacing:".03em" }}>
+        {saving?"creating…":"create event →"}
       </button>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SEARCH — find people by @handle or name
-// ─────────────────────────────────────────────────────────────────────────────
-function SearchView({ user, d, SB_URL, SB_ANON, onOpenProfile }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
-  const [all, setAll] = useState([]);
-  const [followingSet, setFollowingSet] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    fetchAll();
-  }, []);
-
-  async function fetchAll() {
-    const [ar, fr] = await Promise.all([
-      sbFetch(SB_URL, SB_ANON, `profiles?id=neq.${user?.id||"none"}&select=id,display_name,handle,avatar_url,target_college&order=display_name`),
-      user?.id ? sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&select=following_id`) : Promise.resolve({ok:true,json:()=>[]}),
-    ]);
-    const users = ar.ok ? await ar.json() : [];
-    const follows = fr.ok ? await fr.json() : [];
-    setAll(users); setResults(users);
-    setFollowingSet(new Set(follows.map(f=>f.following_id)));
-    setLoading(false);
-  }
-
-  function search(q) {
-    setQuery(q);
-    if (!q.trim()) { setResults(all); return; }
-    const lq = q.toLowerCase();
-    setResults(all.filter(u =>
-      u.handle?.toLowerCase().includes(lq) ||
-      u.display_name?.toLowerCase().includes(lq) ||
-      u.target_college?.toLowerCase().includes(lq)
-    ));
-  }
-
-  async function toggleFollow(uid) {
-    if (!user?.id) return;
-    if (followingSet.has(uid)) {
-      await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&following_id=eq.${uid}`, { method:"DELETE" });
-      setFollowingSet(prev=>{const s=new Set(prev);s.delete(uid);return s;});
-    } else {
-      await sbFetch(SB_URL, SB_ANON, "social_follows", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({follower_id:user.id,following_id:uid}),
-      });
-      setFollowingSet(prev=>new Set([...prev,uid]));
-    }
-  }
-
-  return (
-    <div>
-      <div style={{ position:"relative", marginBottom:14 }}>
-        <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:16, color:d.t3, pointerEvents:"none" }}>⌕</span>
-        <input ref={inputRef} value={query} onChange={e=>search(e.target.value)}
-          placeholder="search @handle, name, target college…"
-          style={{
-            width:"100%", boxSizing:"border-box", padding:"11px 14px 11px 36px",
-            border:`1px solid ${d.b}`, borderRadius:5, background:d.inp,
-            color:d.t, fontFamily:"inherit", fontSize:13, outline:"none",
-          }}/>
-        {query && <button onClick={()=>search("")} style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:d.t3, cursor:"pointer", fontSize:18, lineHeight:1 }}>×</button>}
-      </div>
-
-      {loading ? <SkeletonList d={d} /> :
-       results.length === 0 ? (
-        <EmptySlate d={d} icon="🔍" title="nobody found." sub="check the spelling or try a different handle." />
-      ) : results.map(u => (
-        <div key={u.id} className="card" style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", marginBottom:8 }}>
-          <Av name={u.display_name} url={u.avatar_url} size={42} d={d} onClick={()=>onOpenProfile(u.id)} />
-          <div style={{ flex:1, minWidth:0 }}>
-            <button onClick={()=>onOpenProfile(u.id)} style={{ background:"none", border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13.5, fontWeight:700, color:d.t, padding:0, textAlign:"left" }}>
-              {u.display_name}
-            </button>
-            <div style={{ fontSize:11, color:d.t3 }}>
-              {u.handle ? `@${u.handle}` : ""}
-              {u.target_college ? ` · 🎯 ${u.target_college}` : ""}
-            </div>
-          </div>
-          <button onClick={()=>toggleFollow(u.id)} style={{
-            padding:"6px 14px", borderRadius:3,
-            border:`1px solid ${followingSet.has(u.id)?d.b:d.a1}`,
-            background:followingSet.has(u.id)?"transparent":d.a1,
-            color:followingSet.has(u.id)?d.t3:"#fff",
-            fontFamily:"inherit", fontSize:11, fontWeight:700, cursor:"pointer",
-            flexShrink:0, transition:"all .12s",
-          }}>
-            {followingSet.has(u.id)?"following":"follow"}
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROFILE — own or other user's
-// ─────────────────────────────────────────────────────────────────────────────
-function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfile, onBack, sessions }) {
+// ── Profile View ──────────────────────────────────────────────────────────────
+function SProfileView({ user, d, SB_URL, SB_ANON, accessToken, viewingUid, isOwn, onOpenProfile, onBack, sessions }) {
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [stats, setStats] = useState({ secs:0, followers:0, following:0 });
@@ -2520,42 +1018,26 @@ function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfil
   useEffect(() => { load(); }, [viewingUid]);
 
   async function load() {
-    setLoading(true); setEditing(false); setTab("posts");
+    setLoading(true); setEditing(false);
     const pr = await sbFetch(SB_URL, SB_ANON, `profiles?id=eq.${viewingUid}&select=*`);
     let prof = (pr.ok ? await pr.json() : [])[0];
     if (!prof && isOwn) {
-      await sbFetch(SB_URL, SB_ANON, "profiles", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
-      });
+      await sbFetch(SB_URL, SB_ANON, "profiles", { method:"POST", prefer:"return=minimal", token:accessToken, body:JSON.stringify({id:user.id,display_name:user.name,avatar_url:user.avatar||null}) });
       prof = { id:user.id, display_name:user.name, avatar_url:user.avatar, bio:null, target_college:null, handle:null };
     }
-    setProfile(prof || { id:viewingUid, display_name:"Student" });
-
-    const postr = await sbFetch(SB_URL, SB_ANON,
-      `social_posts?user_id=eq.${viewingUid}&select=*,social_kudos(user_id)&order=created_at.desc&limit=30`
-    );
+    setProfile(prof || { id:viewingUid, display_name:"Candidate" });
+    const postr = await sbFetch(SB_URL, SB_ANON, `social_posts?user_id=eq.${viewingUid}&select=*,social_kudos(user_id)&order=created_at.desc&limit=30`);
     const rawPosts = postr.ok ? await postr.json() : [];
-    let totalSecs = rawPosts.reduce((a,p)=>a+(p.duration_seconds||0), 0);
-    if (isOwn && sessions?.length) {
-      const localSecs = sessions.reduce((a,s)=>a+s.duration*60, 0);
-      totalSecs = Math.max(totalSecs, localSecs);
-    }
-    setPosts(rawPosts.map(p => ({
-      ...p,
-      profiles: prof || { display_name:user.name, avatar_url:user.avatar },
-      kudos_count: (p.social_kudos||[]).length,
-      kudos_given: (p.social_kudos||[]).some(k=>k.user_id===user?.id),
-    })));
-
-    const [folr, folgi] = await Promise.all([
-      sbFetch(SB_URL, SB_ANON, `social_follows?following_id=eq.${viewingUid}&select=follower_id`),
-      sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${viewingUid}&select=following_id`),
+    let totalSecs = rawPosts.reduce((a,p)=>a+(p.duration_seconds||0),0);
+    if (isOwn && sessions?.length) totalSecs = Math.max(totalSecs, sessions.reduce((a,s)=>a+s.duration*60,0));
+    setPosts(rawPosts.map(p=>({...p,profiles:prof||{display_name:user.name,avatar_url:user.avatar},kudos_count:(p.social_kudos||[]).length,kudos_given:(p.social_kudos||[]).some(k=>k.user_id===user?.id)})));
+    const [folr,folgi] = await Promise.all([
+      sbFetch(SB_URL,SB_ANON,`social_follows?following_id=eq.${viewingUid}&select=follower_id`),
+      sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${viewingUid}&select=following_id`),
     ]);
-    setStats({ secs:totalSecs, followers:(folr.ok?(await folr.json()).length:0), following:(folgi.ok?(await folgi.json()).length:0) });
-
-    if (!isOwn && user?.id) {
-      const cr = await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}&select=follower_id`);
+    setStats({secs:totalSecs,followers:folr.ok?(await folr.json()).length:0,following:folgi.ok?(await folgi.json()).length:0});
+    if (!isOwn&&user?.id) {
+      const cr = await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}&select=follower_id`);
       setIsFollowing((cr.ok?await cr.json():[]).length>0);
     }
     setLoading(false);
@@ -2564,13 +1046,10 @@ function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfil
   async function toggleFollow() {
     if (!user?.id) return;
     if (isFollowing) {
-      await sbFetch(SB_URL, SB_ANON, `social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}`, { method:"DELETE" });
+      await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${viewingUid}`,{method:"DELETE",token:accessToken});
       setIsFollowing(false); setStats(s=>({...s,followers:s.followers-1}));
     } else {
-      await sbFetch(SB_URL, SB_ANON, "social_follows", {
-        method:"POST", prefer:"return=minimal",
-        body: JSON.stringify({follower_id:user.id,following_id:viewingUid}),
-      });
+      await sbFetch(SB_URL,SB_ANON,"social_follows",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({follower_id:user.id,following_id:viewingUid})});
       setIsFollowing(true); setStats(s=>({...s,followers:s.followers+1}));
     }
   }
@@ -2578,69 +1057,57 @@ function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfil
   async function toggleKudos(post) {
     if (!user?.id||post.user_id===user.id) return;
     if (post.kudos_given) {
-      await sbFetch(SB_URL,SB_ANON,`social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`,{method:"DELETE"});
+      await sbFetch(SB_URL,SB_ANON,`social_kudos?post_id=eq.${post.id}&user_id=eq.${user.id}`,{method:"DELETE",token:accessToken});
     } else {
-      await sbFetch(SB_URL,SB_ANON,"social_kudos",{method:"POST",prefer:"return=minimal",body:JSON.stringify({post_id:post.id,user_id:user.id})});
+      await sbFetch(SB_URL,SB_ANON,"social_kudos",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({post_id:post.id,user_id:user.id})});
     }
     setPosts(prev=>prev.map(p=>p.id===post.id?{...p,kudos_given:!p.kudos_given,kudos_count:p.kudos_count+(p.kudos_given?-1:1)}:p));
   }
 
-  if (loading) return <div style={{ padding:40, textAlign:"center", color:d.t3, fontSize:13, fontStyle:"italic" }}>loading profile…</div>;
-
+  if (loading) return <div style={{padding:40,textAlign:"center",color:d.t3,fontSize:13,fontStyle:"italic"}}>loading profile…</div>;
   const bg = avColor(profile?.display_name);
-  const subBreakdown = ["Physics","Chemistry","Mathematics"].map(sub => ({
-    sub, secs: posts.filter(p=>p.subject===sub).reduce((a,p)=>a+(p.duration_seconds||0),0),
-  }));
+  const subBreakdown = CFA_TOPICS_LIST.map(sub=>({sub,secs:posts.filter(p=>p.subject===sub).reduce((a,p)=>a+(p.duration_seconds||0),0)}));
   const totalPostedSecs = subBreakdown.reduce((a,b)=>a+b.secs,0);
 
   return (
     <div>
-      {/* Instagram-style profile header */}
-      <div className="card" style={{ overflow:"hidden", marginBottom:10 }}>
-        {/* Banner */}
-        <div style={{ height:80, background:`linear-gradient(135deg,${bg}80,${bg}20)`, position:"relative" }}>
-          {!isOwn && (
-            <button onClick={onBack} style={{ position:"absolute", top:10, left:12, background:"rgba(0,0,0,.35)", border:"none", color:"#fff", borderRadius:3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>← back</button>
-          )}
+      <div style={{ background:d.card, border:`1px solid ${d.b}`, borderRadius:8, overflow:"hidden", marginBottom:10 }}>
+        <div style={{ height:72, background:`linear-gradient(135deg,${bg}60,${bg}15)`, position:"relative" }}>
+          {!isOwn && <button onClick={onBack} style={{ position:"absolute", top:10, left:12, background:"rgba(0,0,0,.4)", border:"none", color:"#fff", borderRadius:3, padding:"4px 10px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>← back</button>}
         </div>
         <div style={{ padding:"0 18px 18px" }}>
-          {/* Avatar + action row */}
-          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginTop:-28, marginBottom:12 }}>
-            <div style={{ width:56, height:56, borderRadius:"50%", background:bg, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, fontWeight:700, border:`3px solid ${d.card}`, overflow:"hidden", flexShrink:0 }}>
-              {profile?.avatar_url ? <img src={profile.avatar_url} style={{ width:"100%",height:"100%",objectFit:"cover" }} alt=""/> : initials(profile?.display_name)}
+          <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginTop:-26, marginBottom:12 }}>
+            <div style={{ width:54,height:54,borderRadius:"50%",background:bg,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:700,border:`3px solid ${d.card}`,overflow:"hidden",flexShrink:0 }}>
+              {profile?.avatar_url?<img src={profile.avatar_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:sInitials(profile?.display_name)}
             </div>
             {isOwn ? (
-              <button onClick={()=>setEditing(v=>!v)} style={{ padding:"7px 16px", border:`1px solid ${d.b}`, borderRadius:3, background:"transparent", color:d.t3, fontFamily:"inherit", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              <button onClick={()=>setEditing(v=>!v)} style={{padding:"7px 16px",border:`1px solid ${d.b}`,borderRadius:3,background:"transparent",color:d.t3,fontFamily:"inherit",fontSize:11,fontWeight:600,cursor:"pointer",letterSpacing:".03em"}}>
                 {editing?"cancel":"edit profile"}
               </button>
             ) : (
-              <button onClick={toggleFollow} style={{ padding:"8px 20px", borderRadius:3, border:`1px solid ${isFollowing?d.b:d.a1}`, background:isFollowing?"transparent":d.a1, color:isFollowing?d.t3:"#fff", fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer", transition:"all .12s" }}>
+              <button onClick={toggleFollow} style={{padding:"8px 20px",borderRadius:3,border:`1px solid ${isFollowing?d.b:d.a1}`,background:isFollowing?"transparent":d.a1,color:isFollowing?d.t3:"#fff",fontFamily:"inherit",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .12s",letterSpacing:".02em"}}>
                 {isFollowing?"following":"follow"}
               </button>
             )}
           </div>
-
           {editing ? (
-            <EditProfileForm user={user} profile={profile} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON}
-              onSaved={updated=>{ setProfile(updated); setEditing(false); }} />
+            <SEditProfileForm user={user} profile={profile} d={d} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onSaved={updated=>{setProfile(updated);setEditing(false);}} />
           ) : (
             <>
-              <div style={{ fontSize:17, fontWeight:700, color:d.t }}>{profile?.display_name}</div>
-              {profile?.handle && <div style={{ fontSize:12, color:d.t3, marginBottom:4 }}>@{profile.handle}</div>}
-              {profile?.bio && <div style={{ fontSize:13, color:d.t2, lineHeight:1.65, marginBottom:5 }}>{profile.bio}</div>}
-              {profile?.target_college && <div style={{ fontSize:12, color:d.t3, marginBottom:12 }}>🎯 {profile.target_college}</div>}
-
-              {/* Instagram-style stat row */}
-              <div style={{ display:"flex", gap:0, borderTop:`1px solid ${d.b}`, paddingTop:12 }}>
+              <div style={{fontSize:17,fontWeight:700,color:d.t}}>{profile?.display_name}</div>
+              {profile?.handle&&<div style={{fontSize:12,color:d.t3,marginBottom:5}}>@{profile.handle}</div>}
+              {profile?.bio&&<div style={{fontSize:13,color:d.t2,lineHeight:1.65,marginBottom:6}}>{profile.bio}</div>}
+              {profile?.target_college&&<div style={{fontSize:12,color:d.t3,marginBottom:12}}>🎯 {profile.target_college}</div>}
+              <div style={{display:"flex",borderTop:`1px solid ${d.b}`,paddingTop:12}}>
                 {[
-                  { val: fmtS(stats.secs) !== "0m" ? fmtS(stats.secs) : (isOwn&&sessions?.length?fmtS(sessions.reduce((a,s)=>a+s.duration*60,0)):"0m"), lbl:"studied" },
-                  { val: posts.length, lbl:"posts" },
-                  { val: stats.followers, lbl:"followers" },
-                  { val: stats.following, lbl:"following" },
-                ].map((s,i) => (
-                  <div key={s.lbl} style={{ flex:1, textAlign:"center", borderRight: i<3?`1px solid ${d.b}`:"none", padding:"4px 0" }}>
-                    <div style={{ fontSize:18, fontWeight:700, color:d.t, letterSpacing:"-.01em" }}>{s.val}</div>
-                    <div style={{ fontSize:9.5, color:d.t3, textTransform:"uppercase", letterSpacing:".06em" }}>{s.lbl}</div>
+                  {val:sFmtS(stats.secs)||"0m",lbl:"studied"},
+                  {val:posts.length,lbl:"posts"},
+                  {val:stats.followers,lbl:"followers"},
+                  {val:stats.following,lbl:"following"},
+                ].map((s,i)=>(
+                  <div key={s.lbl} style={{flex:1,textAlign:"center",borderRight:i<3?`1px solid ${d.b}`:"none",padding:"4px 0"}}>
+                    <div style={{fontSize:18,fontWeight:700,color:d.t,letterSpacing:"-.01em"}}>{s.val}</div>
+                    <div style={{fontSize:9.5,color:d.t3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.lbl}</div>
                   </div>
                 ))}
               </div>
@@ -2648,54 +1115,40 @@ function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfil
           )}
         </div>
       </div>
-
-      {/* Tab bar */}
-      <div style={{ display:"flex", borderBottom:`1px solid ${d.b}`, marginBottom:12 }}>
-        {[["posts","Posts"],["stats","Stats"]].map(([v,l]) => (
-          <button key={v} onClick={()=>setTab(v)} style={{ padding:"8px 16px", border:"none", background:"transparent", fontFamily:"inherit", fontSize:12, fontWeight:tab===v?700:400, color:tab===v?d.t:d.t3, cursor:"pointer", borderBottom:`2px solid ${tab===v?d.a1:"transparent"}`, marginBottom:-1 }}>{l}</button>
+      <div style={{display:"flex",borderBottom:`1px solid ${d.b}`,marginBottom:12}}>
+        {[["posts","Sessions"],["stats","Stats"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setTab(v)} style={{padding:"8px 16px",border:"none",background:"transparent",fontFamily:"inherit",fontSize:12,fontWeight:tab===v?700:400,color:tab===v?d.t:d.t3,cursor:"pointer",borderBottom:`2px solid ${tab===v?d.a1:"transparent"}`,marginBottom:-1}}>{l}</button>
         ))}
       </div>
-
-      {tab === "posts" && (
-        posts.length === 0 ? <EmptySlate d={d} icon="📭" title="no sessions posted yet." sub="post a session from the Home or Friends tab." /> :
-        posts.map(post => (
-          <PostCard key={post.id} post={post} user={user} d={d}
-            onKudos={()=>toggleKudos(post)} onOpenProfile={onOpenProfile}
-            SB_URL={SB_URL} SB_ANON={SB_ANON} onRefresh={load} />
-        ))
+      {tab==="posts"&&(
+        posts.length===0?<SEmptySlate d={d} icon="📭" title="no sessions posted yet." sub="log sessions from the Home tab." />:
+        posts.map(post=><SPostCard key={post.id} post={post} user={user} d={d} onKudos={()=>toggleKudos(post)} onOpenProfile={onOpenProfile} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={accessToken} onRefresh={load}/>)
       )}
-
-      {tab === "stats" && (
+      {tab==="stats"&&(
         <div>
-          <div className="card cp" style={{ marginBottom:10 }}>
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>subject breakdown</div>
-            {subBreakdown.map(({sub,secs})=>{
-              const pct = totalPostedSecs>0?Math.round((secs/totalPostedSecs)*100):0;
-              return (
-                <div key={sub} style={{ marginBottom:10 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:5 }}>
-                    <span style={{ color:SUB_C[sub], fontWeight:600 }}>{SUB_EMOJI[sub]} {sub}</span>
-                    <span style={{ color:d.t3 }}>{fmtS(secs)||"0m"}</span>
-                  </div>
-                  <div style={{ height:5, background:d.b, borderRadius:3, overflow:"hidden" }}>
-                    <div style={{ height:"100%", width:`${pct}%`, background:SUB_C[sub], borderRadius:3, transition:"width .5s" }}/>
-                  </div>
+          <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,padding:"16px",marginBottom:10}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:12}}>topic breakdown</div>
+            {subBreakdown.filter(b=>b.secs>0).map(({sub,secs})=>{
+              const pct=totalPostedSecs>0?Math.round((secs/totalPostedSecs)*100):0;
+              const sc=SUBJECT_COLORS[sub]||d.a1;
+              return(<div key={sub} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5}}>
+                  <span style={{color:sc,fontWeight:600}}>{SUB_EMOJI[sub]} {sub}</span>
+                  <span style={{color:d.t3}}>{sFmtS(secs)}</span>
                 </div>
-              );
+                <div style={{height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${pct}%`,background:sc,borderRadius:2,transition:"width .5s"}}/>
+                </div>
+              </div>);
             })}
           </div>
-          <div className="card cp">
-            <div style={{ fontSize:10, fontWeight:700, letterSpacing:".12em", textTransform:"uppercase", color:d.t4, marginBottom:12 }}>all-time</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-              {[
-                { label:"Total studied", val:fmtS(stats.secs)||"0m" },
-                { label:"Sessions posted", val:posts.length },
-                { label:"Total kudos", val:posts.reduce((a,p)=>a+p.kudos_count,0) },
-                { label:"Avg session", val:posts.length>0?fmtS(Math.round(stats.secs/posts.length)):"—" },
-              ].map(s=>(
-                <div key={s.label} style={{ textAlign:"center", padding:"10px 8px", background:d.hover, borderRadius:3 }}>
-                  <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:22, fontWeight:400, color:d.t }}>{s.val}</div>
-                  <div style={{ fontSize:9.5, color:d.t4, marginTop:3, textTransform:"uppercase", letterSpacing:".06em" }}>{s.label}</div>
+          <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,padding:"16px"}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:12}}>all-time</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[{label:"Total studied",val:sFmtS(stats.secs)||"0m"},{label:"Sessions posted",val:posts.length},{label:"Total kudos",val:posts.reduce((a,p)=>a+p.kudos_count,0)},{label:"Avg session",val:posts.length>0?sFmtS(Math.round(stats.secs/posts.length)):"—"}].map(s=>(
+                <div key={s.label} style={{textAlign:"center",padding:"10px 8px",background:d.hover,borderRadius:4}}>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,fontWeight:400,color:d.t}}>{s.val}</div>
+                  <div style={{fontSize:9.5,color:d.t4,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.label}</div>
                 </div>
               ))}
             </div>
@@ -2706,9 +1159,8 @@ function ProfileView({ user, d, SB_URL, SB_ANON, viewingUid, isOwn, onOpenProfil
   );
 }
 
-// ── Edit Profile Form ─────────────────────────────────────────────────────────
-function EditProfileForm({ user, profile, d, SB_URL, SB_ANON, onSaved }) {
-  const [form, setForm] = useState({ display_name:profile?.display_name||"", handle:profile?.handle||"", bio:profile?.bio||"", target_college:profile?.target_college||"" });
+function SEditProfileForm({ user, profile, d, SB_URL, SB_ANON, accessToken, onSaved }) {
+  const [form, setForm] = useState({display_name:profile?.display_name||"",handle:profile?.handle||"",bio:profile?.bio||"",target_college:profile?.target_college||""});
   const [handleState, setHandleState] = useState("ok");
   const [saving, setSaving] = useState(false);
   const debounceRef = useRef(null);
@@ -2722,242 +1174,103 @@ function EditProfileForm({ user, profile, d, SB_URL, SB_ANON, onSaved }) {
     clearTimeout(debounceRef.current);
     debounceRef.current=setTimeout(async()=>{
       const r=await sbFetch(SB_URL,SB_ANON,`profiles?handle=eq.${clean}&select=id`);
-      const rows=r.ok?await r.json():[];
-      setHandleState(rows.length>0?"taken":"ok");
+      setHandleState((r.ok?await r.json():[]).length>0?"taken":"ok");
     },350);
   }
 
   async function save() {
     if (handleState!=="ok") return;
     setSaving(true);
-    const r = await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method:"POST", prefer:"resolution=merge-duplicates,return=representation",
-      body: JSON.stringify({ id:user.id, ...form, avatar_url:user.avatar||null }),
-    });
+    const r = await sbFetch(SB_URL,SB_ANON,"profiles",{method:"POST",prefer:"resolution=merge-duplicates,return=representation",token:accessToken,body:JSON.stringify({id:user.id,...form,avatar_url:user.avatar||null})});
     const rows = r.ok?await r.json():[];
     setSaving(false);
     onSaved(rows[0]||{...profile,...form});
   }
 
-  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", marginBottom:8 };
-  const handleBorder = handleState==="ok"?d.a2:handleState==="taken"||handleState==="short"?d.danger:d.b;
+  const inp = {padding:"8px 11px",border:`1px solid ${d.b}`,borderRadius:4,background:d.inp,color:d.t,fontFamily:"inherit",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",marginBottom:8};
+  const hb = handleState==="ok"?d.a2:handleState==="taken"||handleState==="short"?d.danger:d.b;
 
   return (
-    <div style={{ animation:"selIn .15s ease" }}>
+    <div>
       <input style={inp} placeholder="Display name" value={form.display_name} onChange={e=>setForm(f=>({...f,display_name:e.target.value}))}/>
-      <div style={{ position:"relative", marginBottom:8 }}>
-        <span style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:d.t3,pointerEvents:"none" }}>@</span>
-        <input style={{ ...inp, marginBottom:0, paddingLeft:26, border:`1px solid ${handleBorder}` }} placeholder="handle" value={form.handle} onChange={e=>onHandleType(e.target.value)}/>
-        {handleState==="checking"&&<span style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:d.t3 }}>…</span>}
-        {handleState==="ok"&&form.handle.length>=3&&<span style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:d.a2,fontSize:14 }}>✓</span>}
-        {handleState==="taken"&&<span style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:d.danger }}>taken</span>}
+      <div style={{position:"relative",marginBottom:8}}>
+        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:d.t3,pointerEvents:"none"}}>@</span>
+        <input style={{...inp,marginBottom:0,paddingLeft:28,border:`1px solid ${hb}`}} placeholder="handle" value={form.handle} onChange={e=>onHandleType(e.target.value)}/>
+        {handleState==="ok"&&form.handle.length>=3&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:d.a2,fontSize:14}}>✓</span>}
+        {handleState==="taken"&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:d.danger}}>taken</span>}
       </div>
-      <input style={inp} placeholder="Target college" value={form.target_college} onChange={e=>setForm(f=>({...f,target_college:e.target.value}))}/>
-      <textarea style={{ ...inp, minHeight:54, resize:"vertical" }} placeholder="Bio" value={form.bio} onChange={e=>setForm(f=>({...f,bio:e.target.value}))}/>
-      <button className="btn btn-d" onClick={save} disabled={saving||handleState!=="ok"} style={{ fontSize:12, opacity:saving||handleState!=="ok"?0.4:1 }}>
+      <input style={inp} placeholder="Target — e.g. CFA Level II, Nov 2026" value={form.target_college} onChange={e=>setForm(f=>({...f,target_college:e.target.value}))}/>
+      <textarea style={{...inp,minHeight:54,resize:"vertical"}} placeholder="Bio" value={form.bio} onChange={e=>setForm(f=>({...f,bio:e.target.value}))}/>
+      <button className="btn btn-d" onClick={save} disabled={saving||handleState!=="ok"} style={{fontSize:12,opacity:saving||handleState!=="ok"?.4:1,letterSpacing:".03em"}}>
         {saving?"saving…":"save changes"}
       </button>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST CARD — used across Home, Friends, Profile
-// ─────────────────────────────────────────────────────────────────────────────
-function PostCard({ post, user, d, onKudos, onOpenProfile, onRefresh, SB_URL, SB_ANON }) {
-  const profile = post.profiles || {};
-  const sc = SUB_C[post.subject] || d.a3;
-  const isOwn = post.user_id === user?.id;
-  const [showDelete, setShowDelete] = useState(false);
+// ── Search View ───────────────────────────────────────────────────────────────
+function SSearchView({ user, d, SB_URL, SB_ANON, accessToken, onOpenProfile }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [all, setAll] = useState([]);
+  const [followingSet, setFollowingSet] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const inputRef = useRef(null);
 
-  async function deletePost() {
-    await sbFetch(SB_URL, SB_ANON, `social_posts?id=eq.${post.id}&user_id=eq.${user.id}`, { method:"DELETE" });
-    onRefresh?.();
+  useEffect(() => { inputRef.current?.focus(); fetchAll(); }, []);
+
+  async function fetchAll() {
+    const [ar,fr] = await Promise.all([
+      sbFetch(SB_URL,SB_ANON,`profiles?id=neq.${user?.id||"none"}&select=id,display_name,handle,avatar_url,target_college&order=display_name`),
+      user?.id?sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&select=following_id`):Promise.resolve({ok:true,json:()=>[]}),
+    ]);
+    const users = ar.ok?await ar.json():[];
+    const follows = fr.ok?await fr.json():[];
+    setAll(users); setResults(users);
+    setFollowingSet(new Set(follows.map(f=>f.following_id)));
+    setLoading(false);
+  }
+
+  function search(q) {
+    setQuery(q);
+    if (!q.trim()){setResults(all);return;}
+    const lq = q.toLowerCase();
+    setResults(all.filter(u=>u.handle?.toLowerCase().includes(lq)||u.display_name?.toLowerCase().includes(lq)||u.target_college?.toLowerCase().includes(lq)));
+  }
+
+  async function toggleFollow(uid) {
+    if (!user?.id) return;
+    if (followingSet.has(uid)) {
+      await sbFetch(SB_URL,SB_ANON,`social_follows?follower_id=eq.${user.id}&following_id=eq.${uid}`,{method:"DELETE",token:accessToken});
+      setFollowingSet(prev=>{const s=new Set(prev);s.delete(uid);return s;});
+    } else {
+      await sbFetch(SB_URL,SB_ANON,"social_follows",{method:"POST",prefer:"return=minimal",token:accessToken,body:JSON.stringify({follower_id:user.id,following_id:uid})});
+      setFollowingSet(prev=>new Set([...prev,uid]));
+    }
   }
 
   return (
-    <div className="card" style={{ marginBottom:10, overflow:"hidden" }}>
-      {/* Header */}
-      <div style={{ padding:"12px 14px 10px", display:"flex", alignItems:"center", gap:10 }}>
-        <Av name={profile.display_name} url={profile.avatar_url} size={36} d={d} onClick={()=>onOpenProfile(post.user_id)} />
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
-            <button onClick={()=>onOpenProfile(post.user_id)} style={{ background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:d.t,padding:0 }}>
-              {profile.display_name||"Student"}
-            </button>
-            {profile.handle&&<span style={{ fontSize:10.5,color:d.t4 }}>@{profile.handle}</span>}
-            <span style={{ fontSize:10,fontWeight:700,padding:"1px 7px",borderRadius:2,background:`${sc}18`,color:sc }}>
-              {SUB_EMOJI[post.subject]||"📚"} {post.subject}
-            </span>
-          </div>
-          <div style={{ fontSize:10.5,color:d.t4,marginTop:1 }}>{ago(post.created_at)}</div>
-        </div>
-        {isOwn && (
-          <div style={{ position:"relative" }}>
-            <button onClick={()=>setShowDelete(v=>!v)} style={{ background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:18,lineHeight:1,padding:"2px 6px" }}>⋯</button>
-            {showDelete && (
-              <div style={{ position:"absolute",right:0,top:"100%",zIndex:10,background:d.card,border:`1px solid ${d.b}`,borderRadius:4,padding:4,boxShadow:"0 4px 16px rgba(0,0,0,.2)",minWidth:100 }}>
-                <button onClick={deletePost} style={{ display:"block",width:"100%",padding:"7px 12px",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,color:d.danger,textAlign:"left" }}>delete post</button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
-      <div style={{ padding:"0 14px 12px" }}>
-        <div style={{ fontSize:14,fontWeight:600,color:d.t,marginBottom:post.notes?6:10,lineHeight:1.4 }}>{post.title}</div>
-        {post.notes && <div style={{ fontSize:12.5,color:d.t2,lineHeight:1.75,marginBottom:10 }}>{post.notes}</div>}
-        {/* Stats strip */}
-        <div style={{ display:"flex",gap:6 }}>
-          {[
-            { label:"Duration", val:fmtS(post.duration_seconds)||"—" },
-            { label:"Problems", val:post.problems_solved??"—" },
-            { label:"Accuracy", val:post.accuracy_pct!=null?`${post.accuracy_pct}%`:"—" },
-          ].map(s=>(
-            <div key={s.label} style={{ flex:1,textAlign:"center",background:d.hover,borderRadius:3,padding:"7px 4px",border:`1px solid ${d.b}` }}>
-              <div style={{ fontSize:14,fontWeight:700,color:d.t,letterSpacing:"-.01em" }}>{s.val}</div>
-              <div style={{ fontSize:9,color:d.t4,textTransform:"uppercase",letterSpacing:".06em",marginTop:2 }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div style={{ padding:"8px 14px",borderTop:`1px solid ${d.b}`,display:"flex",alignItems:"center",gap:4,background:d.hover }}>
-        <button onClick={onKudos} disabled={isOwn} style={{
-          display:"flex",alignItems:"center",gap:5,padding:"5px 9px",
-          border:"none",background:post.kudos_given?`${d.danger}12`:"transparent",
-          borderRadius:3,fontFamily:"inherit",fontSize:12,
-          color:post.kudos_given?d.danger:d.t3,
-          cursor:isOwn?"default":"pointer",
-          opacity:isOwn?.4:1,transition:"all .12s",
-        }}>
-          <span style={{ fontSize:16,lineHeight:1 }}>{post.kudos_given?"♥":"♡"}</span>
-          {post.kudos_count} {post.kudos_count===1?"kudo":"kudos"}
-        </button>
-        <span style={{ marginLeft:"auto",fontSize:10.5,color:d.t4 }}>{ago(post.created_at)}</span>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST COMPOSER
-// ─────────────────────────────────────────────────────────────────────────────
-function PostComposer({ user, d, SB_URL, SB_ANON, onPosted }) {
-  const [form, setForm] = useState({ title:"", subject:"Physics", dur:"", problems:"", accuracy:"", notes:"" });
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    if (!form.title.trim()||!user?.id) return;
-    setSaving(true);
-    await sbFetch(SB_URL, SB_ANON, "profiles", {
-      method:"POST", prefer:"resolution=merge-duplicates,return=minimal",
-      body: JSON.stringify({ id:user.id, display_name:user.name, avatar_url:user.avatar||null }),
-    });
-    await sbFetch(SB_URL, SB_ANON, "social_posts", {
-      method:"POST", prefer:"return=minimal",
-      body: JSON.stringify({
-        user_id:user.id, title:form.title.trim(), subject:form.subject,
-        duration_seconds:form.dur?parseInt(form.dur)*60:null,
-        problems_solved:form.problems?parseInt(form.problems):null,
-        accuracy_pct:form.accuracy?parseInt(form.accuracy):null,
-        notes:form.notes.trim()||null,
-      }),
-    });
-    setSaving(false); onPosted();
-  }
-
-  const inp = { padding:"8px 11px", border:`1px solid ${d.b}`, borderRadius:3, background:d.inp, color:d.t, fontFamily:"inherit", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
-
-  return (
     <div>
-      <input style={{ ...inp, marginBottom:8 }} placeholder="what did you study? be specific." value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:7, marginBottom:8 }}>
-        <select style={{ ...inp, cursor:"pointer" }} value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))}>
-          <option>Physics</option><option>Chemistry</option><option>Mathematics</option>
-        </select>
-        <input style={inp} type="number" min="1" placeholder="Mins" value={form.dur} onChange={e=>setForm(f=>({...f,dur:e.target.value}))}/>
-        <input style={inp} type="number" min="0" placeholder="Problems" value={form.problems} onChange={e=>setForm(f=>({...f,problems:e.target.value}))}/>
-        <input style={inp} type="number" min="0" max="100" placeholder="Acc %" value={form.accuracy} onChange={e=>setForm(f=>({...f,accuracy:e.target.value}))}/>
+      <div style={{position:"relative",marginBottom:14}}>
+        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:16,color:d.t3,pointerEvents:"none"}}>⌕</span>
+        <input ref={inputRef} value={query} onChange={e=>search(e.target.value)} placeholder="search @handle, name, or target exam…"
+          style={{width:"100%",boxSizing:"border-box",padding:"11px 14px 11px 36px",border:`1px solid ${d.b}`,borderRadius:5,background:d.inp,color:d.t,fontFamily:"inherit",fontSize:13,outline:"none"}}/>
+        {query&&<button onClick={()=>search("")} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:d.t3,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>}
       </div>
-      <textarea style={{ ...inp, resize:"vertical", minHeight:50, marginBottom:8 }} placeholder="anything clicked? anything broke your brain?" value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
-      <div style={{ display:"flex", justifyContent:"flex-end" }}>
-        <button className="btn btn-d" onClick={submit} disabled={saving||!form.title.trim()} style={{ fontSize:12, opacity:saving||!form.title.trim()?.4:1 }}>
-          {saving?"posting…":"post →"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SHARED SMALL COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-function SuggestRow({ s, d, isFollowing, onFollow, onOpenProfile }) {
-  return (
-    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:9 }}>
-      <Av name={s.display_name} url={s.avatar_url} size={32} d={d} onClick={()=>onOpenProfile(s.id)} />
-      <div style={{ flex:1, minWidth:0 }}>
-        <button onClick={()=>onOpenProfile(s.id)} style={{ background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:d.t,padding:0,textAlign:"left",display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"100%" }}>
-          {s.display_name}
-        </button>
-        <div style={{ fontSize:10.5, color:d.t3 }}>{s.handle?`@${s.handle}`:""}{s.target_college?` · ${s.target_college}`:""}</div>
-      </div>
-      {!isFollowing && (
-        <button onClick={onFollow} style={{ fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:2,background:`${d.a1}15`,color:d.a1,border:`1px solid ${d.a1}30`,cursor:"pointer",fontFamily:"inherit",flexShrink:0 }}>
-          follow
-        </button>
-      )}
-    </div>
-  );
-}
-
-function SkeletonFeed({ d }) {
-  return (
-    <div>
-      {[1,2,3].map(i => (
-        <div key={i} className="card" style={{ marginBottom:10, padding:"14px 16px" }}>
-          <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-            <div style={{ width:36,height:36,borderRadius:"50%",background:d.b,flexShrink:0 }}/>
-            <div style={{ flex:1 }}>
-              <div className="shim" style={{ height:10,width:"40%",marginBottom:6 }}/>
-              <div className="shim" style={{ height:8,width:"25%" }}/>
-            </div>
+      {loading?<div style={{padding:32,textAlign:"center",color:d.t3,fontSize:13,fontStyle:"italic"}}>loading…</div>:
+       results.length===0?<SEmptySlate d={d} icon="🔍" title="no candidates found." sub="try a different handle or name." />:
+       results.map(u=>(
+        <div key={u.id} style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:8,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",marginBottom:8}}>
+          <SAv name={u.display_name} url={u.avatar_url} size={42} d={d} onClick={()=>onOpenProfile(u.id)}/>
+          <div style={{flex:1,minWidth:0}}>
+            <button onClick={()=>onOpenProfile(u.id)} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13.5,fontWeight:700,color:d.t,padding:0,textAlign:"left"}}>{u.display_name}</button>
+            <div style={{fontSize:11,color:d.t3}}>{u.handle?`@${u.handle}`:""}{u.target_college?` · 🎯 ${u.target_college}`:""}</div>
           </div>
-          <div className="shim" style={{ height:12,width:"70%",marginBottom:8 }}/>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6 }}>
-            {[1,2,3].map(j=><div key={j} className="shim" style={{ height:40 }}/>)}
-          </div>
+          <button onClick={()=>toggleFollow(u.id)} style={{padding:"6px 14px",borderRadius:3,border:`1px solid ${followingSet.has(u.id)?d.b:d.a1}`,background:followingSet.has(u.id)?"transparent":d.a1,color:followingSet.has(u.id)?d.t3:"#fff",fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,transition:"all .12s",letterSpacing:".02em"}}>
+            {followingSet.has(u.id)?"following":"follow"}
+          </button>
         </div>
       ))}
-    </div>
-  );
-}
-
-function SkeletonList({ d }) {
-  return (
-    <div className="card">
-      {[1,2,3,4,5].map(i=>(
-        <div key={i} style={{ display:"flex",gap:10,padding:"11px 16px",borderBottom:`1px solid ${d.b}` }}>
-          <div style={{ width:30,height:30,borderRadius:"50%",background:d.b,flexShrink:0 }}/>
-          <div style={{ flex:1 }}>
-            <div className="shim" style={{ height:10,width:"50%",marginBottom:5 }}/>
-            <div className="shim" style={{ height:8,width:"30%" }}/>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptySlate({ d, icon, title, sub }) {
-  return (
-    <div className="card cp" style={{ textAlign:"center", padding:"44px 24px" }}>
-      <div style={{ fontSize:32,marginBottom:12 }}>{icon}</div>
-      <div style={{ fontFamily:"'DM Serif Display',serif",fontSize:17,color:d.t,marginBottom:6 }}>{title}</div>
-      <div style={{ fontSize:12,color:d.t3,lineHeight:1.65 }}>{sub}</div>
     </div>
   );
 }
@@ -2986,7 +1299,7 @@ function AuthScreen({onAuth}) {
         access_token:session.access_token, refresh_token:session.refresh_token,
         expires_at:Date.now()+(session.expires_in||3600)*1000, user:session.user,
       };
-      localStorage.setItem("slothr_auth", JSON.stringify(stored));
+      localStorage.setItem("cfa_auth", JSON.stringify(stored));
       onAuth(stored);
     } catch(e) { setError(e.message); }
     setLoading(false);
@@ -3011,7 +1324,7 @@ function AuthScreen({onAuth}) {
         <div style={{textAlign:"center", marginBottom:32}}>
           <div style={{fontSize:40, marginBottom:8}}>🦥</div>
           <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
-            sloth<span style={{color:"#e8723c"}}>r</span>
+            Charter<span style={{color:"#c9a84c"}}>Run</span>
           </div>
           <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your smartest situationship.</div>
         </div>
@@ -3058,6 +1371,19 @@ function AuthScreen({onAuth}) {
 }
 
 
+const TABS=[
+  {id:"overview",    label:"Dashboard",  icon:"⌂"},
+  {id:"home",        label:"Home",       icon:"◉"},
+  {id:"friends",     label:"Network",    icon:"◎"},
+  {id:"leaderboard", label:"Rankings",   icon:"▲"},
+  {id:"events",      label:"Events",     icon:"◈"},
+  {id:"coach",       label:"AI Coach",   icon:"👁"},
+  {id:"goals",       label:"Today",      icon:"✦"},
+  {id:"sessions",    label:"Log",        icon:"◷"},
+  {id:"streaks",     label:"Streaks",    icon:"🔥"},
+  {id:"syllabus",    label:"Curriculum", icon:"📋"},
+];
+
 export default function App(){
   // Tab switch — also closes sidebar on mobile
   function switchTab(newTab){
@@ -3068,10 +1394,10 @@ export default function App(){
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authSession,setAuthSession]=useState(()=>{
     try{
-      const s=localStorage.getItem("slothr_auth");
+      const s=localStorage.getItem("cfa_auth");
       if(!s)return null;
       const p=JSON.parse(s);
-      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("slothr_auth");return null;}
+      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("cfa_auth");return null;}
       return p;
     }catch(e){return null;}
   });
@@ -3082,19 +1408,19 @@ export default function App(){
     id:authSession.user?.id,
   }:{name:"Student",email:"",avatar:null,id:null};
   function handleAuthSuccess(stored){
-    const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
+    const prev=()=>{try{return JSON.parse(localStorage.getItem("cfa_auth"));}catch(e){return null;}};
     const p=prev();
     if(p?.user?.id&&p.user.id!==stored?.user?.id){
-      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+      ["cfa_sessions","cfa_mocks","cfa_goals","cfa_log","cfa_completed","cfa_syllabus","cfa_level"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
-    localStorage.setItem("slothr_auth",JSON.stringify(stored));
+    localStorage.setItem("cfa_auth",JSON.stringify(stored));
     setAuthSession(stored);
   }
   function handleSignOut(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
-    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
-    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_completed","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+    setSessions([]);setMocks([]);setGoals([]);setStudyLog([]);setCompletedTests({});
+    try{["cfa_auth","cfa_sessions","cfa_mocks","cfa_goals","cfa_log","cfa_completed","cfa_syllabus","cfa_level"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
   // OAuth redirect handler
   const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
@@ -3132,30 +1458,16 @@ export default function App(){
   const [dark,setDark]=useState(true);
   const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
-  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
-  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
-  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
-  const [completedTests,setCompletedTests]=useState(()=>{try{const c=localStorage.getItem("slothr_completed");if(!c)return {};const a=JSON.parse(c);return Object.fromEntries(Object.entries(a).slice(-2));}catch(e){return {};}});
+  const [cfaLevel,setCfaLevel]=useState(()=>{try{return localStorage.getItem("cfa_level")||null;}catch(e){return null;}});
+  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("cfa_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("cfa_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
 
   // ── Receive completed practice test result ────────────────────────────────
-  function handleStoreTest(paperId,result){
-    setCompletedTests(prev=>{
-      const entries=Object.entries({...prev,[paperId]:result});
-      const last2=Object.fromEntries(entries.slice(-2));
-      try{localStorage.setItem("slothr_completed",JSON.stringify(last2));}catch(e){}
-      return last2;
-    });
-    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_completed`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,paper_id:paperId,data:result})}).catch(()=>{});
-  }
-  function handleTestComplete({mockEntry, pyqEntries}){
-    // Add to mocks (for coach analysis)
-    setMocks(prev=>[...prev, mockEntry]);
-    // Add all answered questions to pyqHistory
-    setPyqHistory(prev=>[...prev, ...pyqEntries]);
-  }
+
+
 
   // Goals
-  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("cfa_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [goalInput,setGoalInput]=useState("");
   const [goalSub,setGoalSub]=useState("Physics");
   const [goalTopic,setGoalTopic]=useState("");
@@ -3163,18 +1475,11 @@ export default function App(){
   const [goalTarget,setGoalTarget]=useState("");
   const [goalLoading,setGoalLoading]=useState(false);
 
-  // PYQ
-  const [pyqSubject,setPyqSubject]=useState("Physics");
-  const [pyqTopic,setPyqTopic]=useState("");
-  const [pyqDiff,setPyqDiff]=useState("All");
-  const [currentPyq,setCurrentPyq]=useState(null);
-  const [revealed,setRevealed]=useState(false);
-  const [pyqResult,setPyqResult]=useState(null);
-  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
-  const [selectedOpt,setSelectedOpt]=useState(null);
+  // Practice log
+  const [studyLog,setStudyLog]=useState(()=>{try{const c=localStorage.getItem("cfa_log");return c?JSON.parse(c):[];}catch(e){return [];}});
 
   // Coach
-  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
+  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("cfa_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
   const [coachCards,setCoachCards]=useState(null);
   function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
   const [coachLoading,setCoachLoading]=useState(false);
@@ -3198,7 +1503,7 @@ export default function App(){
   const [toast,setToast]=useState(null);
   function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
   const d=(dark?THEME.dark:THEME.light)||THEME.dark;
-  const classTopics=sub=>TOPICS[sub][jeClass]||TOPICS[sub].dropper;
+  const cfaTopics=sub=>(TOPICS[sub]?.all||[]);
   const subColor=SUBJECT_COLORS[timerSub]||d.a1;
 
   // ── Wake Lock ─────────────────────────────────────────────────────────────
@@ -3258,31 +1563,31 @@ export default function App(){
   const weekTime=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
   const streak=calcStreak(sessions);
   const todayGoals=goals.filter(g=>g.date===today());
-  const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
+  const practiceAccuracy=studyLog.length?Math.round((studyLog.filter(p=>p.correct).length/studyLog.length)*100):null;
   // Sync all data to localStorage
-  useEffect(()=>{try{localStorage.setItem("slothr_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
-  useEffect(()=>{try{localStorage.setItem("slothr_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
-  useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
-  useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
-  useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  useEffect(()=>{try{localStorage.setItem("cfa_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
+  useEffect(()=>{try{localStorage.setItem("cfa_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
+  useEffect(()=>{try{localStorage.setItem("cfa_goals",JSON.stringify(goals));}catch(e){}},[goals]);
+  useEffect(()=>{try{localStorage.setItem("cfa_log",JSON.stringify(studyLog));}catch(e){}},[studyLog]);
+  useEffect(()=>{try{localStorage.setItem("cfa_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
   // Load from Supabase on login (only if localStorage empty)
   useEffect(()=>{
     if(!authSession?.access_token||!user?.id)return;
     const token=authSession.access_token, uid=user.id;
-    if(!localStorage.getItem("slothr_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
+    if(!localStorage.getItem("cfa_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("cfa_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("cfa_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("cfa_log"))SB_AUTH.loadData("user_study_log",uid,token).then(d=>{if(d?.length)setStudyLog(d.map(r=>r.data||r));});
+    if(!localStorage.getItem("cfa_level"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.cfa_level){setCfaLevel(d[0].cfa_level);try{localStorage.setItem("cfa_level",d[0].cfa_level);}catch(e){}}}).catch(()=>{});
   },[authSession?.access_token]);
   useEffect(()=>{
     setGoals(prev=>prev.map(g=>{
       if(g.date!==today()) return g;
       if(g.type==="study"){const done=sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0);return{...g,achieved:done>=(g.target||60)};}
-      if(g.type==="pyq"){const done=pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
+      if(g.type==="questions"){const done=studyLog.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length;return{...g,achieved:done>=(g.target||10)};}
       return g;
     }));
-  },[sessions,pyqHistory]);
+  },[sessions,studyLog]);
   // Auth gate — after ALL hooks
   if(authLoading)return(
     <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
@@ -3305,7 +1610,7 @@ export default function App(){
 
   function addGoal(){
     if(!goalTopic&&!goalInput.trim()) return;
-    setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Solve PYQs for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="pyq"?10:60)),achieved:false,aiGenerated:false}]);
+    setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Practice questions for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="questions"?10:60)),achieved:false,aiGenerated:false}]);
     setGoalInput("");setGoalTopic("");setGoalTarget("");
   }
   function stopTimer(){
@@ -3327,7 +1632,7 @@ export default function App(){
   async function callAI(sys,usr,json=false){
     const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://slothr.in","X-Title":"Slothr"},
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://charterrun.app","X-Title":"CharterRun"},
       body:JSON.stringify({model:"anthropic/claude-sonnet-4-5",max_tokens:1500,messages:[{role:"system",content:sys},{role:"user",content:usr}]})
     });
     if(!r.ok){const e=await r.text();throw new Error("AI unavailable: "+e);}
@@ -3342,13 +1647,13 @@ export default function App(){
     setCoachLoading(true);setCoachCards(null);
     try{
       const ss=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(",");
-      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.physics+m.chemistry+m.math}`).join(";");
+      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.ethics+m.fi+m.equity}`).join(";");
       const tt=sessions.reduce((a,s)=>{const k=`${s.subject}-${s.topic}`;a[k]=(a[k]||0)+s.duration;return a;},{});
       const ef=Object.entries(tt).filter(([,t])=>t>120).map(([k])=>k).join(",");
-      const ps=pyqHistory.length?`${pyqHistory.length} PYQs, ${pyqAccuracy}% accuracy`:"No PYQs yet";
-      const cards=await callAI(`You are an elite JEE coach. Return ONLY valid JSON. No markdown.
+      const ps=studyLog.length?`${studyLog.length} practice Qs, ${practiceAccuracy}% accuracy`:"No practice data yet";
+      const cards=await callAI(`You are an elite CFA exam coach. Return ONLY valid JSON. No markdown.
 {"cards":[{"type":"effort_trap","title":"Effort vs Score Gap","icon":"⚠","color":"danger","insight":"2-3 sharp sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"strengths","title":"Your Strengths","icon":"💪","color":"success","insight":"2-3 sentences","topics":["t1"],"action":"1 sentence"},{"type":"critical_gaps","title":"Critical Gaps","icon":"🎯","color":"warning","insight":"2-3 sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"time_analysis","title":"Time Analysis","icon":"⏱","color":"info","insight":"2-3 sentences","recommendation":"1 sentence"},{"type":"pyq_analysis","title":"PYQ Performance","icon":"📝","color":"info","insight":"2-3 sentences","action":"1 sentence"},{"type":"weekly_focus","title":"This Week's Focus","icon":"📅","color":"primary","insight":"2 sentences","plan":["Mon-Tue","Wed-Thu","Fri-Sun"]}]}`,
-        `Class:${jeClass}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
+        `Level:${cfaLevel}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
       setCoachCards(cards.cards);
     }catch{setCoachCards([{type:"error",title:"Error",icon:"⚠",color:"danger",insight:"broke. try again.",action:""}]);}
     setCoachLoading(false);
@@ -3379,17 +1684,17 @@ export default function App(){
       // ── BUCKET A: High-weightage chapters soon studied ─────────────────
       // These are genuine coverage gaps that cost marks
       const highWeightGaps=Object.keys(TOPICS).flatMap(sub=>
-        classTopics(sub)
+        cfaTopics(sub)
           .filter(t=>
             !sessions.some(s=>s.subject===sub&&s.topic===t) &&
-            (JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"
+            (CFA_WEIGHTAGE[sub]?.[t]||"M")==="H"
           )
           .map(t=>({subject:sub, topic:t, weight:"H"}))
       ).slice(0,6);
 
       // ── BUCKET B: Chapters studied but performing badly ───────────────────
       // Combines mock weakness + PYQ accuracy per topic
-      const topicPyqMap=pyqHistory.reduce((acc,p)=>{
+      const topicPyqMap=studyLog.reduce((acc,p)=>{
         const key=`${p.subject}||${p.topic}`;
         if(!acc[key]) acc[key]={subject:p.subject,topic:p.topic,correct:0,total:0};
         acc[key].total++;
@@ -3402,7 +1707,7 @@ export default function App(){
         .map(t=>({
           ...t,
           acc:Math.round((t.correct/t.total)*100),
-          weight: JEE_WEIGHTAGE[t.subject]?.[t.topic]||"M",
+          weight: CFA_WEIGHTAGE[t.subject]?.[t.topic]||"M",
           studied: sessions.some(s=>s.subject===t.subject&&s.topic===t.topic)
         }))
         .filter(t=>t.acc<60&&t.total>=2)
@@ -3425,7 +1730,7 @@ export default function App(){
           const topTopics=Object.entries(topicTimes)
             .sort((a,b)=>b[1]-a[1])
             .slice(0,2)
-            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${JEE_WEIGHTAGE[s.sub]?.[t]||"M"}-weight)`);
+            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${CFA_WEIGHTAGE[s.sub]?.[t]||"M"}-weight)`);
           return topTopics;
         }).flat().slice(0,4);
 
@@ -3452,7 +1757,7 @@ GOAL TYPE GUIDANCE:
 - Studied chapter with bad mock score → type: "revision" (go back and consolidate)
 - reasoning must be specific: "H-weight, 0 sessions logged" OR "44% PYQ accuracy on 6 questions" OR "Chemistry avg mock 61/100"`,
 
-        `Class: ${jeClass}. Streak: ${streak} days.
+        `Class: ${cfaLevel}. Streak: ${streak} days.
 STUDY TIME (total): ${studySummary}
 TODAY studied: ${todayStudySummary} (${fmt(todayTotalMins)} total today)
 MOCK SCORES: ${mockBySubject.map(s=>`${s.sub} avg=${s.avg}/100 latest=${s.latest}/100`).join("; ")||"no mocks yet"}
@@ -3472,55 +1777,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     }catch(e){console.error(e);}
     setGoalLoading(false);
   }
-  async function generatePYQ(){
-    setCurrentPyq({loading:true});
-    try {
-      let params=[
-        "select=id,subject,topic,question_text,option_a,option_b,option_c,option_d,correct,solution,difficulty,diagram_url,answer_type",
-        "subject=eq."+pyqSubject,
-        "exam=eq.JEE%20Advanced",
-        "is_active=eq.true",
-        "is_verified=eq.true",
-        "limit=50",
-      ];
-      if(pyqTopic) params.push("topic=eq."+encodeURIComponent(pyqTopic));
-      if(pyqDiff!=="All") params.push("difficulty=eq."+pyqDiff);
-      const r=await fetch(`${SB_URL}/rest/v1/questions?${params.join("&")}`,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+SB_ANON}});
-      if(!r.ok) throw new Error(await r.text());
-      let pool=await r.json();
-      if(pool.length===0){
-        setCurrentPyq({error:true,msg:`No questions yet for ${pyqSubject}${pyqTopic?" — "+pyqTopic:""}. Add them in the admin panel.`});
-        return;
-      }
-      // Avoid recently seen questions
-      const recent=pyqHistory.slice(-5).map(p=>p.qid).filter(Boolean);
-      const fresh=pool.filter(q=>!recent.includes(q.id));
-      const candidates=fresh.length>0?fresh:pool;
-      const raw=candidates[Math.floor(Math.random()*candidates.length)];
-      // Map to slothr question shape
-      const q={
-        id:raw.id, subject:raw.subject, topic:raw.topic,
-        text:raw.question_text, difficulty:raw.difficulty,
-        options:raw.option_a?{A:raw.option_a,B:raw.option_b,C:raw.option_c,D:raw.option_d}:null,
-        correct:raw.correct, solution:raw.solution,
-        diagram_url:raw.diagram_url||null, answer_type:raw.answer_type||"text",
-      };
-      setCurrentPyq(q);
-      setRevealed(false);
-      setPyqResult(null);
-      setSelectedOpt(null);
-    } catch(e){
-      setCurrentPyq({error:true,msg:"Failed to load question. Check your connection."});
-    }
-  }
-  function submitPYQAnswer(opt){
-    if(!currentPyq||revealed) return;
-    setSelectedOpt(opt);
-    const correct=opt===currentPyq.correct;
-    setPyqResult(correct?"correct":"incorrect");
-    setRevealed(true);
-    setPyqHistory(p=>[...p,{qid:currentPyq.id,subject:currentPyq.subject,topic:currentPyq.topic,correct,date:today(),difficulty:currentPyq.difficulty,year:currentPyq.year}]);
-  }
+
 
   // ── CSS ───────────────────────────────────────────────────────────────────
   const SW=sideOpen?220:56;
@@ -3829,24 +2086,24 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
 
-  if(!jeClass) return(
+  if(!cfaLevel) return(
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
         <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
-          <span style={{fontSize:32,marginRight:6}}>🦥</span>sloth<span style={{color:d.a1}}>r</span>
+          <span style={{fontSize:32,marginRight:6}}>🦥</span>Charter<span style={{color:d.a1}}>Run</span>
         </div>
-        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>who are you.</div>
+        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>which level are you targeting.</div>
         <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study less. rank more. nap often.</div>
-        {CLASSES.map(c=>(
+        {CFA_LEVELS.map(c=>(
           <div key={c.id}
             style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:`1.5px solid ${d.b}`,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"}}
             onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
             onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
             onClick={()=>{
-                  setJeClass(c.id);
-                  try{localStorage.setItem("slothr_class",c.id);}catch(e){}
-                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
+                  setCfaLevel(c.id);
+                  try{localStorage.setItem("cfa_level",c.id);}catch(e){}
+                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:c.id})}).catch(()=>{});
                 }}>
             <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{c.icon}</div>
             <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
@@ -3857,7 +2114,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </div>
   );
 
-  const classLabel=CLASSES.find(c=>c.id===jeClass)?.label;
+  const classLabel=CFA_LEVELS.find(c=>c.id===cfaLevel)?.label||'CFA Candidate';
 
   // ── Fullscreen render ─────────────────────────────────────────────────────
   const renderFS=()=>{
@@ -3932,7 +2189,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         </div>
         <div className="field">
           <label className="fl">topic</label>
-          <Select value={timerTopic} onChange={setTimerTopic} options={[{value:"",label:"General Study"},...classTopics(timerSub).map(t=>({value:t,label:t}))]} disabled={timerOn} d={d}/>
+          <Select value={timerTopic} onChange={setTimerTopic} options={[{value:"",label:"General Study"},...cfaTopics(timerSub).map(t=>({value:t,label:t}))]} disabled={timerOn} d={d}/>
         </div>
         <div className="field">
           <label className="fl">what are we doing today.</label>
@@ -4016,15 +2273,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           <div className="s-logo">
             <button className="s-toggle" onClick={()=>setSideOpen(p=>!p)}>{sideOpen?"‹":"›"}</button>
             <div className="s-brand">
-              <span style={{fontSize:14,marginRight:4}}>🦥</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>sloth</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>r</span>
+              <span style={{fontSize:14,marginRight:4}}>🦥</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15}}>Charter</span><span style={{fontWeight:800,letterSpacing:"-.04em",fontSize:15,color:d.a1}}>Run</span>
             </div>
           </div>
           <nav className="s-nav">
-            <div className="s-sec" style={{marginTop:6}}>study</div>
-            {TABS.map((t,idx)=>(
+            <div className="s-sec" style={{marginTop:6}}>navigation</div>
+            {TABS.map(t=>(
               <React.Fragment key={t.id}>
-                {t.id==="home"&&<div className="s-sec">social</div>}
-                {t.id==="coach"&&<div className="s-sec">tools</div>}
+                {t.id==="home"&&<div className="s-sec">community</div>}
+                {t.id==="coach"&&<div className="s-sec">study tools</div>}
                 <div className={`s-item${tab===t.id?" active":""}`} onClick={()=>switchTab(t.id)} title={!sideOpen?t.label:""}>
                   <span className="s-icon">{t.icon}</span>
                   <span className="s-label">{t.label}</span>
@@ -4034,7 +2291,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {sideOpen&&(
               <div style={{margin:"10px 4px 0",padding:"10px 11px",background:d.sa,borderRadius:3,border:`1px solid ${d.sab}`}}>
                 <div style={{fontSize:9,color:d.t4,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>today</div>
-                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>{todayTime>0?`${fmt(todayTime)} today`:"zero. the exam doesn't care."}</div>
+                <div style={{fontSize:11.5,color:d.t2,marginBottom:5}}>{todayTime>0?`${fmt(todayTime)} today`:"0m today. the exam doesn't care."}</div>
                 <div className="btrack" style={{height:3}}>
                   <div className="bfill" style={{width:`${Math.min((todayTime/360)*100,100)}%`,background:`linear-gradient(90deg,${d.a1},${d.a3})`}}/>
                 </div>
@@ -4054,7 +2311,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               )}
               <div className="s-uinfo">
                 <div style={{fontSize:12,fontWeight:500,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:130}}>{user?.name||"Student"}</div>
-                <div style={{fontSize:10,color:d.a1}}>{classLabel} · 🦥</div>
+                <div style={{fontSize:10,color:d.a1}}>{classLabel||'CFA Candidate'}</div>
               </div>
               {sideOpen&&(
                 <button onClick={handleSignOut} title="sign out"
@@ -4069,41 +2326,38 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         </aside>
 
         <div className="content">
-          {tab!=="pyq"&&<div className="topbar">
-            {/* Always-visible Slothr logo */}
+          {true&&<div className="topbar">
+            {/* App logo */}
             <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
               <button className="mob-btn" onClick={()=>setSideOpen(p=>!p)} aria-label="menu">☰</button>
               <div style={{minWidth:0}}>
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
-                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left. days left. tick tock.`}
-                  {tab==="coach"&&"your smartest situationship. i know things about you."}
+                  {tab==="overview"&&`${new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2026-11-18")-new Date())/86400000))}d to the exam.`}
+                  {tab==="coach"&&"your personal CFA exam coach. i know where you're leaking marks."}
                   {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
-                  {tab==="pyq"&&"3 hours. 54 questions. no one to save you."}
-                  {tab==="home"&&"everything everyone's studying right now."}
-                  {tab==="friends"&&"just the people you follow."}
-                  {tab==="leaderboard"&&"who's putting in the hours. is it you?"}
-                  {tab==="events"&&"marathons, blitzes, mock battles."}
-                  {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
+                  
+                  {tab==="sessions"&&`${sessions.length} study sessions · ${fmt(totalTime)} total.`}
                   {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
-                  {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
+                  {tab==="syllabus"&&"full CFA curriculum tracker. don't leave gaps."}
                 </div>
               </div>
             </div>
             <div className="tbr">
               <button className="icon-btn" onClick={()=>setDark(p=>!p)}>{dark?"☀":"◑"}</button>
-              <button className="ghost-sm" onClick={()=>setJeClass(null)}>switch class</button>
+              <button className="ghost-sm" onClick={()=>setCfaLevel(null)}>switch class</button>
             </div>
           </div>}
 
-          {/* ── PRACTICE ── */}
-          {tab==="pyq"&&(
-            <div style={{width:"100%",minHeight:"100vh"}}>
-              <NTAMode user={user} dark={dark} onExit={()=>switchTab("overview")} onTestComplete={handleTestComplete} completedTests={completedTests} onStoreTest={handleStoreTest}/>
-            </div>
-          )}
 
-          <div className="inner" style={{display:tab==="pyq"?"none":"block"}}>
+
+          <div className="inner" style={{display:"block"}}>
+
+            {/* ── SOCIAL TABS ── */}
+            {tab==="home"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="home"/>}
+            {tab==="friends"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="friends"/>}
+            {tab==="leaderboard"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="leaderboard"/>}
+            {tab==="events"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} accessToken={authSession?.access_token} sessions={sessions} streak={streak} fmt={fmt} today={today} view="events"/>}
 
             {/* ── OVERVIEW ── */}
             {tab==="overview"&&(
@@ -4114,7 +2368,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
                     {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
                     {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
-                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
+                    {lbl:"PYQ Accuracy", val:practiceAccuracy!==null?`${practiceAccuracy}%`:"—", hint:practiceAccuracy===null?"uncharted territory.":practiceAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
                   ].map(s=>(
                     <div key={s.lbl} style={{background:d.card,padding:"28px 26px"}}>
                       <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:14}}>{s.lbl}</div>
@@ -4179,7 +2433,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                         <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>switchTab("pyq")}>→ go to practice</button>
                       </div>
                     ):[...mocks].reverse().slice(0,4).map(m=>{
-                      const total=m.physics+m.chemistry+m.math;
+                      const total=m.ethics+m.fi+m.equity;
                       const outOf=180;
                       const pct=Math.round((total/outOf)*100);
                       const scoreC=pct>=60?d.a2:pct>=40?d.gold:d.danger;
@@ -4272,9 +2526,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card cp">
                     <div className="cl mb12">Add Goal</div>
                     <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v=>{setGoalSub(v);setGoalTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
-                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...classTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
+                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...cfaTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
                     <div className="field"><label className="fl">Type</label><Select value={goalType} onChange={setGoalType} options={[{value:"study",label:"Study (time)"},{value:"pyq",label:"Solve PYQs (count)"},{value:"revision",label:"Revision"}]} d={d}/></div>
-                    <div className="field"><label className="fl">{goalType==="pyq"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="pyq"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="pyq"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
+                    <div className="field"><label className="fl">{goalType==="questions"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="questions"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="questions"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
                     <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/></div>
                     <button className="btn btn-d btn-full" onClick={addGoal}>+ Add Goal</button>
                   </div>
@@ -4288,8 +2542,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div style={{display:"flex",flexDirection:"column",gap:5}}>
                       <div style={{fontSize:10,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:d.t4,marginBottom:2}}>what it looks at</div>
                       {(()=>{
-                        const hGaps=Object.keys(TOPICS).flatMap(sub=>classTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
-                        const weakPyqs=pyqHistory.length;
+                        const hGaps=Object.keys(TOPICS).flatMap(sub=>cfaTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(CFA_WEIGHTAGE[sub]?.[t]||"M")==="H")).length;
+                        const weakPyqs=studyLog.length;
                         const hasMocks=mocks.length>0;
                         const sigs=[
                           {icon:"📥", label:"not started", bucket:"A", detail:`${hGaps} high-weight chapter${hGaps!==1?"s":""} soon started`, active:hGaps>0, color:d.a1},
@@ -4325,7 +2579,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   {todayGoals.length>0&&<div style={{marginBottom:12}}><div className="btrack" style={{height:4}}><div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/></div></div>}
                   {todayGoals.length===0&&<div className="empty" style={{padding:"22px 0"}}><div className="et">no goals yet.</div><div className="es">let me plan your day. i know exactly what you need. 😏</div></div>}
                   {todayGoals.map(g=>{
-                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
+                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="questions"?studyLog.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
                     const pct=Math.min((prog/g.target)*100,100);
                     return(
                       <div key={g.id} className={`goal-item${g.achieved?" achieved":""}`}>
@@ -4335,7 +2589,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                             <div className={`goal-text${g.achieved?" done":""}`}>{g.text}</div>
                             {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
                           </div>
-                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
+                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="questions"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
                           <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${pct}%`}}/></div>
                         </div>
                         <button onClick={()=>setGoals(p=>p.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
@@ -4403,9 +2657,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               ];
               const WT_ORDER={"H":0,"M":1,"L":2};
               const allChapters=sub=>{const s=new Set();return[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter(t=>{if(s.has(t))return false;s.add(t);return true;});};
-              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[JEE_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[JEE_WEIGHTAGE[sub]?.[b]||"M"]||1));
+              const sorted=sub=>[...allChapters(sub)].sort((a,b)=>(WT_ORDER[CFA_WEIGHTAGE[sub]?.[a]||"M"]||1)-(WT_ORDER[CFA_WEIGHTAGE[sub]?.[b]||"M"]||1));
               const chHrs=(sub,t)=>sessions.filter(s=>s.subject===sub&&s.topic===t).reduce((a,s)=>a+(s.duration||0),0);
-              const chAcc=(sub,t)=>{const qs=pyqHistory.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
+              const chAcc=(sub,t)=>{const qs=studyLog.filter(p=>p.subject===sub&&p.topic===t);return qs.length?Math.round(qs.filter(p=>p.correct).length/qs.length*100):null;};
               const total=SUBS.reduce((a,sub)=>a+allChapters(sub).length,0);
               const done=Object.values(syllabusStatus).filter(v=>v==="done").length;
               const prog=Object.values(syllabusStatus).filter(v=>v==="in_progress").length;
@@ -4437,7 +2691,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontSize:10,color:d.t3}}>JEE Advanced 2026</div>
-                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2026-05-24")-new Date())/86400000))}d left</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t}}>{Math.max(0,Math.ceil((new Date("2026-11-18")-new Date())/86400000))}d left</div>
                       </div>
                     </div>
                   </div>
@@ -4457,7 +2711,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           <div style={{fontSize:11,fontWeight:700,color:subColor,minWidth:28,textAlign:"right"}}>{subPct}%</div>
                         </div>
                         {["H","M","L"].map(wt=>{
-                          const wtCh=chapters.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")===wt);
+                          const wtCh=chapters.filter(t=>(CFA_WEIGHTAGE[sub]?.[t]||"M")===wt);
                           if(!wtCh.length)return null;
                           const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
                           return(
@@ -4501,19 +2755,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               );
             })()}
 
-            {/* ── SOCIAL ── */}
-            {/* ── HOME (global feed) ── */}
-            {tab==="home"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} sessions={sessions} streak={streak} fmt={fmt} today={today} view="home"/>}
-
-            {/* ── FRIENDS (following feed) ── */}
-            {tab==="friends"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} sessions={sessions} streak={streak} fmt={fmt} today={today} view="friends"/>}
-
-            {/* ── LEADERBOARD ── */}
-            {tab==="leaderboard"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} sessions={sessions} streak={streak} fmt={fmt} today={today} view="leaderboard"/>}
-
-            {/* ── EVENTS ── */}
-            {tab==="events"&&<HomeGate user={user} d={d} dark={dark} SB_URL={SB_URL} SB_ANON={SB_ANON} sessions={sessions} streak={streak} fmt={fmt} today={today} view="events"/>}
-
             {tab==="streaks"&&(
               <div className="pin">
                 <div className="streak-hero mb13">
@@ -4555,7 +2796,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     )}
                     <div className="card cp mb12">
                       <div className="cl mb10">stats</div>
-                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:pyqHistory.length,c:d.gold}].map(s=>(
+                      {[{lbl:"streak",val:`${streak}d`,c:d.a1},{lbl:"study days",val:new Set(sessions.map(s=>s.date)).size,c:d.a2},{lbl:"total sessions",val:sessions.length,c:d.a3},{lbl:"PYQs solved",val:studyLog.length,c:d.gold}].map(s=>(
                         <div key={s.lbl} className="rowb" style={{marginBottom:8}}>
                           <span style={{fontSize:12,color:d.t3}}>{s.lbl}</span>
                           <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
