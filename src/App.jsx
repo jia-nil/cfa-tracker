@@ -1,8 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Config — paste your values here, OR set as Vite env vars before deploying
-// ─────────────────────────────────────────────────────────────────────────────
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
