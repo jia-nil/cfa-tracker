@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ── Config — paste your values here, OR set as Vite env vars ─────────────────
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -316,6 +316,27 @@ const SUBJECT_COLORS = {
   "Alt. Investments":"#a29bfe",
   "Portfolio Mgmt":"#fd79a8",
 };
+
+// ── Real CFA exam windows (2026) ──────────────────────────────────────────────
+const CFA_EXAM_WINDOWS = {
+  L1: [
+    {id:"2026-02",label:"Feb 2026",start:"2026-02-02",end:"2026-02-08",regOpen:"2025-05-13",regClose:"2026-01-14"},
+    {id:"2026-05",label:"May 2026",start:"2026-05-12",end:"2026-05-18",regOpen:"2025-08-12",regClose:"2026-04-15"},
+    {id:"2026-08",label:"Aug 2026",start:"2026-08-18",end:"2026-08-24",regOpen:"2025-11-11",regClose:"2026-07-15"},
+    {id:"2026-11",label:"Nov 2026",start:"2026-11-11",end:"2026-11-17",regOpen:"2026-02-11",regClose:"2026-10-14"},
+  ],
+  L2: [
+    {id:"2026-05",label:"May 2026",start:"2026-05-19",end:"2026-05-23",regOpen:"2025-08-12",regClose:"2026-04-15"},
+    {id:"2026-08",label:"Aug 2026",start:"2026-08-25",end:"2026-08-29",regOpen:"2025-11-11",regClose:"2026-07-15"},
+    {id:"2026-11",label:"Nov 2026",start:"2026-11-18",end:"2026-11-22",regOpen:"2026-02-11",regClose:"2026-10-14"},
+  ],
+  L3: [
+    {id:"2026-02",label:"Feb 2026",start:"2026-01-29",end:"2026-02-01",regOpen:"2025-05-13",regClose:"2026-01-14"},
+    {id:"2026-08",label:"Aug 2026",start:"2026-08-13",end:"2026-08-17",regOpen:"2025-11-11",regClose:"2026-07-15"},
+  ],
+};
+const CFA_RECOMMENDED_HOURS = {L1:300, L2:328, L3:344}; // CFA Institute candidate survey averages
+
 const TOPICS = {
   Ethics:{
     L1:["Code of Ethics","Standards of Professional Conduct","GIPS"],
@@ -670,6 +691,135 @@ c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px
 return c.join("\n");
 }
 
+// ── ExamSetupScreen — captures exam window, registration, education status ────
+function ExamSetupScreen({d,jeClass,classLabel,onComplete}){
+  const [step,setStep]=useState(1);
+  const [examWindow,setExamWindow]=useState(null);
+  const [regStatus,setRegStatus]=useState(null);
+  const [eduStatus,setEduStatus]=useState(null);
+  const [customHours,setCustomHours]=useState(null);
+  const windows=CFA_EXAM_WINDOWS[jeClass]||[];
+  const recommended=CFA_RECOMMENDED_HOURS[jeClass]||300;
+
+  const cardStyle={display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:"1.5px solid "+d.b,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"};
+
+  function Step({title,sub,children}){
+    return(
+      <div>
+        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>{title}</div>
+        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>{sub}</div>
+        {children}
+      </div>
+    );
+  }
+
+  return(
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:400,margin:"auto"}}>
+        {/* Progress dots */}
+        <div style={{display:"flex",gap:5,marginBottom:24}}>
+          {[1,2,3,4].map(s=>(
+            <div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>
+          ))}
+        </div>
+
+        {step===1&&(
+          <Step title="when are you sitting for the exam?" sub={"select your target window for "+classLabel}>
+            {windows.map(w=>{
+              const daysLeft=Math.max(0,Math.ceil((new Date(w.start)-new Date())/86400000));
+              const regOpen=new Date()>=new Date(w.regOpen);
+              return(
+                <div key={w.id} style={cardStyle}
+                  onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
+                  onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
+                  onClick={()=>{setExamWindow(w.id);setStep(2);}}>
+                  <div style={{width:36,height:36,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>
+                    {w.label.split(" ")[0].slice(0,3).toUpperCase()}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:600,color:d.t}}>{w.label}</div>
+                    <div style={{fontSize:11,color:d.t3,marginTop:1}}>
+                      {daysLeft>0?daysLeft+" days away":"window passed"}{!regOpen&&" · registration not yet open"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={cardStyle} onClick={()=>{setExamWindow("undecided");setStep(2);}}
+              onMouseOver={e=>e.currentTarget.style.borderColor=d.bs} onMouseOut={e=>e.currentTarget.style.borderColor=d.b}>
+              <div style={{width:36,height:36,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>?</div>
+              <div style={{fontSize:13,fontWeight:500,color:d.t2}}>I haven't decided yet</div>
+            </div>
+          </Step>
+        )}
+
+        {step===2&&(
+          <Step title="have you registered for the exam?" sub="this affects how urgently I should pace you">
+            {[
+              {id:"registered",label:"Yes, I've registered",icon:"✓"},
+              {id:"planning",label:"Not yet, but planning to",icon:"○"},
+              {id:"not_eligible",label:"Still checking eligibility",icon:"?"},
+            ].map(opt=>(
+              <div key={opt.id} style={cardStyle}
+                onMouseOver={e=>e.currentTarget.style.borderColor=d.bs} onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
+                onClick={()=>{setRegStatus(opt.id);setStep(3);}}>
+                <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,color:d.a1}}>{opt.icon}</div>
+                <div style={{fontSize:13,fontWeight:500,color:d.t}}>{opt.label}</div>
+              </div>
+            ))}
+            <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:8,fontFamily:"inherit"}}>← back</button>
+          </Step>
+        )}
+
+        {step===3&&(
+          <Step title="what's your situation right now?" sub="working professionals get realistic weekly targets, not unrealistic ones">
+            {[
+              {id:"student",label:"Full-time student",icon:"🎓"},
+              {id:"working",label:"Working professional",icon:"💼"},
+              {id:"graduated",label:"Graduated, not yet working",icon:"📘"},
+            ].map(opt=>(
+              <div key={opt.id} style={cardStyle}
+                onMouseOver={e=>e.currentTarget.style.borderColor=d.bs} onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
+                onClick={()=>{setEduStatus(opt.id);setStep(4);}}>
+                <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{opt.icon}</div>
+                <div style={{fontSize:13,fontWeight:500,color:d.t}}>{opt.label}</div>
+              </div>
+            ))}
+            <button onClick={()=>setStep(2)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:8,fontFamily:"inherit"}}>← back</button>
+          </Step>
+        )}
+
+        {step===4&&(
+          <Step title="your study target" sub={"CFA Institute candidates report averaging "+recommended+"+ hours for "+classLabel+". Use this, or set your own."}>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+              {[recommended,Math.round(recommended*1.15),Math.round(recommended*0.85)].map((h,i)=>(
+                <div key={h} style={{...cardStyle,border:customHours===h?"1.5px solid "+d.a1:cardStyle.border,background:customHours===h?d.a1+"10":d.card}}
+                  onClick={()=>setCustomHours(h)}>
+                  <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:d.a1,flexShrink:0}}>{h}</div>
+                  <div style={{fontSize:12.5,color:d.t2}}>
+                    {i===0?"Recommended — CFA Institute average":i===1?"Extra buffer — first-time candidate":"Lean — strong background or retake"}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:20}}>
+              <span style={{fontSize:12,color:d.t3}}>or custom:</span>
+              <input type="number" placeholder={String(recommended)} className="inp" style={{width:90,padding:"7px 10px",fontSize:12}}
+                onChange={e=>setCustomHours(parseInt(e.target.value)||recommended)}/>
+              <span style={{fontSize:12,color:d.t3}}>hours total</span>
+            </div>
+            <button
+              onClick={()=>onComplete({examWindow,regStatus,eduStatus,targetHours:customHours||recommended})}
+              style={{width:"100%",padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
+              start studying →
+            </button>
+            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit",display:"block",margin:"10px auto 0"}}>← back</button>
+          </Step>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function App(){
   // Tab switch — also closes sidebar on mobile
@@ -746,6 +896,16 @@ export default function App(){
   const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
   const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
+  // ── Exam setup state ─────────────────────────────────────────────────────
+  const [examWindow,setExamWindow]=useState(()=>{try{return localStorage.getItem("nev_exam_window")||null;}catch(e){return null;}});
+  const [regStatus,setRegStatus]=useState(()=>{try{return localStorage.getItem("nev_reg_status")||null;}catch(e){return null;}}); // "registered"|"planning"|"not_eligible"
+  const [eduStatus,setEduStatus]=useState(()=>{try{return localStorage.getItem("nev_edu_status")||null;}catch(e){return null;}}); // "student"|"working"|"graduated"
+  const [targetHours,setTargetHours]=useState(()=>{try{const v=localStorage.getItem("nev_target_hours");return v?parseInt(v):null;}catch(e){return null;}});
+  const [examSetupDone,setExamSetupDone]=useState(()=>{try{return localStorage.getItem("nev_exam_setup_done")==="1";}catch(e){return false;}});
+  useEffect(()=>{try{if(examWindow)localStorage.setItem("nev_exam_window",examWindow);}catch(e){}},[examWindow]);
+  useEffect(()=>{try{if(regStatus)localStorage.setItem("nev_reg_status",regStatus);}catch(e){}},[regStatus]);
+  useEffect(()=>{try{if(eduStatus)localStorage.setItem("nev_edu_status",eduStatus);}catch(e){}},[eduStatus]);
+  useEffect(()=>{try{if(targetHours)localStorage.setItem("nev_target_hours",String(targetHours));}catch(e){}},[targetHours]);
   const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
 
@@ -1350,7 +1510,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
         <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
-          <span style={{fontSize:32,marginRight:6}}>🦥</span>nevile<span style={{color:d.a1}}>te</span>
+          nevile<span style={{color:d.a1}}>te</span>
         </div>
         <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>which level are you studying for?</div>
         <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study smarter. pass faster.</div>
@@ -1364,13 +1524,35 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   try{localStorage.setItem("slothr_class",c.id);}catch(e){}
                   if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
                 }}>
-            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{c.icon}</div>
+            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0,color:d.a1,fontWeight:700}}>{c.icon}</div>
             <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
           </div>
         ))}
         <div style={{fontSize:10.5,color:d.t4,textAlign:"center",marginTop:12}}>you can change this later.</div>
       </div>
     </div>
+  );
+
+  // ── Exam Setup flow — runs once after level is picked ────────────────────
+  if(jeClass && !examSetupDone) return(
+    <ExamSetupScreen
+      d={d} jeClass={jeClass} classLabel={CLASSES.find(c=>c.id===jeClass)?.label}
+      onComplete={(setup)=>{
+        setExamWindow(setup.examWindow);
+        setRegStatus(setup.regStatus);
+        setEduStatus(setup.eduStatus);
+        setTargetHours(setup.targetHours);
+        setExamSetupDone(true);
+        try{
+          localStorage.setItem("nev_exam_window",setup.examWindow);
+          localStorage.setItem("nev_reg_status",setup.regStatus);
+          localStorage.setItem("nev_edu_status",setup.eduStatus);
+          localStorage.setItem("nev_target_hours",String(setup.targetHours));
+          localStorage.setItem("nev_exam_setup_done","1");
+        }catch(e){}
+        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,exam_window:setup.examWindow,reg_status:setup.regStatus,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
+      }}
+    />
   );
 
   const classLabel=CLASSES.find(c=>c.id===jeClass)?.label||'CFA';
@@ -2366,6 +2548,44 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   </div>
                 </div>
 
+                {/* Exam Setup card — editable */}
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <div className="cl">Exam Setup</div>
+                    <button onClick={()=>{
+                        try{localStorage.removeItem("nev_exam_setup_done");}catch(e){}
+                        setExamSetupDone(false);
+                      }}
+                      style={{fontSize:11,color:d.a1,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                      edit →
+                    </button>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
+                      <span style={{fontSize:12,color:d.t3}}>Target Window</span>
+                      <span style={{fontSize:12,fontWeight:600,color:d.t}}>
+                        {(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow)?.label||"not set"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
+                      <span style={{fontSize:12,color:d.t3}}>Registration</span>
+                      <span style={{fontSize:12,fontWeight:600,color:d.t}}>
+                        {{registered:"✓ Registered",planning:"Planning to register",not_eligible:"Checking eligibility"}[regStatus]||"not set"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
+                      <span style={{fontSize:12,color:d.t3}}>Status</span>
+                      <span style={{fontSize:12,fontWeight:600,color:d.t}}>
+                        {{student:"Full-time student",working:"Working professional",graduated:"Graduated"}[eduStatus]||"not set"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0"}}>
+                      <span style={{fontSize:12,color:d.t3}}>Study Target</span>
+                      <span style={{fontSize:12,fontWeight:600,color:d.t}}>{targetHours||CFA_RECOMMENDED_HOURS[jeClass]||300} hours</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Weekly leaderboard */}
                 <div className="card cp" style={{marginBottom:20}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
@@ -2571,38 +2791,40 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
             {/* ── RANK PREDICTOR ── */}
             {tab==="rank"&&(()=>{
-              const SUBS=["Physics","Chemistry","Mathematics"];
-              const totalChapters=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.length;
-              },0);
+              const SUBS=Object.keys(TOPICS);
+              const totalChapters=SUBS.reduce((a,sub)=>a+classTopics(sub).length,0);
               const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
               const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
-              const weekDays=[...new Set(sessions.filter(s=>s.date>=weekStart).map(s=>s.date))].length;
               const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
               const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
-              const highWtDone=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length;
-              },0);
-              const highWtTotal=SUBS.reduce((a,sub)=>{
-                const all=[...(TOPICS[sub]["11th"]||[]),...(TOPICS[sub]["12th"]||[]),...(TOPICS[sub].dropper||[])].filter((t,i,arr)=>arr.indexOf(t)===i);
-                return a+all.filter(t=>(JEE_WEIGHTAGE[sub]?.[t]||"M")==="H").length;
-              },0);
+              const highWtDone=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length,0);
+              const highWtTotal=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").length,0);
               const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
+
+              // ── Real exam window + pacing ──────────────────────────────────────
+              const windowData=(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow);
+              const examDate=windowData?windowData.start:null;
+              const daysLeft=examDate?Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000)):null;
+              const recommendedHrs=targetHours||CFA_RECOMMENDED_HOURS[jeClass]||300;
+              const hoursLoggedSoFar=totalTime/60;
+              const hoursRemaining=Math.max(0,recommendedHrs-hoursLoggedSoFar);
+              const weeksLeft=daysLeft?Math.max(0.5,daysLeft/7):null;
+              const neededWeeklyHrs=weeksLeft?Math.round((hoursRemaining/weeksLeft)*10)/10:null;
+              const currentWeeklyHrs=Math.round((weekTime/60)*10)/10;
+              const onPace=neededWeeklyHrs!==null?currentWeeklyHrs>=neededWeeklyHrs*0.85:null;
+              const hoursPct=Math.min(100,Math.round((hoursLoggedSoFar/recommendedHrs)*100));
 
               // Score each factor 0-100
               const factors={
-                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:`${studiedChapters}/${totalChapters} chapters`},
-                consistency:{score:Math.min(100,Math.round((streak/90)*100)),weight:25,label:"Consistency (Streak)",hint:`${streak} day streak`},
-                dailyHrs:{score:Math.min(100,Math.round((avgDailyHrs/8)*100)),weight:20,label:"Daily Study Hours",hint:`${avgDailyHrs.toFixed(1)}h avg/day`},
-                highWeight:{score:highWtPct,weight:20,label:"High-Weight Chapters",hint:`${highWtDone}/${highWtTotal} done`},
-                pyqAcc:{score:pyqAcc||0,weight:15,label:"PYQ Accuracy",hint:pyqAcc!==null?`${pyqAcc}% accuracy`:"no PYQs yet"},
+                hoursProgress:{score:hoursPct,weight:25,label:"Hours Logged",hint:Math.round(hoursLoggedSoFar)+" / "+recommendedHrs+"h target"},
+                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:studiedChapters+"/"+totalChapters+" topics"},
+                consistency:{score:Math.min(100,Math.round((streak/60)*100)),weight:20,label:"Consistency (Streak)",hint:streak+" day streak"},
+                pacing:{score:onPace===null?50:(onPace?100:Math.max(20,Math.round((currentWeeklyHrs/Math.max(neededWeeklyHrs,1))*100))),weight:20,label:"On Pace for Exam",hint:neededWeeklyHrs!==null?currentWeeklyHrs+"h/wk vs "+neededWeeklyHrs+"h/wk needed":"set exam date for pacing"},
+                highWeight:{score:highWtPct,weight:15,label:"High-Weight Topics",hint:highWtDone+"/"+highWtTotal+" done"},
               };
               const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
               const overallPct=Math.round(totalScore);
 
-              // Map score to rank range
               const getRankRange=pct=>{
                 if(pct>=85)return{range:"Ready to Pass",color:d.a2,label:"above the minimum passing score"};
                 if(pct>=70)return{range:"On Track",color:d.a2,label:"tracking well for exam day"};
@@ -2612,7 +2834,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 return{range:"Not Ready",color:d.danger,label:"more preparation needed"};
               };
               const rankData=getRankRange(overallPct);
-              const daysLeft=Math.max(0,Math.ceil((new Date("2025-11-22")-new Date())/86400000));
 
               // What moves the needle most
               const improvements=Object.entries(factors)
@@ -2622,13 +2843,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 .map(([k,f])=>({
                   key:k, label:f.label,
                   gap:80-f.score,
-                  impact:`+${Math.round((80-f.score)*f.weight/100)} pts`,
+                  impact:"+"+Math.round((80-f.score)*f.weight/100)+" pts",
                   action:{
-                    coverage:"study at least 1 new chapter every 2 days",
+                    hoursProgress:"you need roughly "+Math.round(hoursRemaining)+" more hours before "+(windowData?windowData.label:"your exam"),
+                    coverage:"study at least 1 new topic every 2-3 days",
                     consistency:"don't break your streak. even 30 min counts",
-                    dailyHrs:"aim for 6h/day minimum in the final stretch",
-                    highWeight:"prioritise H-weight chapters — they appear every year",
-                    pyqAcc:"drill PYQs in your weakest chapters",
+                    pacing:neededWeeklyHrs?("aim for "+neededWeeklyHrs+"h/week — you're at "+currentWeeklyHrs+"h"):"set your exam window in profile to get a real pacing target",
+                    highWeight:"prioritise Ethics, FRA, Equity and Fixed Income — heaviest weighted",
                   }[k]
                 }));
 
@@ -2670,11 +2891,54 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                       <div style={{width:1,height:36,background:d.b}}/>
                       <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft}</div>
+                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft!==null?daysLeft:"—"}</div>
                         <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
                       </div>
                     </div>
                   </div>
+
+                  {/* Pacing card — shows real exam window data */}
+                  {windowData?(
+                    <div className="card cp" style={{marginBottom:20}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                        <div className="cl">Your Pace</div>
+                        <span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:onPace?d.a2+"15":d.danger+"15",color:onPace?d.a2:d.danger,fontWeight:700}}>
+                          {onPace?"on pace":"behind pace"}
+                        </span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:12,marginBottom:14}}>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{windowData.label}</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Target Window</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{currentWeeklyHrs}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>This Week</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:onPace?d.a2:d.gold,fontFamily:"'DM Serif Display',serif"}}>{neededWeeklyHrs}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Needed/Week</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{Math.round(hoursRemaining)}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Hours Left</div>
+                        </div>
+                      </div>
+                      <div style={{fontSize:12,color:d.t3,lineHeight:1.6,fontStyle:"italic"}}>
+                        {onPace
+                          ?"you're putting in enough hours weekly to hit your "+recommendedHrs+"h target before "+windowData.label+". keep this pace."
+                          :"at your current pace you'll fall short of "+recommendedHrs+"h before "+windowData.label+". you need "+neededWeeklyHrs+"h/week, you're averaging "+currentWeeklyHrs+"h."}
+                      </div>
+                    </div>
+                  ):(
+                    <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"20px"}}>
+                      <div style={{fontSize:13,color:d.t2,marginBottom:10}}>you haven't set a target exam window yet</div>
+                      <button onClick={()=>switchTab("profile")}
+                        style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                        set exam window in profile
+                      </button>
+                    </div>
+                  )}
 
                   {/* Factor breakdown */}
                   <div className="card cp" style={{marginBottom:20}}>
