@@ -5,7 +5,6 @@ const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
 
-// ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -753,131 +752,158 @@ c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px
 return c.join("\n");
 }
 
-// ── ExamSetupScreen — captures exam window, registration, education status ────
-function ExamSetupScreen({d,jeClass,classLabel,onComplete}){
-  const [step,setStep]=useState(1);
+// ── ExamSetupScreen — fully self-contained 4-step setup ──────────────────────
+function ExamSetupScreen({d,initialLevel,onComplete}){
+  const [step,setStep]=useState(initialLevel?2:1);
+  const [level,setLevel]=useState(initialLevel||null);
   const [examWindow,setExamWindow]=useState(null);
-  const [studyDays,setStudyDays]=useState([0,1,2,3,4]); // Mon-Fri default
-  const [eduStatus,setEduStatus]=useState(null);
-  const [customHours,setCustomHours]=useState(null);
-  const windows=CFA_EXAM_WINDOWS[jeClass]||[];
-  const recommended=CFA_RECOMMENDED_HOURS[jeClass]||300;
+  const [studyDays,setStudyDays]=useState([0,1,2,3,4]);
+  const [dailyHours,setDailyHours]=useState(2);
   const DAY_NAMES=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const windows=(CFA_EXAM_WINDOWS[level]||[]).filter(w=>new Date(w.start)>new Date());
+  const recommended=(level&&CFA_RECOMMENDED_HOURS[level])||300;
+  const classLabel=(level&&CLASSES.find(c=>c.id===level)?.label)||"";
   function toggleDay(i){setStudyDays(prev=>prev.includes(i)?prev.filter(x=>x!==i):[...prev,i].sort());}
-
-  const cardStyle={display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:"1.5px solid "+d.b,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"};
-
-  function Step({title,sub,children}){
-    return(
-      <div>
-        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>{title}</div>
-        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>{sub}</div>
-        {children}
-      </div>
-    );
-  }
-
+  const card={display:"flex",alignItems:"center",gap:12,padding:"14px 16px",border:"1.5px solid "+d.b,borderRadius:12,cursor:"pointer",marginBottom:8,background:d.card,transition:"all .15s"};
+  const totalSteps=4;
   return(
-    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{width:"100%",maxWidth:400,margin:"auto"}}>
-        {/* Progress dots */}
-        <div style={{display:"flex",gap:5,marginBottom:24}}>
-          {[1,2,3,4].map(s=>(
-            <div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>
-          ))}
+    <div style={{position:"fixed",inset:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');"}</style>
+      <div style={{width:"100%",maxWidth:420,margin:"auto"}}>
+        <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,letterSpacing:"-.04em",marginBottom:4}}>nevile<span style={{color:d.a1}}>te</span></div>
+        <div style={{fontSize:12,color:d.t3,marginBottom:20}}>step {step} of {totalSteps}</div>
+        <div style={{display:"flex",gap:4,marginBottom:28}}>
+          {[1,2,3,4].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
         </div>
 
+        {/* Step 1 — Level */}
         {step===1&&(
-          <Step title="when are you sitting for the exam?" sub={"select your target window for "+classLabel}>
-            {windows.filter(w=>new Date(w.start)>new Date()).map(w=>{
-              const daysLeft=Math.ceil((new Date(w.start)-new Date())/86400000);
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which level are you taking?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap is built around this level's real curriculum and weighting.</div>
+            {CLASSES.map(c=>(
+              <div key={c.id} style={card}
+                onMouseOver={e=>e.currentTarget.style.borderColor=d.a1}
+                onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
+                onClick={()=>{setLevel(c.id);setExamWindow(null);setStep(2);}}>
+                <div style={{width:36,height:36,borderRadius:9,background:d.a1+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:d.a1,flexShrink:0}}>{c.icon}</div>
+                <div>
+                  <div style={{fontSize:13.5,fontWeight:600,color:d.t}}>{c.label}</div>
+                  <div style={{fontSize:11,color:d.t3,marginTop:1}}>
+                    {c.id==="L1"?"foundational — ethics, quant, equity, fixed income":c.id==="L2"?"application — valuation, analysis depth":"portfolio management heavy — constructed response"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Step 2 — Exam window */}
+        {step===2&&(
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>when's your exam?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>upcoming CFA Institute windows for {classLabel}</div>
+            {windows.length===0&&(
+              <div style={{padding:"24px",textAlign:"center",color:d.t3,fontSize:13,background:d.card,borderRadius:12,border:"1px solid "+d.b}}>
+                no upcoming windows found — go back and pick a different level, or check cfainstitute.org
+              </div>
+            )}
+            {windows.map(w=>{
+              const days=Math.ceil((new Date(w.start)-new Date())/86400000);
               return(
-                <div key={w.id} style={cardStyle}
-                  onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
+                <div key={w.id} style={card}
+                  onMouseOver={e=>e.currentTarget.style.borderColor=d.a1}
                   onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
-                  onClick={()=>{setExamWindow(w.id);setStep(2);}}>
-                  <div style={{width:40,height:40,borderRadius:8,background:d.a1+"18",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:d.a1,flexShrink:0,lineHeight:1.3}}>
-                    <span style={{fontSize:11}}>{w.label.split(" ")[0].slice(0,3).toUpperCase()}</span>
-                    <span>{w.label.split(" ")[1]}</span>
+                  onClick={()=>{setExamWindow(w.id);setStep(3);}}>
+                  <div style={{width:44,height:44,borderRadius:10,background:d.a1+"18",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1.2}}>
+                    <div style={{fontSize:11,fontWeight:800,color:d.a1}}>{w.label.split(" ")[0].slice(0,3).toUpperCase()}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:d.a1}}>{w.label.split(" ")[1]}</div>
                   </div>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13.5,fontWeight:600,color:d.t}}>{w.label}</div>
-                    <div style={{fontSize:11,color:d.t3,marginTop:2}}>{daysLeft} days away</div>
+                    <div style={{fontSize:11,color:d.t3,marginTop:2}}>{days} days away</div>
                   </div>
-                  <div style={{fontSize:10,color:d.t3}}>→</div>
+                  <div style={{fontSize:16,color:d.t4}}>›</div>
                 </div>
               );
             })}
-            {windows.filter(w=>new Date(w.start)>new Date()).length===0&&(
-              <div style={{textAlign:"center",padding:"24px",color:d.t3,fontSize:13}}>no upcoming windows available. check cfa institute website.</div>
-            )}
-          </Step>
+            <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit"}}>← back</button>
+          </div>
         )}
 
-        {step===2&&(
-          <Step title="which days can you study?" sub="be realistic — your roadmap will only schedule sessions on these days.">
-            <div style={{display:"flex",gap:6,marginBottom:24,flexWrap:"wrap"}}>
+        {/* Step 3 — Study days */}
+        {step===3&&(
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which days can you study?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap will only schedule sessions on these days — be realistic.</div>
+            <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
               {DAY_NAMES.map((dn,i)=>(
                 <div key={dn} onClick={()=>toggleDay(i)}
-                  style={{width:46,height:46,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,cursor:"pointer",userSelect:"none",
-                    background:studyDays.includes(i)?d.a1:d.card,color:studyDays.includes(i)?"#fff":d.t3,
-                    border:"1.5px solid "+(studyDays.includes(i)?d.a1:d.b),transition:"all .15s"}}>
+                  style={{width:52,height:52,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:12,fontWeight:700,cursor:"pointer",userSelect:"none",transition:"all .15s",
+                    background:studyDays.includes(i)?d.a1:d.card,
+                    color:studyDays.includes(i)?"#fff":d.t3,
+                    border:"1.5px solid "+(studyDays.includes(i)?d.a1:d.b)}}>
                   {dn}
                 </div>
               ))}
             </div>
-            <button disabled={studyDays.length===0} onClick={()=>setStep(3)}
-              style={{width:"100%",padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
-              continue →
-            </button>
-            <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",display:"block",margin:"0 auto",fontFamily:"inherit"}}>← back</button>
-          </Step>
-        )}
-
-        {step===3&&(
-          <Step title="what's your situation right now?" sub="working professionals get realistic weekly targets, not unrealistic ones">
-            {[
-              {id:"student",label:"Full-time student",icon:"🎓"},
-              {id:"working",label:"Working professional",icon:"💼"},
-              {id:"graduated",label:"Graduated, not yet working",icon:"📘"},
-            ].map(opt=>(
-              <div key={opt.id} style={cardStyle}
-                onMouseOver={e=>e.currentTarget.style.borderColor=d.bs} onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
-                onClick={()=>{setEduStatus(opt.id);setStep(4);}}>
-                <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{opt.icon}</div>
-                <div style={{fontSize:13,fontWeight:500,color:d.t}}>{opt.label}</div>
-              </div>
-            ))}
-            <button onClick={()=>setStep(2)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:8,fontFamily:"inherit"}}>← back</button>
-          </Step>
-        )}
-
-        {step===4&&(
-          <Step title="your study target" sub={"CFA Institute candidates report averaging "+recommended+"+ hours for "+classLabel+". Use this, or set your own."}>
-            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-              {[recommended,Math.round(recommended*1.15),Math.round(recommended*0.85)].map((h,i)=>(
-                <div key={h} style={{...cardStyle,border:customHours===h?"1.5px solid "+d.a1:cardStyle.border,background:customHours===h?d.a1+"10":d.card}}
-                  onClick={()=>setCustomHours(h)}>
-                  <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:d.a1,flexShrink:0}}>{h}</div>
-                  <div style={{fontSize:12.5,color:d.t2}}>
-                    {i===0?"Recommended — CFA Institute average":i===1?"Extra buffer — first-time candidate":"Lean — strong background or retake"}
-                  </div>
+            <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:10}}>hours per study day</div>
+            <div style={{display:"flex",gap:8,marginBottom:22}}>
+              {[1,1.5,2,3,4].map(h=>(
+                <div key={h} onClick={()=>setDailyHours(h)}
+                  style={{flex:1,padding:"11px 4px",borderRadius:10,textAlign:"center",cursor:"pointer",transition:"all .15s",
+                    background:dailyHours===h?d.a1+"18":d.card,
+                    border:"1.5px solid "+(dailyHours===h?d.a1:d.b),
+                    color:dailyHours===h?d.a1:d.t3,fontSize:13,fontWeight:700}}>
+                  {h}h
                 </div>
               ))}
             </div>
-            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:20}}>
-              <span style={{fontSize:12,color:d.t3}}>or custom:</span>
-              <input type="number" placeholder={String(recommended)} className="inp" style={{width:90,padding:"7px 10px",fontSize:12}}
-                onChange={e=>setCustomHours(parseInt(e.target.value)||recommended)}/>
-              <span style={{fontSize:12,color:d.t3}}>hours total</span>
+            {studyDays.length>0&&<div style={{fontSize:12,color:d.t3,marginBottom:18,fontStyle:"italic"}}>
+              {studyDays.length * dailyHours}h/week. CFA Institute candidates average {recommended}h total for {classLabel}.
+            </div>}
+            <button disabled={studyDays.length===0} onClick={()=>setStep(4)}
+              style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
+              continue →
+            </button>
+            <button onClick={()=>setStep(2)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+          </div>
+        )}
+
+        {/* Step 4 — Hours target */}
+        {step===4&&(
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>your study hour target</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>CFA Institute candidates report averaging {recommended}h for {classLabel}. pick a target or set your own.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+              {[
+                {h:recommended,label:"Recommended — CFA Institute average"},
+                {h:Math.round(recommended*1.15),label:"Extra buffer — first-time candidate"},
+                {h:Math.round(recommended*0.85),label:"Lean — strong background or retake"},
+              ].map(({h,label},i)=>(
+                <div key={h} onClick={()=>setDailyHours(-h)}
+                  style={{...card,border:dailyHours===-h?"1.5px solid "+d.a1:card.border,background:dailyHours===-h?d.a1+"10":d.card}}
+                  onClick={()=>setDailyHours(-h)}>
+                  <div style={{width:36,height:36,borderRadius:9,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:d.a1,flexShrink:0}}>{h}h</div>
+                  <div style={{fontSize:12.5,color:d.t2}}>{label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:24}}>
+              <span style={{fontSize:12,color:d.t3,whiteSpace:"nowrap"}}>or enter custom:</span>
+              <input type="number" placeholder={String(recommended)} min="100" max="600"
+                onChange={e=>setDailyHours(-(parseInt(e.target.value)||recommended))}
+                style={{flex:1,padding:"10px 12px",borderRadius:8,background:d.hover,border:"1px solid "+d.b,color:d.t,fontSize:14,fontFamily:"inherit",outline:"none"}}/>
+              <span style={{fontSize:12,color:d.t3}}>hours</span>
             </div>
             <button
-              onClick={()=>onComplete({examWindow,studyDays,eduStatus,targetHours:customHours||recommended})}
-              style={{width:"100%",padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
-              start studying →
+              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:Math.abs(dailyHours)||2,targetHours:dailyHours<0?Math.abs(dailyHours):recommended})}
+              style={{width:"100%",padding:"14px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginBottom:10}}>
+              build my roadmap →
             </button>
-            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit",display:"block",margin:"10px auto 0"}}>← back</button>
-          </Step>
+            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+          </div>
         )}
       </div>
     </div>
@@ -3152,4 +3178,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
