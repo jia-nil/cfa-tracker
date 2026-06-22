@@ -382,19 +382,20 @@ const SUBJECT_COLORS = {
 // ── Real CFA exam windows (2026) ──────────────────────────────────────────────
 const CFA_EXAM_WINDOWS = {
   L1: [
-    {id:"2026-02",label:"Feb 2026",start:"2026-02-02",end:"2026-02-08",regOpen:"2025-05-13",regClose:"2026-01-14"},
-    {id:"2026-05",label:"May 2026",start:"2026-05-12",end:"2026-05-18",regOpen:"2025-08-12",regClose:"2026-04-15"},
-    {id:"2026-08",label:"Aug 2026",start:"2026-08-18",end:"2026-08-24",regOpen:"2025-11-11",regClose:"2026-07-15"},
-    {id:"2026-11",label:"Nov 2026",start:"2026-11-11",end:"2026-11-17",regOpen:"2026-02-11",regClose:"2026-10-14"},
+    {id:"2026-08",label:"August 2026",start:"2026-08-18",end:"2026-08-24"},
+    {id:"2026-11",label:"November 2026",start:"2026-11-11",end:"2026-11-17"},
+    {id:"2027-02",label:"February 2027",start:"2027-02-08",end:"2027-02-14"},
+    {id:"2027-05",label:"May 2027",start:"2027-05-17",end:"2027-05-23"},
   ],
   L2: [
-    {id:"2026-05",label:"May 2026",start:"2026-05-19",end:"2026-05-23",regOpen:"2025-08-12",regClose:"2026-04-15"},
-    {id:"2026-08",label:"Aug 2026",start:"2026-08-25",end:"2026-08-29",regOpen:"2025-11-11",regClose:"2026-07-15"},
-    {id:"2026-11",label:"Nov 2026",start:"2026-11-18",end:"2026-11-22",regOpen:"2026-02-11",regClose:"2026-10-14"},
+    {id:"2026-08",label:"August 2026",start:"2026-08-25",end:"2026-08-29"},
+    {id:"2026-11",label:"November 2026",start:"2026-11-18",end:"2026-11-22"},
+    {id:"2027-05",label:"May 2027",start:"2027-05-19",end:"2027-05-23"},
   ],
   L3: [
-    {id:"2026-02",label:"Feb 2026",start:"2026-01-29",end:"2026-02-01",regOpen:"2025-05-13",regClose:"2026-01-14"},
-    {id:"2026-08",label:"Aug 2026",start:"2026-08-13",end:"2026-08-17",regOpen:"2025-11-11",regClose:"2026-07-15"},
+    {id:"2026-08",label:"August 2026",start:"2026-08-13",end:"2026-08-17"},
+    {id:"2027-02",label:"February 2027",start:"2027-02-03",end:"2027-02-07"},
+    {id:"2027-08",label:"August 2027",start:"2027-08-12",end:"2027-08-16"},
   ],
 };
 const CFA_RECOMMENDED_HOURS = {L1:300, L2:328, L3:344}; // CFA Institute candidate survey averages
@@ -788,26 +789,28 @@ function ExamSetupScreen({d,jeClass,classLabel,onComplete}){
 
         {step===1&&(
           <Step title="when are you sitting for the exam?" sub={"select your target window for "+classLabel}>
-            {windows.map(w=>{
-              const daysLeft=Math.max(0,Math.ceil((new Date(w.start)-new Date())/86400000));
-              const regOpen=new Date()>=new Date(w.regOpen);
+            {windows.filter(w=>new Date(w.start)>new Date()).map(w=>{
+              const daysLeft=Math.ceil((new Date(w.start)-new Date())/86400000);
               return(
                 <div key={w.id} style={cardStyle}
                   onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
                   onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
                   onClick={()=>{setExamWindow(w.id);setStep(2);}}>
-                  <div style={{width:36,height:36,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>
-                    {w.label.split(" ")[0].slice(0,3).toUpperCase()}
+                  <div style={{width:40,height:40,borderRadius:8,background:d.a1+"18",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:d.a1,flexShrink:0,lineHeight:1.3}}>
+                    <span style={{fontSize:11}}>{w.label.split(" ")[0].slice(0,3).toUpperCase()}</span>
+                    <span>{w.label.split(" ")[1]}</span>
                   </div>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:600,color:d.t}}>{w.label}</div>
-                    <div style={{fontSize:11,color:d.t3,marginTop:1}}>
-                      {daysLeft>0?daysLeft+" days away":"window passed"}{!regOpen&&" · registration not yet open"}
-                    </div>
+                    <div style={{fontSize:13.5,fontWeight:600,color:d.t}}>{w.label}</div>
+                    <div style={{fontSize:11,color:d.t3,marginTop:2}}>{daysLeft} days away</div>
                   </div>
+                  <div style={{fontSize:10,color:d.t3}}>→</div>
                 </div>
               );
             })}
+            {windows.filter(w=>new Date(w.start)>new Date()).length===0&&(
+              <div style={{textAlign:"center",padding:"24px",color:d.t3,fontSize:13}}>no upcoming windows available. check cfa institute website.</div>
+            )}
           </Step>
         )}
 
@@ -1900,7 +1903,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               <div style={{minWidth:0}}>
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
-                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})} · ${Math.max(0,Math.ceil((new Date("2025-11-22")-new Date())/86400000))}d left. days left. tick tock.`}
+                  {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}${examDate?" · "+Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000))+"d left":""}. tick tock.`}
                   {tab==="coach"&&"your CFA exam co-pilot. i know things about you."}
                   {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
                   {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
