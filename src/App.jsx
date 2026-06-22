@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -253,6 +252,69 @@ function isOverdue(dateStr){return dateStr<today();}
 function isDueToday(dateStr){return dateStr===today();}
 function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
 function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
+function weekdayIndex(dateStr){const jsDay=new Date(dateStr+"T00:00:00").getDay();return (jsDay+6)%7;} // Mon=0..Sun=6
+function weekStartOf(dateStr){return addDays(dateStr,-weekdayIndex(dateStr));}
+function longestStreak(sessions){
+  const days=[...new Set(sessions.map(s=>s.date))].sort();
+  if(!days.length)return 0;
+  let longest=1,cur=1;
+  for(let i=1;i<days.length;i++){
+    if(daysBetween(days[i-1],days[i])===1){cur++;longest=Math.max(longest,cur);}
+    else cur=1;
+  }
+  return longest;
+}
+// ── Roadmap generator — distributes all topics for a level across study days ──
+function allTopicsForLevel(level){
+  const out=[];
+  Object.keys(TOPICS).forEach(sub=>{
+    const list=TOPICS[sub]?.[level]||[];
+    list.forEach(topic=>out.push({subject:sub,topic,weight:getWeight(sub,topic,level)}));
+  });
+  const order={H:0,M:1,L:2};
+  return out.sort((a,b)=>order[a.weight]-order[b.weight]);
+}
+function generateRoadmap({level,examDate,studyDays}){
+  const topics=allTopicsForLevel(level);
+  if(topics.length===0||!examDate) return {weeks:[],totalDays:0};
+  const totalDaysToExam=Math.max(1,daysBetween(today(),examDate));
+  const revisionDays=Math.min(14,Math.max(5,Math.round(totalDaysToExam*0.12)));
+  const studyPhaseDays=Math.max(1,totalDaysToExam-revisionDays);
+  const studyDates=[];
+  for(let i=0;i<studyPhaseDays;i++){
+    const dt=addDays(today(),i);
+    if((studyDays||[]).includes(weekdayIndex(dt))) studyDates.push(dt);
+  }
+  if(studyDates.length===0) return {weeks:[],totalDays:totalDaysToExam,revisionDays,noStudyDays:true};
+  const passesFor={H:3,M:2,L:1};
+  const sessionPool=[];
+  topics.forEach(t=>{
+    const passes=passesFor[t.weight];
+    for(let p=0;p<passes;p++) sessionPool.push({...t,pass:p+1,totalPasses:passes});
+  });
+  sessionPool.sort((a,b)=>a.pass-b.pass);
+  const perDaySessions=Math.max(1,Math.round(sessionPool.length/studyDates.length));
+  const assignments=studyDates.map(dt=>({date:dt,items:[]}));
+  let poolIdx=0,dayIdx=0;
+  while(poolIdx<sessionPool.length){
+    const slot=assignments[dayIdx%assignments.length];
+    if(slot.items.length<perDaySessions||dayIdx>=assignments.length){slot.items.push(sessionPool[poolIdx]);poolIdx++;}
+    dayIdx++;
+    if(dayIdx>assignments.length*6) break;
+  }
+  while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;}
+  const weeksMap={};
+  assignments.forEach(a=>{
+    const wIdx=Math.floor(daysBetween(today(),a.date)/7);
+    if(!weeksMap[wIdx]) weeksMap[wIdx]=[];
+    weeksMap[wIdx].push(a);
+  });
+  const weeks=Object.keys(weeksMap).sort((a,b)=>a-b).map(k=>({weekNum:parseInt(k)+1,days:weeksMap[k]}));
+  const revisionStart=addDays(examDate,-revisionDays);
+  const revisionTopics=topics.filter(t=>t.weight==="H"||t.weight==="M");
+  return {weeks,totalDays:totalDaysToExam,studyDates,revisionDays,revisionStart,revisionTopics,totalSessions:sessionPool.length,perDaySessions};
+}
+function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
 
 // ── Select component ──────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
@@ -427,15 +489,16 @@ const STREAK_MILESTONES = [
 
 const TABS=[
   {id:"overview",label:"Overview",icon:"⌂"},
-  {id:"coach",label:"Analytics",icon:"◈"},
-  {id:"goals",label:"today's goals",icon:"◎"},
-  {id:"sessions",label:"Sessions",icon:"◷"},
-  {id:"streaks",label:"Streaks",icon:"🔥"},
+  {id:"rank",label:"Readiness",icon:"🎯"},
+  {id:"goals",label:"Today's Goals",icon:"◎"},
+  {id:"planner",label:"Planner",icon:"📅"},
   {id:"syllabus",label:"Syllabus",icon:"📋"},
   {id:"revision",label:"Revision",icon:"↺"},
-  {id:"rank",label:"Readiness",icon:"🎯"},
-  {id:"feed",label:"Feed",icon:"◉"},
-  {id:"events",label:"Events",icon:"⚡"},
+  {id:"sessions",label:"Sessions",icon:"◷"},
+  {id:"coach",label:"Analytics",icon:"◈"},
+  {id:"streaks",label:"Streaks",icon:"🔥"},
+  {id:"partner",label:"Accountability",icon:"🤝"},
+  {id:"report",label:"Weekly Report",icon:"📨"},
   {id:"profile",label:"Profile",icon:"◯"},
 ];
 
@@ -895,12 +958,12 @@ export default function App(){
   const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
   // ── Exam setup state ─────────────────────────────────────────────────────
   const [examWindow,setExamWindow]=useState(()=>{try{return localStorage.getItem("nev_exam_window")||null;}catch(e){return null;}});
-  const [regStatus,setRegStatus]=useState(()=>{try{return localStorage.getItem("nev_reg_status")||null;}catch(e){return null;}}); // "registered"|"planning"|"not_eligible"
+  const [studyDays,setStudyDays]=useState(()=>{try{const v=localStorage.getItem("nev_study_days");return v?JSON.parse(v):[0,1,2,3,4];}catch(e){return [0,1,2,3,4];}});
   const [eduStatus,setEduStatus]=useState(()=>{try{return localStorage.getItem("nev_edu_status")||null;}catch(e){return null;}}); // "student"|"working"|"graduated"
   const [targetHours,setTargetHours]=useState(()=>{try{const v=localStorage.getItem("nev_target_hours");return v?parseInt(v):null;}catch(e){return null;}});
   const [examSetupDone,setExamSetupDone]=useState(()=>{try{return localStorage.getItem("nev_exam_setup_done")==="1";}catch(e){return false;}});
   useEffect(()=>{try{if(examWindow)localStorage.setItem("nev_exam_window",examWindow);}catch(e){}},[examWindow]);
-  useEffect(()=>{try{if(regStatus)localStorage.setItem("nev_reg_status",regStatus);}catch(e){}},[regStatus]);
+  useEffect(()=>{try{localStorage.setItem("nev_study_days",JSON.stringify(studyDays));}catch(e){}},[studyDays]);
   useEffect(()=>{try{if(eduStatus)localStorage.setItem("nev_edu_status",eduStatus);}catch(e){}},[eduStatus]);
   useEffect(()=>{try{if(targetHours)localStorage.setItem("nev_target_hours",String(targetHours));}catch(e){}},[targetHours]);
   const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
@@ -956,6 +1019,31 @@ export default function App(){
       }};
     });
   }
+  // ── Planner / Roadmap completion state ───────────────────────────────────
+  const [roadmapDone,setRoadmapDone]=useState(()=>{try{const c=localStorage.getItem("nev_roadmap_done");return c?JSON.parse(c):{};}catch(e){return {};}});
+  useEffect(()=>{try{localStorage.setItem("nev_roadmap_done",JSON.stringify(roadmapDone));}catch(e){}},[roadmapDone]);
+  function toggleRoadmapItem(date,item){
+    const key=itemKey(date,item);
+    setRoadmapDone(prev=>{
+      const next={...prev};
+      const willBeDone=!next[key];
+      if(next[key]) delete next[key]; else next[key]=true;
+      if(authSession?.access_token&&user?.id){
+        if(willBeDone) fetch(`${SB_URL}/rest/v1/nev_completed`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,item_key:key,subject:item.subject,topic:item.topic,completed_at:new Date().toISOString()})}).catch(()=>{});
+        else fetch(`${SB_URL}/rest/v1/nev_completed?user_id=eq.${user.id}&item_key=eq.${encodeURIComponent(key)}`,{method:"DELETE",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}}).catch(()=>{});
+      }
+      return next;
+    });
+  }
+  // ── Roadmap — recomputed whenever level/window/study days change ──────────
+  const windowData=(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow);
+  const examDate=windowData?.start||null;
+  const roadmap=useMemo(()=>{
+    if(!jeClass||!examDate) return null;
+    return generateRoadmap({level:jeClass,examDate,studyDays});
+  },[jeClass,examDate,studyDays]);
+  const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
+  const roadmapTodayItems=(roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[];
   const [coachCards,setCoachCards]=useState(null);
   // ── Social state ──────────────────────────────────────────────────────────
   const [feed,setFeed]=useState([]);
@@ -1351,11 +1439,9 @@ export default function App(){
     const d=await r.json();
     if(Array.isArray(d))setLeaderboard(d.slice(0,50));
   }
-  // Load social data when feed/events/profile tab opened
+  // Load profile + leaderboard when profile tab opened
   useEffect(()=>{
-    if(tab==="feed"){fetchFeed(feedTab);fetchFollows();}
-    if(tab==="events"){fetchEvents();}
-    if(tab==="profile"){
+    if(tab==="profile"&&user?.id){
       fetchProfile(user.id).then(p=>setProfile(p));
       fetchLeaderboard();
     }
@@ -1536,18 +1622,18 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       d={d} jeClass={jeClass} classLabel={CLASSES.find(c=>c.id===jeClass)?.label}
       onComplete={(setup)=>{
         setExamWindow(setup.examWindow);
-        setRegStatus(setup.regStatus);
+        setStudyDays(setup.studyDays);
         setEduStatus(setup.eduStatus);
         setTargetHours(setup.targetHours);
         setExamSetupDone(true);
         try{
           localStorage.setItem("nev_exam_window",setup.examWindow);
-          localStorage.setItem("nev_reg_status",setup.regStatus);
+          localStorage.setItem("nev_study_days",JSON.stringify(setup.studyDays));
           localStorage.setItem("nev_edu_status",setup.eduStatus);
           localStorage.setItem("nev_target_hours",String(setup.targetHours));
           localStorage.setItem("nev_exam_setup_done","1");
         }catch(e){}
-        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,exam_window:setup.examWindow,reg_status:setup.regStatus,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
+        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
       }}
     />
   );
@@ -1822,8 +1908,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
                   {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
                   {tab==="rank"&&"are you ready to pass. be honest."}
-                  {tab==="feed"&&"what's everyone up to."}
-                  {tab==="events"&&"compete. suffer. grow."}
+                  {tab==="planner"&&"your full roadmap, auto-built around your exam date."}
+                  {tab==="partner"&&"two candidates, one deadline. accountability works."}
+                  {tab==="report"&&"every sunday, the truth about your week."}
                   {tab==="profile"&&`@${profile?.username||"..."}`}
                 </div>
               </div>
@@ -2567,9 +2654,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </span>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
-                      <span style={{fontSize:12,color:d.t3}}>Registration</span>
+                      <span style={{fontSize:12,color:d.t3}}>Study Days</span>
                       <span style={{fontSize:12,fontWeight:600,color:d.t}}>
-                        {{registered:"✓ Registered",planning:"Planning to register",not_eligible:"Checking eligibility"}[regStatus]||"not set"}
+                        {studyDays&&studyDays.length?studyDays.map(i=>["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]).join(", "):"not set"}
                       </span>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
@@ -3062,3 +3149,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
