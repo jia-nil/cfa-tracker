@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
+
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 const SB_AUTH = {
   async signUp(email, password) {
@@ -967,6 +967,9 @@ export default function App(){
       } else {
         setAuthLoading(false);
       }
+    } else {
+      // No OAuth token in URL — ensure loading state is cleared
+      setAuthLoading(false);
     }
   },[]);
   // Token refresh
@@ -1616,53 +1619,29 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   // ── CSS ───────────────────────────────────────────────────────────────────
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
-
-  if(!jeClass) return(
-    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
-      <style>{`html,body{overflow:hidden;}@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
-      <div style={{width:"100%",maxWidth:380,margin:"auto"}}>
-        <div style={{fontSize:26,fontWeight:900,color:d.t,marginBottom:24,letterSpacing:"-.05em",fontFamily:"'DM Serif Display',serif"}}>
-          nevile<span style={{color:d.a1}}>te</span>
-        </div>
-        <div style={{fontSize:20,fontWeight:600,letterSpacing:"-.02em",color:d.t,marginBottom:4}}>which level are you studying for?</div>
-        <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>study smarter. pass faster.</div>
-        {CLASSES.map(c=>(
-          <div key={c.id}
-            style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px",border:`1.5px solid ${d.b}`,borderRadius:10,cursor:"pointer",marginBottom:8,background:d.card,transition:"border-color .15s"}}
-            onMouseOver={e=>e.currentTarget.style.borderColor=d.bs}
-            onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
-            onClick={()=>{
-                  setJeClass(c.id);
-                  try{localStorage.setItem("slothr_class",c.id);}catch(e){}
-                  if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:c.id})}).catch(()=>{});
-                }}>
-            <div style={{width:32,height:32,borderRadius:8,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0,color:d.a1,fontWeight:700}}>{c.icon}</div>
-            <div style={{fontSize:13,fontWeight:500,color:d.t}}>{c.label}</div>
-          </div>
-        ))}
-        <div style={{fontSize:10.5,color:d.t4,textAlign:"center",marginTop:12}}>you can change this later.</div>
-      </div>
-    </div>
-  );
-
   // ── Exam Setup flow — runs once after level is picked ────────────────────
-  if(jeClass && !examSetupDone) return(
+  // ExamSetupDone is false if: brand new user, OR returning user with stale JEE class (dropper/11th/12th)
+  const needsSetup = !examSetupDone || !jeClass || !CLASSES.find(c=>c.id===jeClass);
+  if(needsSetup) return(
     <ExamSetupScreen
-      d={d} jeClass={jeClass} classLabel={CLASSES.find(c=>c.id===jeClass)?.label}
+      d={d}
+      initialLevel={CLASSES.find(c=>c.id===jeClass)?jeClass:null}
       onComplete={(setup)=>{
+        setJeClass(setup.level);
         setExamWindow(setup.examWindow);
         setStudyDays(setup.studyDays);
         setEduStatus(setup.eduStatus);
         setTargetHours(setup.targetHours);
         setExamSetupDone(true);
         try{
+          localStorage.setItem("slothr_class",setup.level);
           localStorage.setItem("nev_exam_window",setup.examWindow);
           localStorage.setItem("nev_study_days",JSON.stringify(setup.studyDays));
-          localStorage.setItem("nev_edu_status",setup.eduStatus);
+          localStorage.setItem("nev_edu_status",setup.eduStatus||"");
           localStorage.setItem("nev_target_hours",String(setup.targetHours));
           localStorage.setItem("nev_exam_setup_done","1");
         }catch(e){}
-        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
+        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:setup.level,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
       }}
     />
   );
@@ -2015,43 +1994,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                     ))}
                   </div>
-                  {/* recent practice tests — auto-populated from NTA simulation */}
-                  <div className="card" style={{padding:"22px 24px"}}>
-                    <div className="rowb" style={{marginBottom:16}}>
-                      <div className="cl" style={{letterSpacing:".14em"}}>recent practice tests</div>
-                      {mocks.length>0&&<button className="ghost-sm" onClick={()=>{}}>take a test →</button>}
-                    </div>
-                    {mocks.length===0?(
-                      <div className="empty" style={{padding:"14px 0"}}>
-                        <div className="et">zero attempts. bold. i like the confidence.</div>
-                        <div className="es">uncharted territory. take the test.</div>
-                        <button className="btn btn-d" style={{marginTop:12,padding:"8px 18px",fontSize:12}} onClick={()=>{}}>→ go to practice</button>
-                      </div>
-                    ):[...mocks].reverse().slice(0,4).map(m=>{
-                      const total=m.physics+m.chemistry+m.math;
-                      const outOf=180;
-                      const pct=Math.round((total/outOf)*100);
-                      const scoreC=pct>=60?d.a2:pct>=40?d.gold:d.danger;
-                      return(
-                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${d.div}`}}>
-                          <div style={{width:38,height:38,borderRadius:2,background:`${scoreC}14`,border:`1px solid ${scoreC}30`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                            <span style={{fontFamily:"'DM Serif Display',serif",fontSize:15,fontWeight:400,color:scoreC}}>{total}</span>
-                          </div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</div>
-                            <div style={{fontSize:10.5,color:d.t3,marginTop:2}}>
-                              <span style={{color:SUBJECT_COLORS.Physics}}>P {m.physics}</span>
-                              <span style={{margin:"0 5px",color:d.t4}}>·</span>
-                              <span style={{color:SUBJECT_COLORS.Chemistry}}>C {m.chemistry}</span>
-                              <span style={{margin:"0 5px",color:d.t4}}>·</span>
-                              <span style={{color:SUBJECT_COLORS.Mathematics}}>M {m.math}</span>
-                            </div>
-                          </div>
-                          <div style={{fontSize:10,color:d.t4,flexShrink:0}}>{m.date}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
+
                 </div>
               </div>
             )}
@@ -3172,9 +3115,272 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               </div>
             )}
 
+            {/* ── PLANNER ── */}
+            {tab==="planner"&&(()=>{
+              if(!roadmap) return(
+                <div className="pin">
+                  <div style={{textAlign:"center",padding:"60px 24px"}}>
+                    <div style={{fontSize:32,marginBottom:12}}>📅</div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:20,color:d.t,marginBottom:8}}>no roadmap yet</div>
+                    <div style={{fontSize:13,color:d.t3,marginBottom:20}}>your exam window isn't set. go to profile → edit exam setup.</div>
+                    <button onClick={()=>switchTab("profile")} style={{padding:"10px 22px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700}}>set exam window →</button>
+                  </div>
+                </div>
+              );
+              return(
+                <div className="pin">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
+                    <div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>your roadmap</div>
+                      <div style={{fontSize:12,color:d.t3}}>{roadmap.totalDays} days · {roadmap.weeks?.length||0} study weeks · last {roadmap.revisionDays} days = revision</div>
+                    </div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {[
+                        {l:"Total Topics",v:roadmap.totalSessions},
+                        {l:"Study Days",v:roadmap.studyDates?.length||0},
+                        {l:"Per Day",v:roadmap.perDaySessions},
+                      ].map(s=>(
+                        <div key={s.l} style={{textAlign:"center",padding:"10px 16px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{s.v}</div>
+                          <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".05em",marginTop:2}}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {(roadmap.weeks||[]).map(week=>{
+                    const weekTopics=[...new Set(week.days.flatMap(dd=>dd.items.map(it=>it.subject)))];
+                    const weekDone=week.days.flatMap(dd=>dd.items).filter(it=>roadmapDone[itemKey(week.days[0]?.date||today(),it)]);
+                    return(
+                      <div key={week.weekNum} style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:14,overflow:"hidden"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:d.hover,borderBottom:`1px solid ${d.b}`,flexWrap:"wrap",gap:8}}>
+                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>Week {week.weekNum}</div>
+                          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                            {weekTopics.map(s=><span key={s} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:(SUBJECT_COLORS[s]||d.a1)+"18",color:SUBJECT_COLORS[s]||d.a1,fontWeight:700}}>{s}</span>)}
+                          </div>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:1,background:d.b}}>
+                          {week.days.map(dd=>(
+                            <div key={dd.date} style={{background:d.card,padding:"10px 10px",minHeight:80}}>
+                              <div style={{fontSize:10,fontWeight:700,color:d.t3,marginBottom:6}}>{dayName(dd.date)} <span style={{color:d.t4}}>{dd.date.slice(5)}</span></div>
+                              {dd.items.map((item,i)=>{
+                                const key=itemKey(dd.date,item);
+                                const done=roadmapDone[key];
+                                return(
+                                  <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)}
+                                    style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none"}}>
+                                    {item.topic}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {roadmap.revisionDays>0&&(
+                    <div style={{background:d.card,border:`1px solid ${d.gold}40`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+                      <div style={{padding:"12px 16px",background:d.hover,borderBottom:`1px solid ${d.b}`}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.gold}}>Final Revision · last {roadmap.revisionDays} days</div>
+                        <div style={{fontSize:11,color:d.t3,marginTop:2}}>starting {roadmap.revisionStart}</div>
+                      </div>
+                      <div style={{padding:"14px 16px",fontSize:12.5,color:d.t2,lineHeight:1.7}}>
+                        every day is free for revision. prioritise Ethics, Fixed Income, Equity and FRA — these carry the most marks. use your syllabus tab to find where you're weakest.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── ACCOUNTABILITY PARTNER ── */}
+            {tab==="partner"&&(()=>{
+              const [partnerSearch,setPartnerSearch]=useState("");
+              const [partnerResults,setPartnerResults]=useState([]);
+              const [partnerLoading,setPartnerLoading]=useState(false);
+              const [myPartner,setMyPartner]=useState(null);
+
+              async function findPartners(){
+                setPartnerLoading(true);
+                try{
+                  const r=await fetch(`${SB_URL}/rest/v1/profiles?cfa_level=eq.${jeClass}&id=neq.${user?.id}&select=id,username,display_name,avatar_url,cfa_level&limit=20`,
+                    {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||""}`}});
+                  const d2=await r.json();
+                  if(Array.isArray(d2))setPartnerResults(d2);
+                }catch(e){}
+                setPartnerLoading(false);
+              }
+
+              return(
+                <div className="pin">
+                  <div style={{marginBottom:24}}>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>accountability partner</div>
+                    <div style={{fontSize:13,color:d.t3}}>matched to candidates preparing for {jeClass?`CFA ${jeClass}`:"the same exam"}. two people, one deadline.</div>
+                  </div>
+
+                  {!myPartner&&(
+                    <div className="card" style={{padding:20,marginBottom:20,textAlign:"center"}}>
+                      <div style={{fontSize:28,marginBottom:12}}>🤝</div>
+                      <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:6}}>find a study partner</div>
+                      <div style={{fontSize:12,color:d.t3,marginBottom:16}}>we match you with candidates studying the same level and targeting a similar exam window.</div>
+                      <button onClick={findPartners} disabled={partnerLoading}
+                        style={{padding:"10px 24px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,opacity:partnerLoading?.6:1}}>
+                        {partnerLoading?"searching...":"find partners"}
+                      </button>
+                    </div>
+                  )}
+
+                  {partnerResults.length>0&&(
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:d.t3,letterSpacing:".08em",textTransform:"uppercase",marginBottom:12}}>candidates matching your level</div>
+                      {partnerResults.map(p=>(
+                        <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10,marginBottom:8}}>
+                          <div style={{width:40,height:40,borderRadius:12,background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:15,flexShrink:0}}>
+                            {(p.display_name||p.username||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,color:d.t}}>{p.display_name||p.username}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{p.username} · CFA {p.cfa_level}</div>
+                          </div>
+                          <button onClick={()=>setMyPartner(p)}
+                            style={{padding:"7px 16px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                            partner up
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {myPartner&&(
+                    <div className="card" style={{padding:20}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+                        <div style={{width:48,height:48,borderRadius:14,background:`linear-gradient(135deg,${d.a2},${d.a1})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:18}}>
+                          {(myPartner.display_name||myPartner.username||"?")[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{fontSize:14,fontWeight:700,color:d.t}}>{myPartner.display_name||myPartner.username}</div>
+                          <div style={{fontSize:11,color:d.a2}}>your accountability partner ✓</div>
+                        </div>
+                        <button onClick={()=>setMyPartner(null)} style={{marginLeft:"auto",background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>remove</button>
+                      </div>
+                      <div style={{fontSize:12.5,color:d.t2,lineHeight:1.7,fontStyle:"italic"}}>
+                        check in with your partner regularly. tell them what you studied. ask them what they covered. accountability is 40% of success.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── WEEKLY REPORT ── */}
+            {tab==="report"&&(()=>{
+              const thisWeekStart=weekStartOf(today());
+              const lastWeekStart=addDays(thisWeekStart,-7);
+              const thisWeekSess=sessions.filter(s=>s.date>=thisWeekStart&&s.date<=today());
+              const lastWeekSess=sessions.filter(s=>s.date>=lastWeekStart&&s.date<thisWeekStart);
+              const thisWeekMins=thisWeekSess.reduce((a,s)=>a+(s.duration||0),0);
+              const lastWeekMins=lastWeekSess.reduce((a,s)=>a+(s.duration||0),0);
+              const thisWeekHrs=Math.round(thisWeekMins/60*10)/10;
+              const lastWeekHrs=Math.round(lastWeekMins/60*10)/10;
+              const weeklyTarget=studyDays?.length?(studyDays.length*(targetHours||300)/((roadmap?.totalDays||100)/7)):0;
+              const weeklyTargetHrs=Math.round(weeklyTarget/60*10)/10;
+              const behindHrs=Math.max(0,Math.round((weeklyTarget-thisWeekMins)/60*10)/10);
+              const trend=thisWeekMins>lastWeekMins?"up":thisWeekMins<lastWeekMins?"down":"flat";
+              const totalHrsLogged=Math.round(sessions.reduce((a,s)=>a+(s.duration||0),0)/60*10)/10;
+              const pct=Math.min(100,Math.round((totalHrsLogged/(targetHours||300))*100));
+              const bySubject=Object.keys(TOPICS).map(sub=>{
+                const mins=sessions.filter(s=>s.subject===sub).reduce((a,s)=>a+(s.duration||0),0);
+                return {sub,mins,hrs:Math.round(mins/60*10)/10};
+              }).filter(s=>s.mins>0).sort((a,b)=>b.mins-a.mins);
+              const daysLeft=examDate?Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000)):null;
+              const completionDate=examDate&&sessions.length>4?(()=>{
+                const avgWeeklyMins=totalHrsLogged*60/(Math.max(1,daysBetween(sessions[0]?.date||today(),today()))/7);
+                const minsLeft=Math.max(0,(targetHours||300)*60-totalHrsLogged*60);
+                const weeksLeft=avgWeeklyMins>0?minsLeft/avgWeeklyMins:null;
+                if(!weeksLeft)return null;
+                return addDays(today(),Math.round(weeksLeft*7));
+              })():null;
+              const finishBeforeExam=completionDate&&examDate?daysBetween(completionDate,examDate):null;
+
+              return(
+                <div className="pin">
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>weekly report</div>
+                    <div style={{fontSize:12,color:d.t3}}>week of {thisWeekStart} — generated for you, every Sunday.</div>
+                  </div>
+
+                  {/* The headline */}
+                  <div style={{padding:"20px 22px",background:d.card,border:`1px solid ${d.b}`,borderRadius:14,marginBottom:16}}>
+                    <div style={{fontSize:13,fontWeight:700,color:d.t3,letterSpacing:".08em",textTransform:"uppercase",marginBottom:8}}>this week</div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:36,color:trend==="up"?d.a2:trend==="down"?d.danger:d.t,letterSpacing:"-.04em",marginBottom:4}}>{thisWeekHrs}h studied</div>
+                    {lastWeekHrs>0&&<div style={{fontSize:12.5,color:d.t3,marginBottom:10}}>
+                      {trend==="up"?`↑ up from ${lastWeekHrs}h last week`:trend==="down"?`↓ down from ${lastWeekHrs}h last week`:`same as last week (${lastWeekHrs}h)`}
+                    </div>}
+                    {behindHrs>0&&<div style={{fontSize:12.5,color:d.gold,fontStyle:"italic"}}>you are {behindHrs}h behind your weekly target of {weeklyTargetHrs}h.</div>}
+                    {behindHrs===0&&thisWeekHrs>0&&<div style={{fontSize:12.5,color:d.a2,fontStyle:"italic"}}>you hit your weekly target. good.</div>}
+                  </div>
+
+                  {/* Stats grid */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
+                    {[
+                      {l:"Total Hours",v:totalHrsLogged+"h",c:d.a1},
+                      {l:"Target",v:(targetHours||300)+"h",c:d.t3},
+                      {l:"Completion",v:pct+"%",c:pct>=80?d.a2:pct>=50?d.gold:d.danger},
+                      {l:"Days Left",v:daysLeft!==null?daysLeft+"d":"—",c:d.gold},
+                    ].map(s=>(
+                      <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10}}>
+                        <div style={{fontSize:20,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}</div>
+                        <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".05em"}}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Predicted completion */}
+                  {completionDate&&(
+                    <div style={{padding:"14px 18px",borderRadius:10,background:finishBeforeExam>0?d.a2+"10":d.danger+"10",border:`1px solid ${finishBeforeExam>0?d.a2:d.danger}30`,marginBottom:16,fontSize:13,lineHeight:1.7,color:d.t2}}>
+                      {finishBeforeExam>0
+                        ?`at your current pace you'll finish ${finishBeforeExam} days before the exam. that's revision time. keep it up.`
+                        :`at your current pace you'll finish ${Math.abs(finishBeforeExam)} days AFTER your exam. you need to pick up the pace.`}
+                    </div>
+                  )}
+
+                  {/* By subject */}
+                  {bySubject.length>0&&(
+                    <div style={{padding:"16px 20px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16}}>
+                      <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:14}}>Hours by subject</div>
+                      {bySubject.map(s=>{
+                        const maxHrs=bySubject[0].hrs;
+                        const col=SUBJECT_COLORS[s.sub]||d.a1;
+                        return(
+                          <div key={s.sub} style={{marginBottom:10}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                              <span style={{fontSize:12,color:d.t}}>{s.sub}</span>
+                              <span style={{fontSize:11,fontWeight:600,color:col}}>{s.hrs}h</span>
+                            </div>
+                            <div style={{height:5,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${(s.hrs/maxHrs)*100}%`,background:col,borderRadius:3}}/>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {sessions.length<3&&(
+                    <div style={{textAlign:"center",padding:"24px",color:d.t3,fontSize:13,fontStyle:"italic"}}>
+                      log at least 3 sessions for a meaningful report.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
           </div>
         </div>
       </div>
     </>
   );
 }
+
