@@ -5,6 +5,7 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
+// ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
     const r = await fetch(`${SB_URL}/auth/v1/signup`, {
@@ -1934,70 +1935,161 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           <div className="inner">
 
             {/* ── OVERVIEW ── */}
-            {tab==="overview"&&(
-              <div className="pin">
-                {/* ── Hero stats — editorial wide layout ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:1,border:`1px solid ${d.b}`,borderRadius:2,overflow:"hidden",marginBottom:24,background:d.b,width:"100%"}}>
-                  {[
-                    {lbl:"This Week",    val:fmt(weekTime),  hint:`${sessions.filter(s=>s.date>=weekStart).length} sessions. i saw every one. don't think i didn't notice.`,     color:d.a1},
-                    {lbl:"Today",        val:fmt(todayTime), hint:todayTime===0?"oh you studied 0m? cute.":todayTime>=360?"okay you're actually good. don't let it go to your head.":`${fmt(todayTime)} logged. i saw every minute.`,color:todayTime>=360?d.a2:d.t},
-                    {lbl:"Goals",        val:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length||0}`, hint:todayGoals.filter(g=>g.achieved).length===todayGoals.length&&todayGoals.length>0?"i knew you had it. always did. 😏":"goals set. bold of you.", color:d.a2},
-                    {lbl:"PYQ Accuracy", val:pyqAccuracy!==null?`${pyqAccuracy}%`:"—", hint:pyqAccuracy===null?"uncharted territory.":pyqAccuracy>=80?"okay you're actually good. don't let it go to your head.":"yeah we're fixing this. together.", color:d.a3},
-                  ].map(s=>(
-                    <div key={s.lbl} style={{background:d.card,padding:"28px 26px"}}>
-                      <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:d.t4,marginBottom:14}}>{s.lbl}</div>
-                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:46,fontWeight:400,lineHeight:1,letterSpacing:"-.02em",color:s.color,marginBottom:10}}>{s.val}</div>
-                      <div style={{fontSize:11,color:d.t3,fontStyle:"italic"}}>{s.hint}</div>
+            {tab==="overview"&&(()=>{
+              const daysLeft=examDate?Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000)):null;
+              const totalHrs=Math.round(sessions.reduce((a,s)=>a+(s.duration||0),0)/60*10)/10;
+              const targetHrs=targetHours||300;
+              const pct=Math.min(100,Math.round((totalHrs/targetHrs)*100));
+              const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
+              const todayMins=sessions.filter(s=>s.date===today()).reduce((a,s)=>a+(s.duration||0),0);
+
+              // Today's items from roadmap
+              const todayRoadmap=roadmapTodayItems;
+              const isStudyDay=(studyDays||[]).includes(weekdayIndex(today()));
+
+              // Nearest upcoming topics from roadmap (next few days) for context
+              const upcoming=(roadmap?.weeks||[]).flatMap(w=>w.days)
+                .filter(dd=>dd.date>today()).slice(0,2)
+                .flatMap(dd=>dd.items.slice(0,2).map(it=>({...it,date:dd.date})));
+
+              // Readiness score (simple weighted)
+              const SUBS=Object.keys(TOPICS).filter(sub=>classTopics(sub).length>0);
+              const totalChaps=SUBS.reduce((a,sub)=>a+classTopics(sub).length,0);
+              const doneChaps=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>syllabusStatus[sub+"|"+t]==="done").length,0);
+              const covPct=totalChaps>0?Math.round((doneChaps/totalChaps)*100):0;
+              const readiness=Math.round(Math.min(100,(pct*0.4)+(covPct*0.4)+(Math.min(streak,30)/30*20)));
+              const readColor=readiness>=70?d.a2:readiness>=40?d.gold:d.danger;
+              const readLabel=readiness>=70?"On Track":readiness>=40?"Needs Work":"At Risk";
+
+              return(
+                <div className="pin">
+                  {/* ── Countdown banner ── */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t4,marginBottom:4}}>
+                        {windowData?windowData.label:"Exam Window"}
+                      </div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:32,color:d.t,letterSpacing:"-.03em",lineHeight:1}}>
+                        {daysLeft!==null?<>{daysLeft} <span style={{fontSize:16,color:d.t3}}>days left</span></>:"set your exam date"}
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="g2" style={{gap:14,marginBottom:24,minWidth:0}}>
-                  <div className="card cp" style={{padding:"24px 26px"}}>
-                    <div className="cl" style={{marginBottom:18,letterSpacing:".14em"}}>Subject Time</div>
-                    {Object.entries(SUBJECT_COLORS).map(([sub,color])=>(
-                      <div key={sub} style={{marginBottom:13}}>
-                        <div className="rowb" style={{marginBottom:5}}>
-                          <div className="row" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12.5,fontWeight:500}}>{sub}</span></div>
-                          <span style={{fontSize:11,color:d.t3}}>{fmt(totBySub[sub])}</span>
-                        </div>
-                        <div className="btrack"><div className="bfill" style={{width:`${(totBySub[sub]/barMax)*100}%`,background:color}}/></div>
+                    <div style={{display:"flex",gap:20,alignItems:"center"}}>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:700,color:readColor,fontFamily:"'DM Serif Display',serif"}}>{readiness}</div>
+                        <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>readiness</div>
+                        <div style={{fontSize:9,fontWeight:700,color:readColor}}>{readLabel}</div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="card cp">
-                    <div className="cl mb12">Today's Goals</div>
-                    {todayGoals.length===0?(<div className="empty" style={{padding:"18px 0"}}><div className="et">no goals yet.</div><div className="es">go to today's goals and add some.</div></div>)
-                    :todayGoals.slice(0,5).map(g=>(
-                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""} style={{padding:"9px 11px"}}>
-                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
-                        <div style={{flex:1}}>
-                          <div className={"goal-text"+g.achieved?" done":""} style={{fontSize:12.5}}>{g.text}</div>
-                          <div className="goal-meta">{g.subject}{g.topic?` · ${g.topic}`:""}</div>
-                        </div>
-                        {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:700,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{streak}d</div>
+                        <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>streak</div>
                       </div>
-                    ))}
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{totalHrs}h</div>
+                        <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>logged</div>
+                        <div style={{fontSize:9,color:d.t4}}>of {targetHrs}h</div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="g2" style={{gap:14,marginBottom:0}}>
-                  {/* Recent Study Sessions */}
-                  <div className="card" style={{padding:"22px 24px"}}>
-                    <div className="rowb" style={{marginBottom:16}}><div className="cl" style={{letterSpacing:".14em"}}>recent sessions</div><button className="ghost-sm" onClick={()=>setTab("sessions")}>see all →</button></div>
-                    {sessions.length===0&&<div className="empty" style={{padding:"14px 0"}}><div className="et">nothing yet.</div><div className="es">i'm watching. go.</div></div>}
-                    {[...sessions].reverse().slice(0,5).map(s=>(
-                      <div key={s.id} className="srow">
-                        <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
-                        <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
-                        <div className="stopic">{s.topic}</div>
-                        <div className="sdur">{fmt(s.duration)}</div>
-                        <div className="sdate">{s.date}</div>
+
+                  {/* ── Today's study plan ── */}
+                  <div style={{marginBottom:20}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:20,color:d.t,letterSpacing:"-.02em"}}>
+                        {isRevisionPhase?"Revision mode — today":"What to study today"}
+                      </div>
+                      <div style={{fontSize:11,color:d.t3}}>
+                        {todayMins>0?fmt(todayMins)+" logged today":"nothing logged yet"}
+                      </div>
+                    </div>
+
+                    {!isStudyDay&&!isRevisionPhase&&(
+                      <div style={{padding:"12px 16px",borderRadius:10,background:d.gold+"10",border:`1px solid ${d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12}}>
+                        📅 today isn't one of your scheduled study days — but any session still counts.
+                      </div>
+                    )}
+
+                    {todayRoadmap.length===0&&!isRevisionPhase&&(
+                      <div style={{padding:"24px",textAlign:"center",background:d.card,border:`1px solid ${d.b}`,borderRadius:12}}>
+                        <div style={{fontSize:22,marginBottom:8}}>✓</div>
+                        <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:4}}>nothing scheduled today</div>
+                        <div style={{fontSize:12,color:d.t3}}>check the planner for what's coming up, or log a free study session.</div>
+                      </div>
+                    )}
+
+                    {todayRoadmap.map((item,i)=>{
+                      const key=itemKey(today(),item);
+                      const done=roadmapDone[key];
+                      const col=SUBJECT_COLORS[item.subject]||d.a1;
+                      return(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:done?d.hover:d.card,border:`1px solid ${done?d.b:col+"30"}`,borderLeft:`3px solid ${done?d.b:col}`,borderRadius:10,marginBottom:8,transition:"all .2s",opacity:done?.6:1}}>
+                          <div onClick={()=>toggleRoadmapItem(today(),item)}
+                            style={{width:22,height:22,borderRadius:6,border:`2px solid ${done?d.a2:d.b}`,background:done?d.a2:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,color:"#fff",fontSize:12,fontWeight:700,transition:"all .15s"}}>
+                            {done&&"✓"}
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none",marginBottom:3}}>{item.topic}</div>
+                            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                              <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{item.subject}</span>
+                              <span style={{fontSize:10,color:d.t4}}>{item.weight==="H"?"● high weight":item.weight==="M"?"● medium weight":"● lower weight"}</span>
+                              {item.totalPasses>1&&<span style={{fontSize:10,color:d.t4}}>pass {item.pass}/{item.totalPasses}</span>}
+                            </div>
+                          </div>
+                          {!done&&(
+                            <button onClick={()=>{startTimer({...item,_date:today()});}} disabled={timerOn}
+                              style={{padding:"7px 14px",borderRadius:7,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0,opacity:timerOn?.4:1}}>
+                              ▶ start
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {isRevisionPhase&&(
+                      <div>
+                        <div style={{fontSize:12,color:d.t3,marginBottom:12,fontStyle:"italic"}}>you're in the final revision window. focus on these high-weight topics:</div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8}}>
+                          {(roadmap?.revisionTopics||[]).slice(0,8).map((t,i)=>(
+                            <div key={i} style={{padding:"10px 12px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${SUBJECT_COLORS[t.subject]||d.a1}`,borderRadius:8}}>
+                              <div style={{fontSize:12.5,fontWeight:600,color:d.t}}>{t.topic}</div>
+                              <div style={{fontSize:10,color:d.t3,marginTop:2}}>{t.subject}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Quick stats row ── */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:20}}>
+                    {[
+                      {l:"This Week",v:fmt(wkMins),c:d.a1},
+                      {l:"Syllabus",v:covPct+"%",c:covPct>=70?d.a2:d.gold},
+                      {l:"Target",v:pct+"%",c:pct>=70?d.a2:d.gold},
+                      {l:"Sessions",v:sessions.length,c:d.t2},
+                    ].map(s=>(
+                      <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10}}>
+                        <div style={{fontSize:20,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif",lineHeight:1}}>{s.v}</div>
+                        <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".05em"}}>{s.l}</div>
                       </div>
                     ))}
                   </div>
 
+                  {/* ── Coming up ── */}
+                  {upcoming.length>0&&(
+                    <div style={{padding:"14px 18px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12}}>
+                      <div style={{fontSize:11,fontWeight:700,color:d.t3,letterSpacing:".08em",textTransform:"uppercase",marginBottom:10}}>Coming up next</div>
+                      {upcoming.map((item,i)=>(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:i<upcoming.length-1?`1px solid ${d.b}`:"none"}}>
+                          <div style={{width:6,height:6,borderRadius:"50%",background:SUBJECT_COLORS[item.subject]||d.a1,flexShrink:0}}/>
+                          <div style={{flex:1,fontSize:12,color:d.t2}}>{item.topic}</div>
+                          <div style={{fontSize:10,color:d.t4}}>{item.date}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ── JEE COACH ── */}
             {tab==="coach"&&(
@@ -3383,4 +3475,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
