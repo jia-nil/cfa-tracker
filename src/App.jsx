@@ -5,6 +5,8 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
+
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -470,6 +472,19 @@ function getWeight(sub, topic, level){
   const lvlWeights = CFA_WEIGHTS[sub]||{};
   return lvlWeights[level||"L1"]||"M";
 }
+// Exam weight % ranges per topic area per level (from CFA Institute curriculum)
+const TOPIC_WEIGHT_RANGES = {
+  Ethics:           {L1:"15-20%",L2:"10-15%",L3:"10-15%"},
+  Quantitative:     {L1:"8-12%", L2:"5-10%", L3:"0-5%"},
+  Economics:        {L1:"8-12%", L2:"5-10%", L3:"5-10%"},
+  "Fin. Reporting": {L1:"13-17%",L2:"10-15%",L3:"0%"},
+  "Corp. Issuers":  {L1:"8-12%", L2:"5-10%", L3:"0%"},
+  Equity:           {L1:"10-12%",L2:"10-15%",L3:"10-15%"},
+  "Fixed Income":   {L1:"10-12%",L2:"10-15%",L3:"15-20%"},
+  Derivatives:      {L1:"5-8%",  L2:"5-10%", L3:"5-10%"},
+  "Alt. Investments":{L1:"5-8%", L2:"5-10%", L3:"5-10%"},
+  "Portfolio Mgmt": {L1:"5-8%",  L2:"10-15%",L3:"35-40%"},
+};
 const CLASSES = [
   {id:"L1", label:"CFA Level 1", icon:"Ⅰ"},
   {id:"L2", label:"CFA Level 2", icon:"Ⅱ"},
@@ -911,6 +926,154 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
   );
 }
 
+// ── Roadmap Questionnaire ─────────────────────────────────────────────────────
+function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
+  const SUBS=Object.keys(TOPICS).filter(s=>(TOPICS[s][jeClass]||[]).length>0);
+  const [step,setStep]=useState(0); // 0=completed topics, 1=weekly hours, 2=weak areas
+  const [completedTopics,setCompletedTopics]=useState({});
+  const [weeklyHrs,setWeeklyHrs]=useState(null);
+  const [weakAreas,setWeakAreas]=useState([]);
+  const [expandedSub,setExpandedSub]=useState(SUBS[0]||null);
+
+  function toggleTopic(sub,topic){
+    const key=sub+"|"+topic;
+    setCompletedTopics(prev=>({...prev,[key]:!prev[key]}));
+  }
+  function toggleWeak(sub){
+    setWeakAreas(prev=>prev.includes(sub)?prev.filter(x=>x!==sub):[...prev,sub]);
+  }
+
+  const totalTopics=SUBS.reduce((a,s)=>a+(TOPICS[s][jeClass]||[]).length,0);
+  const doneCount=Object.values(completedTopics).filter(Boolean).length;
+
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:9998,background:"rgba(10,10,15,.97)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"20px 16px",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:520,margin:"auto",paddingBottom:40}}>
+        <div style={{display:"flex",gap:4,marginBottom:24}}>
+          {[0,1,2].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
+        </div>
+
+        {step===0&&(
+          <div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>what have you already covered?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:6}}>tick anything you've studied before — even partially. we'll skip these in your roadmap.</div>
+            <div style={{fontSize:12,color:d.a2,marginBottom:20}}>{doneCount}/{totalTopics} topics marked done</div>
+            {SUBS.map(sub=>{
+              const topics=TOPICS[sub][jeClass]||[];
+              const subDone=topics.filter(t=>completedTopics[sub+"|"+t]).length;
+              const col=SUBJECT_COLORS[sub]||d.a1;
+              return(
+                <div key={sub} style={{marginBottom:8,background:d.card,border:`1px solid ${d.b}`,borderRadius:10,overflow:"hidden"}}>
+                  <div onClick={()=>setExpandedSub(expandedSub===sub?null:sub)}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",cursor:"pointer"}}>
+                    <div style={{width:4,height:28,borderRadius:2,background:col,flexShrink:0}}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:d.t}}>{sub}</div>
+                      <div style={{fontSize:10,color:d.t3,marginTop:1}}>{subDone}/{topics.length} done · {TOPIC_WEIGHT_RANGES[sub]?.[jeClass]||"—"} of exam</div>
+                    </div>
+                    <div style={{fontSize:11,color:d.t3}}>{expandedSub===sub?"▲":"▼"}</div>
+                  </div>
+                  {expandedSub===sub&&(
+                    <div style={{borderTop:`1px solid ${d.b}`}}>
+                      {topics.map(topic=>{
+                        const key=sub+"|"+topic;
+                        const done=completedTopics[key];
+                        return(
+                          <div key={topic} onClick={()=>toggleTopic(sub,topic)}
+                            style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",cursor:"pointer",background:done?d.a2+"08":"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .1s"}}>
+                            <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${done?d.a2:d.b}`,background:done?d.a2:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"#fff",fontSize:10,fontWeight:700}}>{done&&"✓"}</div>
+                            <div style={{flex:1,fontSize:12.5,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{topic}</div>
+                            <div style={{fontSize:9,color:getWeight(sub,topic,jeClass)==="H"?d.danger:getWeight(sub,topic,jeClass)==="M"?d.gold:d.t4,fontWeight:700,background:getWeight(sub,topic,jeClass)==="H"?d.danger+"15":getWeight(sub,topic,jeClass)==="M"?d.gold+"15":d.hover,padding:"1px 6px",borderRadius:3}}>
+                              {getWeight(sub,topic,jeClass)==="H"?"High":getWeight(sub,topic,jeClass)==="M"?"Mid":"Low"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{display:"flex",gap:10,marginTop:20}}>
+              <button onClick={()=>setStep(1)}
+                style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
+                continue →
+              </button>
+              <button onClick={onSkip}
+                style={{padding:"13px 20px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>
+                skip
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step===1&&(
+          <div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>how many hours can you study this week?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:24}}>be honest. we'll plan around your actual availability, not your ideal self.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:24}}>
+              {[
+                {h:5,label:"5h/week",sub:"~1h/day, 5 days"},
+                {h:10,label:"10h/week",sub:"~2h/day, 5 days"},
+                {h:15,label:"15h/week",sub:"~3h/day, 5 days"},
+                {h:20,label:"20h/week",sub:"~4h/day, 5 days"},
+                {h:25,label:"25h/week",sub:"serious mode"},
+                {h:30,label:"30h+/week",sub:"full-time prep"},
+              ].map(opt=>(
+                <div key={opt.h} onClick={()=>setWeeklyHrs(opt.h)}
+                  style={{padding:"16px",borderRadius:10,cursor:"pointer",textAlign:"center",transition:"all .15s",
+                    background:weeklyHrs===opt.h?d.a1+"18":d.card,
+                    border:`1.5px solid ${weeklyHrs===opt.h?d.a1:d.b}`}}>
+                  <div style={{fontSize:16,fontWeight:700,color:weeklyHrs===opt.h?d.a1:d.t,marginBottom:3}}>{opt.label}</div>
+                  <div style={{fontSize:11,color:d.t3}}>{opt.sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setStep(0)} style={{padding:"12px 18px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+              <button disabled={!weeklyHrs} onClick={()=>setStep(2)}
+                style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:weeklyHrs?1:.4}}>
+                continue →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step===2&&(
+          <div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>which areas feel weakest?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:20}}>we'll give these more repetition in your roadmap. pick any that apply.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+              {SUBS.map(sub=>{
+                const selected=weakAreas.includes(sub);
+                const col=SUBJECT_COLORS[sub]||d.a1;
+                return(
+                  <div key={sub} onClick={()=>toggleWeak(sub)}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderRadius:10,cursor:"pointer",transition:"all .15s",
+                      background:selected?col+"12":d.card,border:`1.5px solid ${selected?col:d.b}`}}>
+                    <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${selected?col:d.b}`,background:selected?col:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"#fff",fontSize:10,fontWeight:700}}>{selected&&"✓"}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:d.t}}>{sub}</div>
+                      <div style={{fontSize:10,color:d.t3}}>{TOPIC_WEIGHT_RANGES[sub]?.[jeClass]||"—"} of exam</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setStep(1)} style={{padding:"12px 18px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+              <button onClick={()=>onSave({completedTopics,weeklyHrs,weakAreas})}
+                style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
+                build my roadmap →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   // Tab switch — also closes sidebar on mobile
   function switchTab(newTab){
@@ -949,29 +1112,29 @@ export default function App(){
     setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
     try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
-  // OAuth redirect handler
-  const [authLoading,setAuthLoading]=useState(()=>window.location.hash.includes("access_token"));
+  // OAuth redirect handler — parse token from URL hash on mount
+  const [authLoading,setAuthLoading]=useState(false);
   useEffect(()=>{
     const hash=window.location.hash;
-    if(hash.includes("access_token")){
-      const p=new URLSearchParams(hash.replace("#","?"));
-      const token=p.get("access_token");
-      if(token){
-        SB_AUTH.getUser(token).then(u=>{
-          if(u){
-            const stored={access_token:token,refresh_token:p.get("refresh_token"),expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,user:u};
-            handleAuthSuccess(stored);
-            window.history.replaceState(null,"",window.location.pathname);
-          }
-          setAuthLoading(false);
-        }).catch(()=>setAuthLoading(false));
-      } else {
-        setAuthLoading(false);
+    if(!hash.includes("access_token")) return;
+    // Show loading only if we actually have a token to process
+    setAuthLoading(true);
+    const p=new URLSearchParams(hash.replace("#","?"));
+    const token=p.get("access_token");
+    if(!token){setAuthLoading(false);return;}
+    // Clear hash immediately so refresh doesn't reprocess it
+    window.history.replaceState(null,"",window.location.pathname);
+    SB_AUTH.getUser(token).then(u=>{
+      if(u){
+        const stored={
+          access_token:token,
+          refresh_token:p.get("refresh_token"),
+          expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,
+          user:u
+        };
+        handleAuthSuccess(stored);
       }
-    } else {
-      // No OAuth token in URL — ensure loading state is cleared
-      setAuthLoading(false);
-    }
+    }).catch(()=>{}).finally(()=>setAuthLoading(false));
   },[]);
   // Token refresh
   useEffect(()=>{
@@ -1051,6 +1214,13 @@ export default function App(){
         lastRevised:today(),
       }};
     });
+  }
+  // ── Roadmap personalization questionnaire ────────────────────────────────
+  const [roadmapAnswers,setRoadmapAnswers]=useState(()=>{try{const v=localStorage.getItem("nev_roadmap_answers");return v?JSON.parse(v):null;}catch(e){return null;}});
+  const [showRoadmapQs,setShowRoadmapQs]=useState(false);
+  function saveRoadmapAnswers(ans){
+    setRoadmapAnswers(ans);
+    try{localStorage.setItem("nev_roadmap_answers",JSON.stringify(ans));}catch(e){}
   }
   // ── Planner / Roadmap completion state ───────────────────────────────────
   const [roadmapDone,setRoadmapDone]=useState(()=>{try{const c=localStorage.getItem("nev_roadmap_done");return c?JSON.parse(c):{};}catch(e){return {};}});
@@ -1991,6 +2161,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   </div>
 
+                  {/* ── Questionnaire modal ── */}
+                  {showRoadmapQs&&(
+                    <RoadmapQuestionnaire
+                      d={d} jeClass={jeClass}
+                      onSave={(ans)=>{saveRoadmapAnswers(ans);setShowRoadmapQs(false);}}
+                      onSkip={()=>{saveRoadmapAnswers({skipped:true});setShowRoadmapQs(false);}}
+                    />
+                  )}
+
                   {/* ── Today's study plan ── */}
                   <div style={{marginBottom:20}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -2002,7 +2181,21 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                     </div>
 
-                    {!isStudyDay&&!isRevisionPhase&&(
+                    {/* Personalise CTA when no questionnaire answers yet */}
+                  {!roadmapAnswers&&!showRoadmapQs&&todayRoadmap.length>0&&(
+                    <div style={{padding:"14px 18px",borderRadius:10,background:d.a1+"10",border:`1px solid ${d.a1}25`,marginBottom:14,display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:200}}>
+                        <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:3}}>personalise your roadmap</div>
+                        <div style={{fontSize:12,color:d.t3}}>tell us what you've already covered and where you're weakest — we'll adjust what appears here.</div>
+                      </div>
+                      <button onClick={()=>setShowRoadmapQs(true)}
+                        style={{padding:"9px 18px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,flexShrink:0}}>
+                        answer 3 questions →
+                      </button>
+                    </div>
+                  )}
+
+                  {!isStudyDay&&!isRevisionPhase&&(
                       <div style={{padding:"12px 16px",borderRadius:10,background:d.gold+"10",border:`1px solid ${d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12}}>
                         📅 today isn't one of your scheduled study days — but any session still counts.
                       </div>
@@ -3475,3 +3668,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
