@@ -1449,6 +1449,14 @@ export default function App(){
   }
   const [showSharePrompt,setShowSharePrompt]=useState(false);
   const [lastSession,setLastSession]=useState(null);
+  // Comment state (used in feed posts)
+  const [openCommentPostId,setOpenCommentPostId]=useState(null);
+  const [comments,setComments]=useState([]);
+  const [commentText,setCommentText]=useState("");
+  // Partner state
+  const [partnerResults,setPartnerResults]=useState([]);
+  const [partnerLoading,setPartnerLoading]=useState(false);
+  const [myPartner,setMyPartner]=useState(null);
   function stopTimer(){
     setTimerOn(false);
     const elapsed=timerStartRef.current?Math.floor((Date.now()-timerStartRef.current)/1000):0;
@@ -2661,12 +2669,10 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   const p=post.profiles||{};
                   const meta=post.metadata||{};
                   const liked=post._liked||false;
-                  const [showComments,setShowComments]=useState(false);
-                  const [comments,setComments]=useState([]);
-                  const [commentText,setCommentText]=useState("");
+
                   const timeAgo=t=>{const s=Math.floor((Date.now()-new Date(t))/1000);if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";if(s<86400)return Math.floor(s/3600)+"h";return Math.floor(s/86400)+"d";};
-                  async function loadComments(){
-                    const r=await fetch(SB_URL+"/rest/v1/post_comments?post_id=eq."+post.id+"&select=*,profiles!post_comments_user_id_fkey(username,display_name,avatar_url)&order=created_at.asc",{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+authSession?.access_token}});
+                  async function loadComments(pid){
+                    const r=await fetch(SB_URL+"/rest/v1/post_comments?post_id=eq."+(pid||post.id)+"&select=*,profiles!post_comments_user_id_fkey(username,display_name,avatar_url)&order=created_at.asc",{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+authSession?.access_token}});
                     const d2=await r.json();
                     if(Array.isArray(d2))setComments(d2);
                   }
@@ -2724,13 +2730,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${liked?d.danger+"60":d.b}`,color:liked?d.danger:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
                           {liked?"♥":"♡"} {post.like_count||0}
                         </button>
-                        <button onClick={()=>{setShowComments(!showComments);if(!showComments)loadComments();}}
+                        <button onClick={()=>{const pid=post.id;setOpenCommentPostId(openCommentPostId===pid?null:pid);if(openCommentPostId!==pid)loadComments(pid);}}
                           style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
                           ◌ {post.comment_count||0}
                         </button>
                       </div>
 
-                      {showComments&&(
+                      {openCommentPostId===post.id&&(
                         <div style={{borderTop:`1px solid ${d.b}`,padding:"12px 16px"}}>
                           {comments.map(c=>(
                             <div key={c.id} style={{display:"flex",gap:8,marginBottom:10}}>
@@ -3482,10 +3488,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
             {/* ── ACCOUNTABILITY PARTNER ── */}
             {tab==="partner"&&(()=>{
-              const [partnerSearch,setPartnerSearch]=useState("");
-              const [partnerResults,setPartnerResults]=useState([]);
-              const [partnerLoading,setPartnerLoading]=useState(false);
-              const [myPartner,setMyPartner]=useState(null);
+
 
               async function findPartners(){
                 setPartnerLoading(true);
