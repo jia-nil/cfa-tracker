@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -1422,6 +1420,15 @@ export default function App(){
       return g;
     }));
   },[sessions,pyqHistory]);
+  // These must be before any early return
+  const [showSharePrompt,setShowSharePrompt]=useState(false);
+  const [lastSession,setLastSession]=useState(null);
+  const [openCommentPostId,setOpenCommentPostId]=useState(null);
+  const [comments,setComments]=useState([]);
+  const [commentText,setCommentText]=useState("");
+  const [partnerResults,setPartnerResults]=useState([]);
+  const [partnerLoading,setPartnerLoading]=useState(false);
+  const [myPartner,setMyPartner]=useState(null);
   // Auth gate — after ALL hooks
   if(authLoading)return(
     <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
@@ -1447,16 +1454,6 @@ export default function App(){
     setGoals(p=>[...p,{id:Date.now(),date:today(),text:goalInput||`${goalType==="study"?"Study":"Solve PYQs for"} ${goalTopic||goalSub}`,subject:goalSub,topic:goalTopic,type:goalType,target:Math.max(1,parseInt(goalTarget)||(goalType==="pyq"?10:60)),achieved:false,aiGenerated:false}]);
     setGoalInput("");setGoalTopic("");setGoalTarget("");
   }
-  const [showSharePrompt,setShowSharePrompt]=useState(false);
-  const [lastSession,setLastSession]=useState(null);
-  // Comment state (used in feed posts)
-  const [openCommentPostId,setOpenCommentPostId]=useState(null);
-  const [comments,setComments]=useState([]);
-  const [commentText,setCommentText]=useState("");
-  // Partner state
-  const [partnerResults,setPartnerResults]=useState([]);
-  const [partnerLoading,setPartnerLoading]=useState(false);
-  const [myPartner,setMyPartner]=useState(null);
   function stopTimer(){
     setTimerOn(false);
     const elapsed=timerStartRef.current?Math.floor((Date.now()-timerStartRef.current)/1000):0;
