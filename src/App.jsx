@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -1072,7 +1073,30 @@ function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
   );
 }
 
-export default function App(){
+// ── Error boundary — catches render crashes, shows reload instead of black screen ─
+class ErrorBoundary extends React.Component {
+  constructor(props){super(props);this.state={hasError:false,error:null};}
+  static getDerivedStateFromError(e){return{hasError:true,error:e};}
+  render(){
+    if(!this.state.hasError) return this.props.children;
+    return(
+      <div style={{position:"fixed",inset:0,background:"#0a0a0f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:"'DM Sans',sans-serif",padding:24}}>
+        <div style={{fontSize:32}}>⚠</div>
+        <div style={{fontSize:16,fontWeight:700,color:"#f0f0ff"}}>something went wrong</div>
+        <div style={{fontSize:12,color:"#7878a8",maxWidth:340,textAlign:"center",lineHeight:1.6}}>{this.state.error?.message||"unexpected error"}</div>
+        <button onClick={()=>window.location.reload()} style={{padding:"10px 24px",borderRadius:8,background:"#6c63ff",color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginTop:8}}>
+          reload
+        </button>
+      </div>
+    );
+  }
+}
+
+export default function AppWithBoundary(){
+  return <ErrorBoundary><App/></ErrorBoundary>;
+}
+
+function App(){
   // Tab switch — also closes sidebar on mobile
   function switchTab(newTab){
     setTab(newTab);
@@ -1107,32 +1131,32 @@ export default function App(){
   function handleSignOut(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
-    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);setCompletedTests({});
+    setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);
     try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
-  // OAuth redirect handler — parse token from URL hash on mount
+  // OAuth redirect handler — process silently, no loading state needed
+  // authLoading kept for compatibility but always false
   const [authLoading,setAuthLoading]=useState(false);
   useEffect(()=>{
     const hash=window.location.hash;
     if(!hash.includes("access_token")) return;
-    // Show loading only if we actually have a token to process
-    setAuthLoading(true);
     const p=new URLSearchParams(hash.replace("#","?"));
     const token=p.get("access_token");
-    if(!token){setAuthLoading(false);return;}
-    // Clear hash immediately so refresh doesn't reprocess it
+    if(!token) return;
+    // Clear hash first so back/refresh doesn't reprocess
     window.history.replaceState(null,"",window.location.pathname);
     SB_AUTH.getUser(token).then(u=>{
-      if(u){
-        const stored={
-          access_token:token,
-          refresh_token:p.get("refresh_token"),
-          expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,
-          user:u
-        };
-        handleAuthSuccess(stored);
-      }
-    }).catch(()=>{}).finally(()=>setAuthLoading(false));
+      if(!u) return;
+      const stored={
+        access_token:token,
+        refresh_token:p.get("refresh_token"),
+        expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,
+        user:u,
+      };
+      // Write to localStorage first so if React crashes the refresh picks it up
+      try{localStorage.setItem("slothr_auth",JSON.stringify(stored));}catch(e){}
+      setAuthSession(stored);
+    }).catch(()=>{});
   },[]);
   // Token refresh
   useEffect(()=>{
@@ -1430,12 +1454,7 @@ export default function App(){
   const [partnerLoading,setPartnerLoading]=useState(false);
   const [myPartner,setMyPartner]=useState(null);
   // Auth gate — after ALL hooks
-  if(authLoading)return(
-    <div style={{position:"fixed",inset:0,background:"#0e0d0b",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{fontSize:42}}>📊</div>
-      <div style={{fontSize:13,color:"#8a8070",letterSpacing:".06em"}}>signing you in...</div>
-    </div>
-  );
+  // authLoading removed — OAuth handled silently, app shows AuthScreen while processing
   if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
   const barMax=Math.max(...Object.values(totBySub),1);
   const currentMilestone=[...STREAK_MILESTONES].reverse().find(b=>streak>=b.days);
