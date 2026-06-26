@@ -5,7 +5,6 @@ const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1453,6 +1452,15 @@ function App(){
   const [partnerResults,setPartnerResults]=useState([]);
   const [partnerLoading,setPartnerLoading]=useState(false);
   const [myPartner,setMyPartner]=useState(null);
+  const [userSearch,setUserSearch]=useState("");
+  // Refs — must be declared before any early return
+  // Profile/leaderboard loader — must be before early returns
+  useEffect(()=>{
+    if(tab==="profile"&&user?.id){
+      fetchProfile(user.id).then(p=>setProfile(p));
+      fetchLeaderboard();
+    }
+  },[tab]);
   // Auth gate — after ALL hooks
   // authLoading removed — OAuth handled silently, app shows AuthScreen while processing
   if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
@@ -1666,13 +1674,7 @@ function App(){
     const d=await r.json();
     if(Array.isArray(d))setLeaderboard(d.slice(0,50));
   }
-  // Load profile + leaderboard when profile tab opened
-  useEffect(()=>{
-    if(tab==="profile"&&user?.id){
-      fetchProfile(user.id).then(p=>setProfile(p));
-      fetchLeaderboard();
-    }
-  },[tab]);
+
 
   async function runCoach(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
