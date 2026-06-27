@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
+
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -274,9 +276,14 @@ function allTopicsForLevel(level){
   const order={H:0,M:1,L:2};
   return out.sort((a,b)=>order[a.weight]-order[b.weight]);
 }
-function generateRoadmap({level,examDate,studyDays}){
-  const topics=allTopicsForLevel(level);
+function generateRoadmap({level,examDate,studyDays,answers}){
+  let topics=allTopicsForLevel(level);
   if(topics.length===0||!examDate) return {weeks:[],totalDays:0};
+  // Filter out topics user already completed in questionnaire
+  if(answers&&!answers.skipped&&answers.completedTopics){
+    topics=topics.filter(t=>!answers.completedTopics[t.subject+"|"+t.topic]);
+  }
+  const weakSet=new Set(answers?.weakAreas||[]);
   const totalDaysToExam=Math.max(1,daysBetween(today(),examDate));
   const revisionDays=Math.min(14,Math.max(5,Math.round(totalDaysToExam*0.12)));
   const studyPhaseDays=Math.max(1,totalDaysToExam-revisionDays);
@@ -289,7 +296,9 @@ function generateRoadmap({level,examDate,studyDays}){
   const passesFor={H:3,M:2,L:1};
   const sessionPool=[];
   topics.forEach(t=>{
-    const passes=passesFor[t.weight];
+    const base=passesFor[t.weight]||1;
+    const boost=weakSet.has(t.subject)?1:0; // extra pass for weak areas
+    const passes=base+boost;
     for(let p=0;p<passes;p++) sessionPool.push({...t,pass:p+1,totalPasses:passes});
   });
   sessionPool.sort((a,b)=>a.pass-b.pass);
@@ -508,10 +517,11 @@ const TABS=[
   {id:"planner",label:"Planner",icon:"📅"},
   {id:"syllabus",label:"Syllabus",icon:"📋"},
   {id:"revision",label:"Revision",icon:"↺"},
+  {id:"mocks",label:"Mock Scores",icon:"📝"},
   {id:"sessions",label:"Sessions",icon:"◷"},
   {id:"coach",label:"Analytics",icon:"◈"},
   {id:"streaks",label:"Streaks",icon:"🔥"},
-  {id:"partner",label:"Accountability",icon:"🤝"},
+  {id:"buddy",label:"Study Buddy",icon:"🤝"},
   {id:"report",label:"Weekly Report",icon:"📨"},
   {id:"profile",label:"Profile",icon:"◯"},
 ];
@@ -1236,6 +1246,22 @@ function App(){
       }};
     });
   }
+  // ── Mock exam scores ─────────────────────────────────────────────────────
+  const [mockScores,setMockScores]=useState(()=>{try{const v=localStorage.getItem("nev_mocks");return v?JSON.parse(v):[];}catch(e){return [];}});
+  useEffect(()=>{try{localStorage.setItem("nev_mocks",JSON.stringify(mockScores));}catch(e){}},[mockScores]);
+  const [showMockForm,setShowMockForm]=useState(false);
+  const [mockForm,setMockForm]=useState({date:today(),provider:"Kaplan",score:"",notes:"",weakTopics:[]});
+  // ── Study notes per topic ─────────────────────────────────────────────────
+  const [topicNotes,setTopicNotes]=useState(()=>{try{const v=localStorage.getItem("nev_topic_notes");return v?JSON.parse(v):{};}catch(e){return {};}});
+  useEffect(()=>{try{localStorage.setItem("nev_topic_notes",JSON.stringify(topicNotes));}catch(e){}},[topicNotes]);
+  const [editingNote,setEditingNote]=useState(null); // "sub|topic"
+  // ── Study buddy ───────────────────────────────────────────────────────────
+  const [buddySearch,setBuddySearch]=useState("");
+  const [buddyResults,setBuddyResults]=useState([]);
+  const [buddyLoading,setBuddyLoading]=useState(false);
+  const [buddyRequests,setBuddyRequests]=useState([]);
+  const [myBuddies,setMyBuddies]=useState(()=>{try{const v=localStorage.getItem("nev_buddies");return v?JSON.parse(v):[];}catch(e){return [];}});
+  useEffect(()=>{try{localStorage.setItem("nev_buddies",JSON.stringify(myBuddies));}catch(e){}},[myBuddies]);
   // ── Roadmap personalization questionnaire ────────────────────────────────
   const [roadmapAnswers,setRoadmapAnswers]=useState(()=>{try{const v=localStorage.getItem("nev_roadmap_answers");return v?JSON.parse(v):null;}catch(e){return null;}});
   const [showRoadmapQs,setShowRoadmapQs]=useState(false);
@@ -1264,8 +1290,8 @@ function App(){
   const examDate=windowData?.start||null;
   const roadmap=useMemo(()=>{
     if(!jeClass||!examDate) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays});
-  },[jeClass,examDate,studyDays]);
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers});
+  },[jeClass,examDate,studyDays,roadmapAnswers]);
   const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
   const roadmapTodayItems=(roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[];
   const [coachCards,setCoachCards]=useState(null);
@@ -2114,6 +2140,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
                   {tab==="rank"&&"are you ready to pass. be honest."}
                   {tab==="planner"&&"your full roadmap, auto-built around your exam date."}
+                  {tab==="mocks"&&"log every mock. track every score. see the trend."}
+                  {tab==="buddy"&&"find someone studying the same level. suffer together."}
                   {tab==="partner"&&"two candidates, one deadline. accountability works."}
                   {tab==="report"&&"every sunday, the truth about your week."}
                   {tab==="profile"&&`@${profile?.username||"..."}`}
@@ -3689,4 +3717,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
