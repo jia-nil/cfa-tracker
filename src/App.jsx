@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-
+// ── Con
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
@@ -253,7 +252,19 @@ function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);
 function isOverdue(dateStr){return dateStr<today();}
 function isDueToday(dateStr){return dateStr===today();}
 function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
-function calcStreak(sessions){const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();if(!days.length)return 0;let streak=0,cur=new Date();cur.setHours(0,0,0,0);for(const d of days){const dd=new Date(d);dd.setHours(0,0,0,0);if(Math.round((cur-dd)/86400000)<=1){streak++;cur=dd;}else break;}return streak;}
+function calcStreak(sessions){
+  const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();
+  if(!days.length)return 0;
+  // Use local date string to avoid timezone issues
+  const todayStr=(()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})();
+  let streak=0,curStr=todayStr;
+  for(const d of days){
+    const diff=daysBetween(d,curStr);
+    if(diff===0||diff===1){streak++;curStr=d;}
+    else break;
+  }
+  return streak;
+}
 function weekdayIndex(dateStr){const jsDay=new Date(dateStr+"T00:00:00").getDay();return (jsDay+6)%7;} // Mon=0..Sun=6
 function weekStartOf(dateStr){return addDays(dateStr,-weekdayIndex(dateStr));}
 function longestStreak(sessions){
@@ -1774,7 +1785,7 @@ function App(){
         .filter(t=>t.acc<60&&t.total>=2)
         .sort((a,b)=>{
           // H-weight poor topics first, then by worst accuracy
-          const wdiff=WEIGHT_SCORE[b.weight]-WEIGHT_SCORE[a.weight];
+          const wOrder={"H":0,"M":1,"L":2};const wdiff=(wOrder[b.weight]||1)-(wOrder[a.weight]||1);
           return wdiff!==0?wdiff:a.acc-b.acc;
         })
         .slice(0,5)
@@ -2341,32 +2352,144 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {/* ── JEE COACH ── */}
             {tab==="coach"&&(
               <div className="pin">
-                <div className="rowb" style={{marginBottom:32,alignItems:"flex-end"}}>
-                  <div>
-                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:6,lineHeight:1.2}}>okay. let's talk about your data.</div>
-                    <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>let me tell you exactly where you're leaking marks.</div>
-                  </div>
-                  <button className="btn btn-d" onClick={runCoach} disabled={coachLoading}>{coachLoading?"looking...":"analyse"}</button>
+                <div style={{marginBottom:24}}>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:26,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>Analytics</div>
+                  <div style={{fontSize:12,color:d.t3}}>your study data, decoded.</div>
                 </div>
-                <div className="g3 mb16">
-                  {Object.entries(SUBJECT_COLORS).map(([sub,color])=>{
-                    const sm=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
-                    const avg=sm.length?Math.round(sm.reduce((a,b)=>a+b,0)/sm.length):null;
-                    const hrs=(totBySub[sub]/60).toFixed(1);
-                    const eff=avg&&parseFloat(hrs)>0?Math.round(avg/parseFloat(hrs)):null;
-                    return(
-                      <div key={sub} className="card cp">
-                        <div className="row mb12" style={{gap:8}}><div className="dot" style={{background:color}}/><span style={{fontSize:12,fontWeight:600,color}}>{sub}</span></div>
-                        <div className="g2" style={{gap:7}}>
-                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color,letterSpacing:"-.02em"}}>{hrs}h</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Time</div></div>
-                          <div style={{textAlign:"center",padding:"8px",background:d.hover,borderRadius:3}}><div style={{fontSize:20,fontWeight:600,color:avg?sc(avg):d.t4,letterSpacing:"-.02em"}}>{avg||"—"}</div><div style={{fontSize:9.5,color:d.t4,marginTop:1}}>Avg score</div></div>
+
+                {/* ── Hours by subject ── */}
+                {(() => {
+                  const totalMins=sessions.reduce((a,s)=>a+(s.duration||0),0);
+                  const subjectData=Object.keys(SUBJECT_COLORS).map(sub=>({
+                    sub,
+                    mins:sessions.filter(s=>s.subject===sub).reduce((a,s)=>a+(s.duration||0),0),
+                    color:SUBJECT_COLORS[sub],
+                    weight:CFA_WEIGHTS[sub]?.[jeClass]||"M",
+                    range:TOPIC_WEIGHT_RANGES[sub]?.[jeClass]||"—",
+                  })).filter(s=>s.mins>0).sort((a,b)=>b.mins-a.mins);
+                  const maxMins=subjectData[0]?.mins||1;
+                  const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
+                  const avgSession=sessions.length?Math.round(totalMins/sessions.length):0;
+                  // Weekly trend
+                  const weeks=[];
+                  for(let i=3;i>=0;i--){
+                    const ws=addDays(weekStartOf(today()),-i*7);
+                    const we=addDays(ws,6);
+                    const wMins=sessions.filter(s=>s.date>=ws&&s.date<=we).reduce((a,s)=>a+(s.duration||0),0);
+                    weeks.push({label:`W${4-i}`,mins:wMins});
+                  }
+                  const maxWkMins=Math.max(...weeks.map(w=>w.mins),1);
+                  // Predicted completion
+                  const targetHrs2=targetHours||300;
+                  const daysStudied=new Set(sessions.map(s=>s.date)).size;
+                  const avgHrsPerStudyDay=daysStudied>0?(totalMins/60)/daysStudied:0;
+                  const studyDaysPerWeek=(studyDays||[0,1,2,3,4]).length;
+                  const hrsPerWeek=avgHrsPerStudyDay*studyDaysPerWeek;
+                  const hrsLeft=Math.max(0,targetHrs2-totalMins/60);
+                  const weeksToFinish=hrsPerWeek>0?hrsLeft/hrsPerWeek:null;
+                  const predictedFinish=weeksToFinish?addDays(today(),Math.round(weeksToFinish*7)):null;
+                  const daysToExam=examDate?Math.max(0,daysBetween(today(),examDate)):null;
+                  const daysToFinish=predictedFinish?daysBetween(today(),predictedFinish):null;
+                  const finishBeforeExam=daysToFinish!==null&&daysToExam!==null?daysToExam-daysToFinish:null;
+
+                  return(<div>
+                    {/* ── Key stats ── */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:20}}>
+                      {[
+                        {l:"Total Hours",v:Math.round(totalMins/60*10)/10+"h",c:d.a1},
+                        {l:"This Week",v:Math.round(wkMins/60*10)/10+"h",c:d.a2},
+                        {l:"Avg Session",v:fmt(avgSession),c:d.t2},
+                        {l:"Sessions",v:sessions.length,c:d.t2},
+                      ].map(s=>(
+                        <div key={s.l} style={{textAlign:"center",padding:"14px 8px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10}}>
+                          <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif",lineHeight:1}}>{s.v}</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:4,textTransform:"uppercase",letterSpacing:".05em"}}>{s.l}</div>
                         </div>
-                        {eff&&<div style={{marginTop:8,fontSize:11,textAlign:"center",padding:"5px",background:eff>8?`${d.a2}10`:`${d.danger}10`,borderRadius:6,color:eff>8?d.a2:d.danger}}>{eff>8?"✓ Efficient":"⚠ Low efficiency"} · {eff} pts/hr</div>}
+                      ))}
+                    </div>
+
+                    {/* ── Prediction ── */}
+                    {predictedFinish&&(
+                      <div style={{padding:"14px 18px",borderRadius:10,background:finishBeforeExam>0?d.a2+"10":d.danger+"10",border:`1px solid ${finishBeforeExam>0?d.a2:d.danger}30`,marginBottom:20,fontSize:13,color:d.t2,lineHeight:1.7}}>
+                        {finishBeforeExam>0
+                          ?`📈 at your current pace (${Math.round(hrsPerWeek*10)/10}h/week) you'll complete your ${targetHrs2}h target ${finishBeforeExam} days before the exam. keep it up.`
+                          :`⚠ at your current pace you'll finish ${Math.abs(finishBeforeExam)} days AFTER your exam. you need to study ${Math.round((hrsLeft/Math.max(1,daysToExam/7))*10)/10}h/week to stay on track.`}
                       </div>
-                    );
-                  })}
-                </div>
-                {!coachCards&&!coachLoading&&(<div className="card empty"><div style={{fontSize:26,marginBottom:10}}>👀</div><div className="et">nothing yet.</div><div className="es">i know your weak spots. i'll be gentle.ng. we fix it today.</div></div>)}
+                    )}
+
+                    {/* ── Weekly trend ── */}
+                    <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,padding:"18px",marginBottom:20}}>
+                      <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:14}}>Weekly study trend</div>
+                      <div style={{display:"flex",gap:8,alignItems:"flex-end",height:80}}>
+                        {weeks.map((w,i)=>(
+                          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                            <div style={{width:"100%",background:i===3?d.a1:d.a1+"50",borderRadius:"4px 4px 0 0",height:Math.max(4,(w.mins/maxWkMins)*70)+"px",transition:"height .5s"}}/>
+                            <div style={{fontSize:9,color:d.t3}}>{w.label}</div>
+                            <div style={{fontSize:9,color:d.t4}}>{Math.round(w.mins/60*10)/10}h</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ── Hours by subject ── */}
+                    {subjectData.length>0&&(
+                      <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,padding:"18px",marginBottom:20}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:14}}>Hours by subject</div>
+                        {subjectData.map(s=>(
+                          <div key={s.sub} style={{marginBottom:12}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                <div style={{width:8,height:8,borderRadius:2,background:s.color}}/>
+                                <span style={{fontSize:12.5,fontWeight:600,color:d.t}}>{s.sub}</span>
+                                <span style={{fontSize:9,padding:"1px 5px",borderRadius:3,background:s.color+"18",color:s.color,fontWeight:700}}>{s.range}</span>
+                              </div>
+                              <span style={{fontSize:11,color:d.t3}}>{Math.round(s.mins/60*10)/10}h</span>
+                            </div>
+                            <div style={{height:5,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:(s.mins/maxMins*100)+"%",background:s.color,borderRadius:3,transition:"width .5s"}}/>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* ── High weight coverage ── */}
+                    {(() => {
+                      const SUBS=Object.keys(TOPICS).filter(sub=>classTopics(sub).length>0);
+                      const highWt=SUBS.flatMap(sub=>classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").map(t=>({sub,t,done:sessions.some(s=>s.subject===sub&&s.topic===t)})));
+                      const done=highWt.filter(x=>x.done).length;
+                      const pct=highWt.length?Math.round(done/highWt.length*100):0;
+                      const notDone=highWt.filter(x=>!x.done).slice(0,5);
+                      return(
+                        <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,padding:"18px",marginBottom:20}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                            <div style={{fontSize:13,fontWeight:700,color:d.t}}>High-weight topic coverage</div>
+                            <div style={{fontSize:13,fontWeight:700,color:pct>=70?d.a2:d.gold}}>{pct}%</div>
+                          </div>
+                          <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden",marginBottom:12}}>
+                            <div style={{height:"100%",width:pct+"%",background:pct>=70?d.a2:d.gold,borderRadius:3,transition:"width .6s"}}/>
+                          </div>
+                          {notDone.length>0&&<div>
+                            <div style={{fontSize:11,color:d.t3,marginBottom:8}}>high-weight topics not yet studied:</div>
+                            {notDone.map((x,i)=>(
+                              <div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${d.b}44`,fontSize:12,color:d.t2}}>
+                                <span style={{color:SUBJECT_COLORS[x.sub]||d.a1,fontWeight:600,minWidth:80}}>{x.sub}</span>
+                                <span>{x.t}</span>
+                              </div>
+                            ))}
+                          </div>}
+                        </div>
+                      );
+                    })()}
+
+                    {sessions.length===0&&(
+                      <div style={{textAlign:"center",padding:"40px 24px",color:d.t3,fontSize:13,fontStyle:"italic"}}>
+                        log study sessions to see your analytics.
+                      </div>
+                    )}
+                  </div>);
+                })()}
+                {!coachCards&&!coachLoading&&false&&(<div/>)}
                 {coachCards?.locked&&(
                   <div className="card cp" style={{textAlign:"center",padding:"32px 24px"}}>
                     <div style={{fontSize:28,marginBottom:12}}>🔒</div>
@@ -3717,3 +3840,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
