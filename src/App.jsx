@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-// ── Con
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
@@ -503,6 +501,77 @@ const TOPIC_WEIGHT_RANGES = {
   "Alt. Investments":{L1:"5-8%", L2:"5-10%", L3:"5-10%"},
   "Portfolio Mgmt": {L1:"5-8%",  L2:"10-15%",L3:"35-40%"},
 };
+
+// Per-topic exam probability scores (modeled like Mathongo's weightage sheets)
+// Scale: 5=very high, 4=high, 3=medium, 2=low, 1=rarely tested
+const TOPIC_PROBABILITY = {
+  Ethics: {
+    "Code of Ethics":5, "Standards of Professional Conduct":5, "GIPS":3, "Asset Manager Code":3,
+  },
+  Quantitative: {
+    "Time Value of Money":5, "Statistical Concepts":4, "Probability":4,
+    "Sampling":3, "Hypothesis Testing":3, "Correlation & Regression":4,
+    "Time Series Analysis":3, "Machine Learning":3, "Big Data Techniques":2,
+    "Quantitative Methods for Portfolio Management":3,
+  },
+  Economics: {
+    "Microeconomics":3, "Macroeconomics":4, "Global Trade":3,
+    "Currency Exchange":4, "Business Cycles":4,
+    "Economics & Investment Markets":3, "Currency Exchange Rates":3,
+    "Capital Market Expectations":4,
+  },
+  "Fin. Reporting": {
+    "Intro to Financial Statements":3, "Income Statement":5, "Balance Sheet":5,
+    "Cash Flow Statement":5, "Inventories":4, "PP&E":4, "Deferred Taxes":3,
+    "Long-Term Debt":4, "Leases":3, "Intercorporate Investments":5,
+    "Multinational Operations":4, "Financial Ratio Analysis":5,
+    "Pension & Employee Benefits":4, "Evaluating Quality of Reports":4,
+  },
+  "Corp. Issuers": {
+    "Capital Budgeting":4, "Cost of Capital":5, "Capital Structure":4,
+    "Working Capital":3, "Corporate Governance":4, "ESG Considerations":3,
+    "Dividends & Share Repurchases":4, "Corporate Governance & ESG":3,
+  },
+  Equity: {
+    "Market Organisation":3, "Security Market Indices":3, "Equity Valuation Basics":4,
+    "Industry Analysis":4, "DCF Valuation":5, "Price Multiples":5,
+    "Equity Valuation: DDM":5, "Free Cash Flow Valuation":5,
+    "Residual Income":4, "Private Company Valuation":4,
+    "Equity Portfolio Management":4, "Active Equity Investing":4,
+  },
+  "Fixed Income": {
+    "Bond Features":4, "Bond Valuation":5, "Yield Measures":4,
+    "Duration & Convexity":5, "Credit Analysis":5, "Asset-Backed Securities":4,
+    "Term Structure & Interest Rates":5, "Credit Default Swaps":4, "MBS / ABS":4,
+    "Fixed Income Portfolio Management":5, "Liability-Driven Investing":4,
+    "Yield Curve Strategies":4,
+  },
+  Derivatives: {
+    "Futures & Forwards":4, "Options Basics":4, "Swaps":4,
+    "Risk Management with Derivatives":4, "Derivatives Valuation & Strategies":4,
+    "Derivatives & Currency Management":4,
+  },
+  "Alt. Investments": {
+    "Alt Investment Features":3, "Hedge Funds":4, "Private Equity":4,
+    "Real Estate":4, "Commodities":3, "Infrastructure":3,
+    "Alternative Investments Portfolio Management":4,
+  },
+  "Portfolio Mgmt": {
+    "Portfolio Management Intro":3, "Investment Policy Statements":5,
+    "Risk & Return Basics":4, "Portfolio Construction":4, "Risk Management":4,
+    "Algorithmic Trading":3, "Portfolio Management Process":5, "IPS Construction":5,
+    "Behavioural Finance":4, "Performance Evaluation":4, "GIPS Application":4,
+  },
+};
+function getTopicProbability(sub, topic){ return TOPIC_PROBABILITY[sub]?.[topic]||3; }
+function getProbabilityLabel(score){
+  if(score>=5) return {label:"Very High",color:"#ff4d6d",stars:"●●●●●"};
+  if(score>=4) return {label:"High",color:"#ff9f43",stars:"●●●●○"};
+  if(score>=3) return {label:"Medium",color:"#ffd166",stars:"●●●○○"};
+  if(score>=2) return {label:"Low",color:"#7878a8",stars:"●●○○○"};
+  return {label:"Rare",color:"#454566",stars:"●○○○○"};
+}
+
 const CLASSES = [
   {id:"L1", label:"CFA Level 1", icon:"Ⅰ"},
   {id:"L2", label:"CFA Level 2", icon:"Ⅱ"},
@@ -1143,6 +1212,13 @@ function App(){
     const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
     const p=prev();
     if(p?.user?.id&&p.user.id!==stored?.user?.id){
+      // Different user — wipe everything so old account data doesn't bleed
+      const ALL_KEYS=["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq",
+        "slothr_syllabus","slothr_class","slothr_revision","nev_sessions","nev_completed",
+        "nev_syllabus","nev_mocks","nev_topic_notes","nev_roadmap_answers","nev_roadmap_done",
+        "nev_exam_window","nev_study_days","nev_edu_status","nev_target_hours",
+        "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
+      ALL_KEYS.forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
       ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
     }
     localStorage.setItem("slothr_auth",JSON.stringify(stored));
@@ -1152,7 +1228,12 @@ function App(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
     setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);
-    try{["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+    const ALL_KEYS=["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq",
+      "slothr_syllabus","slothr_class","slothr_revision","nev_sessions","nev_completed",
+      "nev_syllabus","nev_mocks","nev_topic_notes","nev_roadmap_answers","nev_roadmap_done",
+      "nev_exam_window","nev_study_days","nev_edu_status","nev_target_hours",
+      "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
+    try{ALL_KEYS.forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
   // OAuth redirect handler — process silently, no loading state needed
   // authLoading kept for compatibility but always false
@@ -1166,17 +1247,17 @@ function App(){
     // Clear hash first so back/refresh doesn't reprocess
     window.history.replaceState(null,"",window.location.pathname);
     SB_AUTH.getUser(token).then(u=>{
-      if(!u) return;
+      if(!u){setOauthProcessing(false);return;}
       const stored={
         access_token:token,
         refresh_token:p.get("refresh_token"),
         expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,
         user:u,
       };
-      // Write to localStorage first so if React crashes the refresh picks it up
       try{localStorage.setItem("slothr_auth",JSON.stringify(stored));}catch(e){}
       setAuthSession(stored);
-    }).catch(()=>{});
+      setOauthProcessing(false);
+    }).catch(()=>setOauthProcessing(false));
   },[]);
   // Token refresh
   useEffect(()=>{
@@ -2697,6 +2778,46 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                     </div>
                   </div>
+
+                  {/* ── High-yield chapters not yet studied (Mathongo-style) ── */}
+                  {(() => {
+                    const candidates=[];
+                    SUBS.forEach(sub=>{
+                      classTopics(sub).forEach(topic=>{
+                        const prob=getTopicProbability(sub,topic);
+                        const status=syllabusStatus[sub+"|"+topic]||"not_started";
+                        if(prob>=4&&status!=="done"){
+                          candidates.push({sub,topic,prob,status});
+                        }
+                      });
+                    });
+                    candidates.sort((a,b)=>b.prob-a.prob);
+                    if(candidates.length===0)return null;
+                    return(
+                      <div className="card cp mb16" style={{borderColor:d.danger+"30"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                          <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.danger,background:d.danger+"15",padding:"3px 10px",borderRadius:4}}>High Yield · Not Yet Done</span>
+                        </div>
+                        <div style={{fontSize:11,color:d.t3,marginBottom:12}}>these {candidates.length} topics have the highest exam probability and aren't marked done yet. start here.</div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                          {candidates.slice(0,8).map((c,i)=>{
+                            const prob=getProbabilityLabel(c.prob);
+                            const col=SUBJECT_COLORS[c.sub]||d.a1;
+                            return(
+                              <div key={i} style={{padding:"10px 12px",background:d.hover,borderLeft:`3px solid ${col}`,borderRadius:6}}>
+                                <div style={{fontSize:12,fontWeight:600,color:d.t,marginBottom:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.topic}</div>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                  <span style={{fontSize:9,color:col,fontWeight:700}}>{c.sub}</span>
+                                  <span style={{fontSize:9,fontFamily:"monospace",color:prob.color,letterSpacing:"1px"}}>{prob.stars}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {SUBS.map(sub=>{
                     const chapters=sorted(sub);
                     const subDone=chapters.filter(t=>syllabusStatus[sub+"|"+t]==="done").length;
@@ -2727,11 +2848,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                                 const hrs=chHrs(sub,topic);
                                 const acc=chAcc(sub,topic);
                                 const sOpt=STATUS_OPTS.find(s=>s.v===status)||STATUS_OPTS[0];
+                                const probScore=getTopicProbability(sub,topic);
+                                const prob=getProbabilityLabel(probScore);
                                 return(
                                   <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s"}}>
                                     <div style={{flex:1,minWidth:0}}>
                                       <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
-                                      <div style={{display:"flex",gap:6,marginTop:2}}>
+                                      <div style={{display:"flex",gap:6,marginTop:3,alignItems:"center"}}>
+                                        <span title={prob.label+" exam probability"} style={{fontSize:9,fontFamily:"monospace",letterSpacing:"1px",color:prob.color}}>{prob.stars}</span>
+                                        <span style={{fontSize:8.5,fontWeight:700,color:prob.color,background:prob.color+"15",padding:"1px 5px",borderRadius:2}}>{prob.label}</span>
                                         {hrs>0&&<span style={{fontSize:9,color:d.t3,background:d.hover,padding:"1px 5px",borderRadius:2}}>{fmt(hrs)}</span>}
                                         {acc!==null&&<span style={{fontSize:9,fontWeight:600,color:acc>=70?d.a2:acc>=40?d.gold:d.danger,background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc}%</span>}
                                       </div>
