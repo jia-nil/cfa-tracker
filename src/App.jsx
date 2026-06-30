@@ -565,11 +565,12 @@ const TOPIC_PROBABILITY = {
 };
 function getTopicProbability(sub, topic){ return TOPIC_PROBABILITY[sub]?.[topic]||3; }
 function getProbabilityLabel(score){
-  if(score>=5) return {label:"Very High",color:"#ff4d6d",stars:"●●●●●"};
-  if(score>=4) return {label:"High",color:"#ff9f43",stars:"●●●●○"};
-  if(score>=3) return {label:"Medium",color:"#ffd166",stars:"●●●○○"};
-  if(score>=2) return {label:"Low",color:"#7878a8",stars:"●●○○○"};
-  return {label:"Rare",color:"#454566",stars:"●○○○○"};
+  // Dead simple: emoji + one word, like a traffic light. No dots, no jargon.
+  if(score>=5) return {label:"Definitely Asked",emoji:"🔴",color:"#ff4d6d",short:"Must Know"};
+  if(score>=4) return {label:"Very Likely",emoji:"🟠",color:"#ff9f43",short:"Important"};
+  if(score>=3) return {label:"Sometimes Asked",emoji:"🟡",color:"#ffd166",short:"Good to Know"};
+  if(score>=2) return {label:"Rarely Asked",emoji:"🟢",color:"#00d4aa",short:"Low Priority"};
+  return {label:"Almost Never Asked",emoji:"⚪",color:"#7878a8",short:"Skip if Short on Time"};
 }
 
 const CLASSES = [
@@ -1219,7 +1220,10 @@ function App(){
         "nev_exam_window","nev_study_days","nev_edu_status","nev_target_hours",
         "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
       ALL_KEYS.forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
-      ["slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq","slothr_syllabus","slothr_class"].forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+      // Reset in-memory state immediately too — don't wait for the async Supabase reload
+      setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);
+      setSyllabusStatus({});setJeClass(null);setExamWindow(null);setStudyDays([0,1,2,3,4]);
+      setRoadmapAnswers(null);
     }
     localStorage.setItem("slothr_auth",JSON.stringify(stored));
     setAuthSession(stored);
@@ -1235,15 +1239,17 @@ function App(){
       "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
     try{ALL_KEYS.forEach(k=>localStorage.removeItem(k));}catch(e){}
   }
-  // OAuth redirect handler — process silently, no loading state needed
-  // authLoading kept for compatibility but always false
+  // OAuth redirect handler — process silently, no flash
   const [authLoading,setAuthLoading]=useState(false);
+  const [oauthProcessing,setOauthProcessing]=useState(
+    ()=>typeof window!=="undefined"&&window.location.hash.includes("access_token")
+  );
   useEffect(()=>{
     const hash=window.location.hash;
-    if(!hash.includes("access_token")) return;
+    if(!hash.includes("access_token")){setOauthProcessing(false);return;}
     const p=new URLSearchParams(hash.replace("#","?"));
     const token=p.get("access_token");
-    if(!token) return;
+    if(!token){setOauthProcessing(false);return;}
     // Clear hash first so back/refresh doesn't reprocess
     window.history.replaceState(null,"",window.location.pathname);
     SB_AUTH.getUser(token).then(u=>{
@@ -1254,8 +1260,7 @@ function App(){
         expires_at:Date.now()+parseInt(p.get("expires_in")||"3600")*1000,
         user:u,
       };
-      try{localStorage.setItem("slothr_auth",JSON.stringify(stored));}catch(e){}
-      setAuthSession(stored);
+      handleAuthSuccess(stored);
       setOauthProcessing(false);
     }).catch(()=>setOauthProcessing(false));
   },[]);
@@ -1543,16 +1548,21 @@ function App(){
   useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
   useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
   useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
-  // Load from Supabase on login (only if localStorage empty)
+  // Load from Supabase on login — Supabase is always the source of truth,
+  // never gated on localStorage (that was the cause of data bleeding between accounts)
   useEffect(()=>{
     if(!authSession?.access_token||!user?.id)return;
     const token=authSession.access_token, uid=user.id;
-    if(!localStorage.getItem("slothr_sessions"))SB_AUTH.loadData("user_sessions",uid,token).then(d=>{if(d?.length)setSessions(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_goals"))SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d?.length)setGoals(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_mocks"))SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d?.length)setMocks(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_pyq"))SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d?.length)setPyqHistory(d.map(r=>r.data||r));});
-    if(!localStorage.getItem("slothr_class"))fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}}).catch(()=>{});
-  },[authSession?.access_token]);
+    SB_AUTH.loadData("user_sessions",uid,token).then(d=>setSessions(d?.length?d.map(r=>r.data||r):[]));
+    SB_AUTH.loadData("user_goals",uid,token).then(d=>setGoals(d?.length?d.map(r=>r.data||r):[]));
+    SB_AUTH.loadData("user_mocks",uid,token).then(d=>setMocks(d?.length?d.map(r=>r.data||r):[]));
+    SB_AUTH.loadData("user_pyq",uid,token).then(d=>setPyqHistory(d?.length?d.map(r=>r.data||r):[]));
+    fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
+      .then(r=>r.json())
+      .then(d=>{
+        if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}
+      }).catch(()=>{});
+  },[authSession?.access_token,user?.id]);
   useEffect(()=>{
     setGoals(prev=>prev.map(g=>{
       if(g.date!==today()) return g;
@@ -1580,7 +1590,14 @@ function App(){
     }
   },[tab]);
   // Auth gate — after ALL hooks
-  // authLoading removed — OAuth handled silently, app shows AuthScreen while processing
+  // Show a quiet spinner while OAuth token is being processed (eliminates the login-page flash)
+  if(oauthProcessing) return(
+    <div style={{position:"fixed",inset:0,background:"#0a0a0f",display:"flex",alignItems:"center",justifyContent:"center",gap:12,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:20,height:20,borderRadius:"50%",border:"2px solid #6c63ff",borderTopColor:"transparent",animation:"nevspin 0.8s linear infinite"}}/>
+      <div style={{fontSize:13,color:"#7878a8"}}>signing you in...</div>
+      <style>{"@keyframes nevspin{to{transform:rotate(360deg)}}"}</style>
+    </div>
+  );
   if(!authSession)return <AuthScreen onAuth={handleAuthSuccess}/>;
   const barMax=Math.max(...Object.values(totBySub),1);
   const currentMilestone=[...STREAK_MILESTONES].reverse().find(b=>streak>=b.days);
@@ -1660,6 +1677,47 @@ function App(){
     const d=await r.json();
     if(Array.isArray(d))setSearchResults(d.filter(u=>u.id!==user?.id));
   }
+  // ── Study buddy functions ─────────────────────────────────────────────────
+  async function searchBuddy(){
+    if(!buddySearch.trim())return;
+    setBuddyLoading(true);
+    const q=buddySearch.replace("@","").toLowerCase().trim();
+    try{
+      const r=await fetch(SB_URL+"/rest/v1/profiles?username=ilike."+encodeURIComponent("%"+q+"%")+"&select=id,username,display_name,avatar_url,je_class&limit=8",{
+        headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
+      });
+      const d=await r.json();
+      if(Array.isArray(d))setBuddyResults(d.filter(u=>u.id!==user?.id&&!myBuddies.find(b=>b.id===u.id)));
+    }catch(e){}
+    setBuddyLoading(false);
+  }
+  function addBuddy(u){
+    setMyBuddies(prev=>prev.find(b=>b.id===u.id)?prev:[...prev,u]);
+    setBuddyResults(prev=>prev.filter(r=>r.id!==u.id));
+  }
+  function removeBuddy(id){
+    setMyBuddies(prev=>prev.filter(b=>b.id!==id));
+  }
+  // Returns weekly + total minutes for a buddy (general stats only, no session detail)
+  const [buddyStats,setBuddyStats]=useState({});
+  async function fetchBuddyStats(buddyId){
+    try{
+      const ws=weekStartOf(today());
+      const r=await fetch(SB_URL+"/rest/v1/user_sessions?user_id=eq."+buddyId+"&select=data",{
+        headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
+      });
+      const rows=await r.json();
+      if(!Array.isArray(rows))return;
+      const sessionsData=rows.map(r=>r.data||r);
+      const weekMins=sessionsData.filter(s=>s.date>=ws).reduce((a,s)=>a+(s.duration||0),0);
+      const totalMins=sessionsData.reduce((a,s)=>a+(s.duration||0),0);
+      const lastDate=sessionsData.length?[...sessionsData].sort((a,b)=>b.date.localeCompare(a.date))[0].date:null;
+      setBuddyStats(prev=>({...prev,[buddyId]:{weekMins,totalMins,lastDate,sessionCount:sessionsData.length}}));
+    }catch(e){}
+  }
+  useEffect(()=>{
+    if(tab==="buddy"){myBuddies.forEach(b=>fetchBuddyStats(b.id));}
+  },[tab,myBuddies.length]);
   async function fetchProfile(uid){
     const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${uid}&select=*`,{
       headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
@@ -2796,20 +2854,21 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     return(
                       <div className="card cp mb16" style={{borderColor:d.danger+"30"}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                          <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.danger,background:d.danger+"15",padding:"3px 10px",borderRadius:4}}>High Yield · Not Yet Done</span>
+                          <span style={{fontSize:18}}>🔴</span>
+                          <span style={{fontSize:13,fontWeight:700,color:d.t}}>Study These First — They're Definitely on the Exam</span>
                         </div>
-                        <div style={{fontSize:11,color:d.t3,marginBottom:12}}>these {candidates.length} topics have the highest exam probability and aren't marked done yet. start here.</div>
+                        <div style={{fontSize:11,color:d.t3,marginBottom:12}}>{candidates.length} topics almost always show up on the exam. you haven't finished them yet.</div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
                           {candidates.slice(0,8).map((c,i)=>{
                             const prob=getProbabilityLabel(c.prob);
                             const col=SUBJECT_COLORS[c.sub]||d.a1;
                             return(
                               <div key={i} style={{padding:"10px 12px",background:d.hover,borderLeft:`3px solid ${col}`,borderRadius:6}}>
-                                <div style={{fontSize:12,fontWeight:600,color:d.t,marginBottom:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.topic}</div>
-                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                                  <span style={{fontSize:9,color:col,fontWeight:700}}>{c.sub}</span>
-                                  <span style={{fontSize:9,fontFamily:"monospace",color:prob.color,letterSpacing:"1px"}}>{prob.stars}</span>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                                  <span style={{fontSize:13}}>{prob.emoji}</span>
+                                  <div style={{fontSize:12,fontWeight:600,color:d.t,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.topic}</div>
                                 </div>
+                                <span style={{fontSize:9,color:col,fontWeight:700}}>{c.sub}</span>
                               </div>
                             );
                           })}
@@ -2855,8 +2914,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                                     <div style={{flex:1,minWidth:0}}>
                                       <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
                                       <div style={{display:"flex",gap:6,marginTop:3,alignItems:"center"}}>
-                                        <span title={prob.label+" exam probability"} style={{fontSize:9,fontFamily:"monospace",letterSpacing:"1px",color:prob.color}}>{prob.stars}</span>
-                                        <span style={{fontSize:8.5,fontWeight:700,color:prob.color,background:prob.color+"15",padding:"1px 5px",borderRadius:2}}>{prob.label}</span>
+                                        <span title={prob.label} style={{fontSize:8.5,fontWeight:700,color:prob.color,background:prob.color+"15",padding:"1px 6px",borderRadius:2,display:"flex",alignItems:"center",gap:3}}>
+                                          <span>{prob.emoji}</span>{prob.short}
+                                        </span>
                                         {hrs>0&&<span style={{fontSize:9,color:d.t3,background:d.hover,padding:"1px 5px",borderRadius:2}}>{fmt(hrs)}</span>}
                                         {acc!==null&&<span style={{fontSize:9,fontWeight:600,color:acc>=70?d.a2:acc>=40?d.gold:d.danger,background:acc>=70?`${d.a2}15`:acc>=40?`${d.gold}15`:`${d.danger}15`,padding:"1px 5px",borderRadius:2}}>{acc}%</span>}
                                       </div>
@@ -3174,18 +3234,181 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             )}
 
             {/* ── PROFILE ── */}
-            {tab==="profile"&&(
+            {/* ── STUDY BUDDY ── */}
+            {tab==="buddy"&&(
+              <div className="pin">
+                <div style={{marginBottom:20}}>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>study buddy</div>
+                  <div style={{fontSize:12,color:d.t3}}>add friends by username. see how much they're studying — nothing more, nothing less.</div>
+                </div>
+
+                {/* Search */}
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Add a friend</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <input className="inp" placeholder="@username" value={buddySearch}
+                      onChange={e=>setBuddySearch(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&searchBuddy()}
+                      style={{flex:1}}/>
+                    <button onClick={searchBuddy} disabled={buddyLoading}
+                      style={{padding:"9px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:buddyLoading?.6:1}}>
+                      {buddyLoading?"...":"search"}
+                    </button>
+                  </div>
+
+                  {buddyResults.length>0&&(
+                    <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+                      {buddyResults.map(u=>(
+                        <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
+                          <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0,overflow:"hidden"}}>
+                            {u.avatar_url?<img src={u.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(u.display_name||u.username||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{u.username} · {CLASSES.find(c=>c.id===u.je_class)?.label?.replace("CFA ","")||u.je_class||"—"}</div>
+                          </div>
+                          <button onClick={()=>addBuddy(u)}
+                            style={{padding:"6px 14px",borderRadius:6,background:d.a2,color:"#06140f",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                            + add
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {buddyResults.length===0&&buddySearch&&!buddyLoading&&(
+                    <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>no one found with that username.</div>
+                  )}
+                </div>
+
+                {/* My buddies */}
+                <div style={{fontSize:12,fontWeight:700,color:d.t3,letterSpacing:".08em",textTransform:"uppercase",marginBottom:12}}>
+                  Your Study Buddies {myBuddies.length>0&&`(${myBuddies.length})`}
+                </div>
+
+                {myBuddies.length===0&&(
+                  <div className="card empty">
+                    <div style={{fontSize:28,marginBottom:10}}>🤝</div>
+                    <div className="et">no study buddies yet</div>
+                    <div className="es">search for a friend's username above and add them.</div>
+                  </div>
+                )}
+
+                {myBuddies.map(b=>{
+                  const stats=buddyStats[b.id];
+                  const weekHrs=stats?Math.round((stats.weekMins/60)*10)/10:null;
+                  const totalHrs=stats?Math.round((stats.totalMins/60)*10)/10:null;
+                  const daysSinceLast=stats?.lastDate?daysBetween(stats.lastDate,today()):null;
+                  const isActiveToday=stats?.lastDate===today();
+                  return(
+                    <div key={b.id} className="card" style={{marginBottom:10,padding:"16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{width:44,height:44,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:16,flexShrink:0,overflow:"hidden",position:"relative"}}>
+                          {b.avatar_url?<img src={b.avatar_url} style={{width:44,height:44,borderRadius:"50%",objectFit:"cover"}}/>:(b.display_name||b.username||"?")[0].toUpperCase()}
+                          {isActiveToday&&<div style={{position:"absolute",bottom:0,right:0,width:12,height:12,borderRadius:"50%",background:d.a2,border:`2px solid ${d.card}`}}/>}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:600,color:d.t}}>{b.display_name||b.username}</div>
+                          <div style={{fontSize:11,color:d.t3}}>@{b.username} · {CLASSES.find(c=>c.id===b.je_class)?.label?.replace("CFA ","")||b.je_class||"—"}</div>
+                        </div>
+                        <button onClick={()=>removeBuddy(b.id)}
+                          style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:16,padding:4}} title="remove">×</button>
+                      </div>
+                      {stats?(
+                        <div style={{display:"flex",gap:8,marginTop:14}}>
+                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
+                            <div style={{fontSize:16,fontWeight:700,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{weekHrs}h</div>
+                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>This Week</div>
+                          </div>
+                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
+                            <div style={{fontSize:16,fontWeight:700,color:d.t2,fontFamily:"'DM Serif Display',serif"}}>{totalHrs}h</div>
+                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>Total</div>
+                          </div>
+                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
+                            <div style={{fontSize:16,fontWeight:700,color:isActiveToday?d.a2:d.t3,fontFamily:"'DM Serif Display',serif"}}>
+                              {isActiveToday?"Today":daysSinceLast!==null?daysSinceLast+"d ago":"—"}
+                            </div>
+                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>Last Studied</div>
+                          </div>
+                        </div>
+                      ):(
+                        <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>loading their stats...</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {tab==="profile"&&(()=>{
+              const [editingUsername,setEditingUsername]=useState(false);
+              const [usernameInput,setUsernameInput]=useState(profile?.username||"");
+              const [usernameError,setUsernameError]=useState("");
+              const [usernameSaving,setUsernameSaving]=useState(false);
+              async function saveUsername(){
+                const clean=usernameInput.trim().toLowerCase().replace(/[^a-z0-9_]/g,"");
+                if(clean.length<3){setUsernameError("at least 3 characters");return;}
+                if(clean.length>20){setUsernameError("max 20 characters");return;}
+                setUsernameSaving(true);setUsernameError("");
+                try{
+                  // Check availability
+                  const checkR=await fetch(`${SB_URL}/rest/v1/profiles?username=eq.${clean}&id=neq.${user.id}&select=id`,{
+                    headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+                  });
+                  const existing=await checkR.json();
+                  if(existing?.length){setUsernameError("that username is taken");setUsernameSaving(false);return;}
+                  await fetch(`${SB_URL}/rest/v1/profiles`,{
+                    method:"POST",
+                    headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+                    body:JSON.stringify({id:user.id,username:clean,display_name:user?.name,je_class:jeClass})
+                  });
+                  setProfile(p=>({...(p||{}),username:clean}));
+                  setEditingUsername(false);
+                }catch(e){setUsernameError("couldn't save, try again");}
+                setUsernameSaving(false);
+              }
+              const classBadge=CLASSES.find(c=>c.id===jeClass)?.label||jeClass||"Level not set";
+              return(
               <div className="pin">
                 {/* Profile card */}
                 <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"28px 24px"}}>
                   <div style={{width:64,height:64,borderRadius:"50%",background:d.a1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:24,margin:"0 auto 14px",overflow:"hidden"}}>
                     {user?.avatar?<img src={user.avatar} style={{width:64,height:64,borderRadius:"50%",objectFit:"cover"}}/>:(user?.name||"S")[0].toUpperCase()}
                   </div>
-                  <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:3}}>{user?.name||"Student"}</div>
-                  <div style={{fontSize:13,color:d.t3,marginBottom:4}}>@{profile?.username||"..."}</div>
+                  <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:6}}>{user?.name||"Student"}</div>
+
+                  {/* Username — editable like Instagram */}
+                  {!editingUsername?(
+                    <div onClick={()=>{setUsernameInput(profile?.username||"");setEditingUsername(true);}}
+                      style={{display:"inline-flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:4,padding:"3px 10px",borderRadius:6,background:d.hover}}>
+                      <span style={{fontSize:13,color:d.t2}}>@{profile?.username||"set a username"}</span>
+                      <span style={{fontSize:10,color:d.t4}}>✏️</span>
+                    </div>
+                  ):(
+                    <div style={{maxWidth:240,margin:"0 auto 8px"}}>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <span style={{fontSize:13,color:d.t3}}>@</span>
+                        <input autoFocus value={usernameInput}
+                          onChange={e=>{setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,""));setUsernameError("");}}
+                          onKeyDown={e=>e.key==="Enter"&&saveUsername()}
+                          style={{flex:1,padding:"6px 10px",borderRadius:6,background:d.hover,border:`1px solid ${usernameError?d.danger:d.b}`,color:d.t,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+                      </div>
+                      {usernameError&&<div style={{fontSize:10,color:d.danger,marginTop:4}}>{usernameError}</div>}
+                      <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"center"}}>
+                        <button onClick={saveUsername} disabled={usernameSaving}
+                          style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",opacity:usernameSaving?.6:1}}>
+                          {usernameSaving?"saving...":"save"}
+                        </button>
+                        <button onClick={()=>{setEditingUsername(false);setUsernameError("");}}
+                          style={{padding:"6px 14px",borderRadius:6,background:"none",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                          cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {profile?.bio&&<div style={{fontSize:12,color:d.t2,marginBottom:12,fontStyle:"italic"}}>{profile.bio}</div>}
-                  <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{jeClass}</span>
+                  <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap",marginTop:8}}>
+                    <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{classBadge}</span>
                     <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>🔥 {streak}d streak</span>
                     <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>⏱ {fmt(totalTime)} total</span>
                   </div>
@@ -3251,7 +3474,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           <div style={{fontSize:12.5,fontWeight:isMe?700:500,color:isMe?d.a1:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                             {entry.display_name||entry.username}{isMe?" (you)":""}
                           </div>
-                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {entry.je_class}</div>
+                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {CLASSES.find(c=>c.id===entry.je_class)?.label?.replace("CFA ","")||entry.je_class}</div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
                           <div style={{fontSize:13,fontWeight:700,color:d.t}}>{fmt(entry.week_minutes)}</div>
@@ -3280,7 +3503,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* ── REVISION ── */}
             {tab==="revision"&&(()=>{
@@ -3965,4 +4189,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
