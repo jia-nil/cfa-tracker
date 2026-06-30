@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+
+// ── Config — paste your values here, OR set as Vite env vars ─────────────────
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
@@ -1359,6 +1360,15 @@ function App(){
   const [buddyRequests,setBuddyRequests]=useState([]);
   const [myBuddies,setMyBuddies]=useState(()=>{try{const v=localStorage.getItem("nev_buddies");return v?JSON.parse(v):[];}catch(e){return [];}});
   useEffect(()=>{try{localStorage.setItem("nev_buddies",JSON.stringify(myBuddies));}catch(e){}},[myBuddies]);
+  const [buddyStats,setBuddyStats]=useState({});
+  const [recommendedBuddies,setRecommendedBuddies]=useState([]);
+  const [recommendedLoading,setRecommendedLoading]=useState(false);
+  useEffect(()=>{
+    if(tab==="buddy"){myBuddies.forEach(b=>fetchBuddyStats(b.id));}
+  },[tab,myBuddies.length]);
+  useEffect(()=>{
+    if(tab==="buddy"&&jeClass)fetchRecommendedBuddies();
+  },[tab,jeClass,examWindow]);
   // ── Roadmap personalization questionnaire ────────────────────────────────
   const [roadmapAnswers,setRoadmapAnswers]=useState(()=>{try{const v=localStorage.getItem("nev_roadmap_answers");return v?JSON.parse(v):null;}catch(e){return null;}});
   const [showRoadmapQs,setShowRoadmapQs]=useState(false);
@@ -1401,6 +1411,8 @@ function App(){
   const [usernameInput,setUsernameInput]=useState("");
   const [usernameError,setUsernameError]=useState("");
   const [usernameSaving,setUsernameSaving]=useState(false);
+  const [profileIsPublic,setProfileIsPublic]=useState(true);
+  const [privacySaving,setPrivacySaving]=useState(false);
   const [profileLoading,setProfileLoading]=useState(false);
   const [follows,setFollows]=useState(new Set()); // set of user_ids we follow
   const [events,setEvents]=useState([]);
@@ -1590,7 +1602,10 @@ function App(){
   // Profile/leaderboard loader — must be before early returns
   useEffect(()=>{
     if(tab==="profile"&&user?.id){
-      fetchProfile(user.id).then(p=>setProfile(p));
+      fetchProfile(user.id).then(p=>{
+        setProfile(p);
+        if(p)setProfileIsPublic(p.is_public!==false); // default true if unset
+      });
       fetchLeaderboard();
     }
   },[tab]);
@@ -1672,6 +1687,21 @@ function App(){
     if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
     return txt;
   }
+  async function togglePrivacy(){
+    if(!user?.id)return;
+    setPrivacySaving(true);
+    const next=!profileIsPublic;
+    try{
+      await fetch(`${SB_URL}/rest/v1/profiles`,{
+        method:"POST",
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+        body:JSON.stringify({id:user.id,is_public:next})
+      });
+      setProfileIsPublic(next);
+      setProfile(p=>({...(p||{}),is_public:next}));
+    }catch(e){}
+    setPrivacySaving(false);
+  }
   // ── Social API helpers ────────────────────────────────────────────────────
   async function searchUsers(){
     if(!userSearch.trim())return;
@@ -1704,7 +1734,6 @@ function App(){
     setMyBuddies(prev=>prev.filter(b=>b.id!==id));
   }
   // Returns weekly + total minutes for a buddy (general stats only, no session detail)
-  const [buddyStats,setBuddyStats]=useState({});
   async function fetchBuddyStats(buddyId){
     try{
       const ws=weekStartOf(today());
@@ -1720,9 +1749,28 @@ function App(){
       setBuddyStats(prev=>({...prev,[buddyId]:{weekMins,totalMins,lastDate,sessionCount:sessionsData.length}}));
     }catch(e){}
   }
-  useEffect(()=>{
-    if(tab==="buddy"){myBuddies.forEach(b=>fetchBuddyStats(b.id));}
-  },[tab,myBuddies.length]);
+  async function fetchRecommendedBuddies(){
+    if(!jeClass||!user?.id)return;
+    setRecommendedLoading(true);
+    try{
+      // Match by same level, and prefer same exam window if set
+      let url=SB_URL+"/rest/v1/profiles?je_class=eq."+jeClass+"&id=neq."+user.id+"&is_public=eq.true&select=id,username,display_name,avatar_url,je_class,exam_window&limit=20";
+      const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}});
+      const d=await r.json();
+      if(Array.isArray(d)){
+        const existing=new Set(myBuddies.map(b=>b.id));
+        const filtered=d.filter(u=>!existing.has(u.id));
+        // Sort: same exam window first
+        filtered.sort((a,b)=>{
+          const aMatch=a.exam_window===examWindow?0:1;
+          const bMatch=b.exam_window===examWindow?0:1;
+          return aMatch-bMatch;
+        });
+        setRecommendedBuddies(filtered.slice(0,6));
+      }
+    }catch(e){}
+    setRecommendedLoading(false);
+  }
   async function fetchProfile(uid){
     const r=await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${uid}&select=*`,{
       headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
@@ -2208,7 +2256,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           <nav className="s-nav">
             {/* Study tools */}
             {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"8px 12px 4px"}}>Study</div>}
-            {["overview","coach","goals","sessions","streaks","syllabus","revision","rank"].map(id=>{
+            {["overview","rank","goals","planner","syllabus","revision","mocks","sessions","coach","streaks"].map(id=>{
               const t=TABS.find(x=>x.id===id);
               if(!t)return null;
               return(
@@ -2227,7 +2275,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
             {/* Social */}
             {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"4px 12px 4px"}}>Community</div>}
-            {["feed","events","profile"].map(id=>{
+            {["buddy","report","profile"].map(id=>{
               const t=TABS.find(x=>x.id===id);
               if(!t)return null;
               return(
@@ -3247,6 +3295,44 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div style={{fontSize:12,color:d.t3}}>add friends by username. see how much they're studying — nothing more, nothing less.</div>
                 </div>
 
+                {/* Recommended buddies — matched by level + exam window */}
+                {recommendedBuddies.length>0&&(
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:14}}>✨</span>
+                      <div style={{fontSize:12,fontWeight:700,color:d.t}}>Recommended for you</div>
+                    </div>
+                    <div style={{fontSize:11,color:d.t3,marginBottom:14}}>
+                      other {CLASSES.find(c=>c.id===jeClass)?.label||jeClass} candidates{examWindow?", same exam window where possible":""}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      {recommendedBuddies.map(u=>{
+                        const sameWindow=u.exam_window===examWindow&&examWindow;
+                        return(
+                          <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
+                            <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0,overflow:"hidden"}}>
+                              {u.avatar_url?<img src={u.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(u.display_name||u.username||"?")[0].toUpperCase()}
+                            </div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
+                              <div style={{fontSize:11,color:d.t3}}>
+                                @{u.username}{sameWindow&&<span style={{color:d.a2,fontWeight:600}}> · same exam window</span>}
+                              </div>
+                            </div>
+                            <button onClick={()=>{addBuddy(u);setRecommendedBuddies(prev=>prev.filter(r=>r.id!==u.id));}}
+                              style={{padding:"6px 14px",borderRadius:6,background:d.a2,color:"#06140f",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                              + add
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {recommendedLoading&&recommendedBuddies.length===0&&(
+                  <div style={{textAlign:"center",padding:"16px",fontSize:11,color:d.t3,fontStyle:"italic"}}>finding people studying the same level...</div>
+                )}
+
                 {/* Search */}
                 <div className="card cp" style={{marginBottom:20}}>
                   <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Add a friend</div>
@@ -3360,7 +3446,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   await fetch(`${SB_URL}/rest/v1/profiles`,{
                     method:"POST",
                     headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
-                    body:JSON.stringify({id:user.id,username:clean,display_name:user?.name,je_class:jeClass})
+                    body:JSON.stringify({id:user.id,username:clean,display_name:user?.name,je_class:jeClass,exam_window:examWindow,is_public:true})
                   });
                   setProfile(p=>({...(p||{}),username:clean}));
                   setEditingUsername(false);
@@ -3412,6 +3498,26 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:`${d.a1}12`,border:`1px solid ${d.a1}30`,color:d.a1,fontWeight:600}}>{classBadge}</span>
                     <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>🔥 {streak}d streak</span>
                     <span style={{fontSize:11,padding:"3px 12px",borderRadius:4,background:d.hover,border:`1px solid ${d.b}`,color:d.t3}}>⏱ {fmt(totalTime)} total</span>
+                  </div>
+                </div>
+
+                {/* Privacy toggle */}
+                <div className="card cp" style={{marginBottom:20,padding:"16px 18px"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:2}}>
+                        {profileIsPublic?"🌍 Public Profile":"🔒 Private Profile"}
+                      </div>
+                      <div style={{fontSize:11,color:d.t3}}>
+                        {profileIsPublic?"others can find you by username and add you as a study buddy":"hidden from search — only people who already added you can see your stats"}
+                      </div>
+                    </div>
+                    <button onClick={togglePrivacy} disabled={privacySaving}
+                      style={{width:46,height:26,borderRadius:13,border:"none",cursor:"pointer",flexShrink:0,position:"relative",
+                        background:profileIsPublic?d.a2:d.b,transition:"background .2s",opacity:privacySaving?.6:1}}>
+                      <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,
+                        left:profileIsPublic?23:3,transition:"left .2s"}}/>
+                    </button>
                   </div>
                 </div>
 
