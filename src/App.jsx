@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
 
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
@@ -1396,6 +1396,11 @@ function App(){
   const [feed,setFeed]=useState([]);
   const [feedLoading,setFeedLoading]=useState(false);
   const [profile,setProfile]=useState(null);
+  // Username editing — must be top-level hooks, not inside tab render
+  const [editingUsername,setEditingUsername]=useState(false);
+  const [usernameInput,setUsernameInput]=useState("");
+  const [usernameError,setUsernameError]=useState("");
+  const [usernameSaving,setUsernameSaving]=useState(false);
   const [profileLoading,setProfileLoading]=useState(false);
   const [follows,setFollows]=useState(new Set()); // set of user_ids we follow
   const [events,setEvents]=useState([]);
@@ -3340,11 +3345,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             )}
 
             {tab==="profile"&&(()=>{
-              const [editingUsername,setEditingUsername]=useState(false);
-              const [usernameInput,setUsernameInput]=useState(profile?.username||"");
-              const [usernameError,setUsernameError]=useState("");
-              const [usernameSaving,setUsernameSaving]=useState(false);
-              async function saveUsername(){
+              const saveUsername=async()=>{
                 const clean=usernameInput.trim().toLowerCase().replace(/[^a-z0-9_]/g,"");
                 if(clean.length<3){setUsernameError("at least 3 characters");return;}
                 if(clean.length>20){setUsernameError("max 20 characters");return;}
@@ -3365,7 +3366,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   setEditingUsername(false);
                 }catch(e){setUsernameError("couldn't save, try again");}
                 setUsernameSaving(false);
-              }
+              };
               const classBadge=CLASSES.find(c=>c.id===jeClass)?.label||jeClass||"Level not set";
               return(
               <div className="pin">
@@ -4189,3 +4190,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
