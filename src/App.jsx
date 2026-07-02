@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
-// ── Config — paste your values here, OR set as Vite env vars ─────────────────
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
@@ -1228,6 +1227,15 @@ function App(){
     }
     localStorage.setItem("slothr_auth",JSON.stringify(stored));
     setAuthSession(stored);
+    // Auto-upsert profile so buddy search finds this user immediately
+    const u=stored.user;
+    if(u?.id&&stored.access_token){
+      fetch(`${SB_URL}/rest/v1/profiles`,{
+        method:"POST",
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${stored.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+        body:JSON.stringify({id:u.id,display_name:u.user_metadata?.full_name||u.email?.split("@")[0]||"",is_public:true})
+      }).catch(()=>{});
+    }
   }
   function handleSignOut(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
@@ -1577,7 +1585,17 @@ function App(){
     fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
       .then(r=>r.json())
       .then(d=>{
-        if(d?.[0]?.je_class){setJeClass(d[0].je_class);try{localStorage.setItem("slothr_class",d[0].je_class);}catch(e){}}
+        const row=d?.[0];
+        if(!row)return;
+        if(row.je_class){setJeClass(row.je_class);try{localStorage.setItem("slothr_class",row.je_class);}catch(e){}}
+        if(row.exam_window){setExamWindow(row.exam_window);try{localStorage.setItem("nev_exam_window",row.exam_window);}catch(e){}}
+        if(row.study_days){setStudyDays(row.study_days);try{localStorage.setItem("nev_study_days",JSON.stringify(row.study_days));}catch(e){}}
+        if(row.target_hours){setTargetHours(row.target_hours);try{localStorage.setItem("nev_target_hours",String(row.target_hours));}catch(e){}}
+        if(row.je_class&&row.exam_window){
+          // Setup is complete — mark done so we don't show the setup screen again
+          setExamSetupDone(true);
+          try{localStorage.setItem("nev_exam_setup_done","1");}catch(e){}
+        }
       }).catch(()=>{});
   },[authSession?.access_token,user?.id]);
   useEffect(()=>{
@@ -1718,12 +1736,22 @@ function App(){
     setBuddyLoading(true);
     const q=buddySearch.replace("@","").toLowerCase().trim();
     try{
-      const r=await fetch(SB_URL+"/rest/v1/profiles?username=ilike."+encodeURIComponent("%"+q+"%")+"&select=id,username,display_name,avatar_url,je_class&limit=8",{
+      // Search by exact username first, then partial
+      const exactR=await fetch(SB_URL+"/rest/v1/profiles?username=eq."+encodeURIComponent(q)+"&select=id,username,display_name,avatar_url,je_class",{
+        headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
+      });
+      const exactD=await exactR.json();
+      if(Array.isArray(exactD)&&exactD.length>0){
+        setBuddyResults(exactD.filter(u=>u.id!==user?.id&&!myBuddies.find(b=>b.id===u.id)));
+        setBuddyLoading(false);return;
+      }
+      // Fallback: partial match
+      const r=await fetch(SB_URL+"/rest/v1/profiles?username=ilike."+encodeURIComponent("%"+q+"%")+"&select=id,username,display_name,avatar_url,je_class&limit=10",{
         headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
       });
       const d=await r.json();
       if(Array.isArray(d))setBuddyResults(d.filter(u=>u.id!==user?.id&&!myBuddies.find(b=>b.id===u.id)));
-    }catch(e){}
+    }catch(e){console.error("Buddy search error:",e);}
     setBuddyLoading(false);
   }
   function addBuddy(u){
@@ -1754,7 +1782,8 @@ function App(){
     setRecommendedLoading(true);
     try{
       // Match by same level, and prefer same exam window if set
-      let url=SB_URL+"/rest/v1/profiles?je_class=eq."+jeClass+"&id=neq."+user.id+"&is_public=eq.true&select=id,username,display_name,avatar_url,je_class,exam_window&limit=20";
+      // Don't filter by is_public — new users haven't set it yet. Show all same-level candidates.
+      let url=SB_URL+"/rest/v1/profiles?je_class=eq."+jeClass+"&id=neq."+user.id+"&select=id,username,display_name,avatar_url,je_class,exam_window&limit=20";
       const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}});
       const d=await r.json();
       if(Array.isArray(d)){
