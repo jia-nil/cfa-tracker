@@ -4,6 +4,7 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -244,7 +245,8 @@ function renderMath(text) {
 // ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
-const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+const dayName=dateStr=>new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'short'});;
 function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
 function isOverdue(dateStr){return dateStr<today();}
@@ -285,20 +287,22 @@ function allTopicsForLevel(level){
   const order={H:0,M:1,L:2};
   return out.sort((a,b)=>order[a.weight]-order[b.weight]);
 }
-function generateRoadmap({level,examDate,studyDays,answers}){
-  let topics=allTopicsForLevel(level);
+function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics}){
+  // remainingTopics: if passed, use these instead of full curriculum (for adaptive recalc)
+  let topics=remainingTopics||allTopicsForLevel(level);
   if(topics.length===0||!examDate) return {weeks:[],totalDays:0};
-  // Filter out topics user already completed in questionnaire
-  if(answers&&!answers.skipped&&answers.completedTopics){
+  // Filter out topics user already completed in questionnaire (only on first generation)
+  if(!remainingTopics&&answers&&!answers.skipped&&answers.completedTopics){
     topics=topics.filter(t=>!answers.completedTopics[t.subject+"|"+t.topic]);
   }
   const weakSet=new Set(answers?.weakAreas||[]);
-  const totalDaysToExam=Math.max(1,daysBetween(today(),examDate));
+  const from=startDate||today();
+  const totalDaysToExam=Math.max(1,daysBetween(from,examDate));
   const revisionDays=Math.min(14,Math.max(5,Math.round(totalDaysToExam*0.12)));
   const studyPhaseDays=Math.max(1,totalDaysToExam-revisionDays);
   const studyDates=[];
   for(let i=0;i<studyPhaseDays;i++){
-    const dt=addDays(today(),i);
+    const dt=addDays(from,i);
     if((studyDays||[]).includes(weekdayIndex(dt))) studyDates.push(dt);
   }
   if(studyDates.length===0) return {weeks:[],totalDays:totalDaysToExam,revisionDays,noStudyDays:true};
@@ -323,7 +327,7 @@ function generateRoadmap({level,examDate,studyDays,answers}){
   while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;}
   const weeksMap={};
   assignments.forEach(a=>{
-    const wIdx=Math.floor(daysBetween(today(),a.date)/7);
+    const wIdx=Math.floor(daysBetween(from,a.date)/7);
     if(!weeksMap[wIdx]) weeksMap[wIdx]=[];
     weeksMap[wIdx].push(a);
   });
@@ -333,6 +337,64 @@ function generateRoadmap({level,examDate,studyDays,answers}){
   return {weeks,totalDays:totalDaysToExam,studyDates,revisionDays,revisionStart,revisionTopics,totalSessions:sessionPool.length,perDaySessions};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
+
+// Adaptive roadmap: figure out what's overdue and redistribute forward
+function computeAdaptiveRoadmap({roadmap,roadmapDone,level,examDate,studyDays,answers}){
+  if(!roadmap||!examDate)return null;
+  // Find all items that were scheduled for past dates but NOT marked done
+  const overdue=[];
+  const seenTopics=new Set(); // avoid duplicating topics
+  (roadmap.weeks||[]).forEach(w=>{
+    w.days.forEach(dd=>{
+      if(dd.date<today()){
+        dd.items.forEach(item=>{
+          const key=itemKey(dd.date,item);
+          if(!roadmapDone[key]){
+            const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
+            if(!seenTopics.has(topicKey)){
+              seenTopics.add(topicKey);
+              overdue.push({...item,_wasScheduled:dd.date});
+            }
+          }
+        });
+      }
+    });
+  });
+
+  // Future items already scheduled (don't duplicate them)
+  const futureScheduled=new Set();
+  (roadmap.weeks||[]).forEach(w=>{
+    w.days.forEach(dd=>{
+      if(dd.date>=today()){
+        dd.items.forEach(item=>{
+          futureScheduled.add(item.subject+"|"+item.topic+"|"+item.pass);
+        });
+      }
+    });
+  });
+
+  // Only redistribute overdue items NOT already in future schedule
+  const toRedistribute=overdue.filter(item=>{
+    return !futureScheduled.has(item.subject+"|"+item.topic+"|"+item.pass);
+  });
+
+  if(toRedistribute.length===0)return {roadmap,overdueCount:0,redistributed:0};
+
+  // Generate new roadmap from today with the remaining topics prepended
+  const futureItems=(roadmap.weeks||[]).flatMap(w=>w.days)
+    .filter(dd=>dd.date>=today())
+    .flatMap(dd=>dd.items);
+
+  // Merge: overdue first (highest priority), then future
+  const allRemaining=[...toRedistribute,...futureItems];
+  const newRoadmap=generateRoadmap({
+    level,examDate,studyDays,answers,
+    startDate:today(),
+    remainingTopics:allRemaining,
+  });
+
+  return{roadmap:newRoadmap,overdueCount:overdue.length,redistributed:toRedistribute.length};
+}
 
 // ── Select component ──────────────────────────────────────────────────────────
 function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
@@ -1372,7 +1434,11 @@ function App(){
   const [recommendedBuddies,setRecommendedBuddies]=useState([]);
   const [recommendedLoading,setRecommendedLoading]=useState(false);
   useEffect(()=>{
-    if(tab==="buddy"){myBuddies.forEach(b=>fetchBuddyStats(b.id));}
+    if(tab==="buddy"){
+      myBuddies.forEach(b=>fetchBuddyStats(b.id));
+      loadBuddyRequests();
+      loadMyBuddies();
+    }
   },[tab,myBuddies.length]);
   useEffect(()=>{
     if(tab==="buddy"&&jeClass)fetchRecommendedBuddies();
@@ -1731,6 +1797,69 @@ function App(){
     if(Array.isArray(d))setSearchResults(d.filter(u=>u.id!==user?.id));
   }
   // ── Study buddy functions ─────────────────────────────────────────────────
+  async function sendBuddyRequest(targetUser){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
+        method:"POST",
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+        body:JSON.stringify({from_user:user.id,to_user:targetUser.id,status:"pending"})
+      });
+      setBuddyResults(prev=>prev.filter(u=>u.id!==targetUser.id));
+      setRecommendedBuddies(prev=>prev.filter(u=>u.id!==targetUser.id));
+    }catch(e){}
+  }
+  async function acceptBuddyRequest(req){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      // Update status to accepted
+      await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?id=eq.${req.id}`,{
+        method:"PATCH",
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({status:"accepted"})
+      });
+      // Add each other as buddies locally
+      const them={id:req.from_user,username:req.profiles?.username,display_name:req.profiles?.display_name,je_class:req.profiles?.je_class};
+      setMyBuddies(prev=>[...prev.filter(b=>b.id!==them.id),them]);
+      setBuddyRequests(prev=>prev.filter(r=>r.id!==req.id));
+    }catch(e){}
+  }
+  async function declineBuddyRequest(req){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?id=eq.${req.id}`,{
+        method:"PATCH",
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},
+        body:JSON.stringify({status:"declined"})
+      });
+      setBuddyRequests(prev=>prev.filter(r=>r.id!==req.id));
+    }catch(e){}
+  }
+  async function loadBuddyRequests(){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.pending&select=*,profiles!nev_buddy_requests_from_user_fkey(username,display_name,avatar_url,je_class)`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}
+      });
+      const d=await r.json();
+      if(Array.isArray(d))setBuddyRequests(d);
+    }catch(e){}
+  }
+  async function loadMyBuddies(){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      // Get accepted requests where current user is either from or to
+      const [r1,r2]=await Promise.all([
+        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?from_user=eq.${user.id}&status=eq.accepted&select=to_user,profiles!nev_buddy_requests_to_user_fkey(id,username,display_name,avatar_url,je_class)`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}}),
+        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.accepted&select=from_user,profiles!nev_buddy_requests_from_user_fkey(id,username,display_name,avatar_url,je_class)`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}})
+      ]);
+      const d1=await r1.json(),d2=await r2.json();
+      const buddies=[];
+      if(Array.isArray(d1))d1.forEach(r=>{if(r.profiles)buddies.push(r.profiles);});
+      if(Array.isArray(d2))d2.forEach(r=>{if(r.profiles)buddies.push(r.profiles);});
+      if(buddies.length>0)setMyBuddies(buddies);
+    }catch(e){}
+  }
   async function searchBuddy(){
     if(!buddySearch.trim())return;
     setBuddyLoading(true);
@@ -3320,51 +3449,72 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
             {tab==="buddy"&&(
               <div className="pin">
                 <div style={{marginBottom:20}}>
-                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>study buddy</div>
-                  <div style={{fontSize:12,color:d.t3}}>add friends by username. see how much they're studying — nothing more, nothing less.</div>
+                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>Study Buddy</div>
+                  <div style={{fontSize:12,color:d.t3}}>find people studying CFA at the same time. send a request, they accept, then you can see each other's study hours.</div>
                 </div>
 
-                {/* Recommended buddies — matched by level + exam window */}
-                {recommendedBuddies.length>0&&(
-                  <div className="card cp" style={{marginBottom:20}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                      <span style={{fontSize:14}}>✨</span>
-                      <div style={{fontSize:12,fontWeight:700,color:d.t}}>Recommended for you</div>
-                    </div>
-                    <div style={{fontSize:11,color:d.t3,marginBottom:14}}>
-                      other {CLASSES.find(c=>c.id===jeClass)?.label||jeClass} candidates{examWindow?", same exam window where possible":""}
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      {recommendedBuddies.map(u=>{
-                        const sameWindow=u.exam_window===examWindow&&examWindow;
-                        return(
-                          <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
-                            <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0,overflow:"hidden"}}>
-                              {u.avatar_url?<img src={u.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(u.display_name||u.username||"?")[0].toUpperCase()}
-                            </div>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
-                              <div style={{fontSize:11,color:d.t3}}>
-                                @{u.username}{sameWindow&&<span style={{color:d.a2,fontWeight:600}}> · same exam window</span>}
-                              </div>
-                            </div>
-                            <button onClick={()=>{addBuddy(u);setRecommendedBuddies(prev=>prev.filter(r=>r.id!==u.id));}}
-                              style={{padding:"6px 14px",borderRadius:6,background:d.a2,color:"#06140f",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
-                              + add
-                            </button>
+                {/* Incoming requests */}
+                {buddyRequests.length>0&&(
+                  <div className="card cp" style={{marginBottom:20,borderColor:d.a1+"40"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:d.a1,marginBottom:12}}>📬 {buddyRequests.length} pending request{buddyRequests.length>1?"s":""}</div>
+                    {buddyRequests.map(req=>{
+                      const p=req.profiles||{};
+                      return(
+                        <div key={req.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:`1px solid ${d.b}`}}>
+                          <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
+                            {(p.display_name||p.username||"?")[0].toUpperCase()}
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:600,color:d.t}}>{p.display_name||p.username}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{p.username} wants to be your study buddy</div>
+                          </div>
+                          <button onClick={()=>acceptBuddyRequest(req)}
+                            style={{padding:"6px 12px",borderRadius:6,background:d.a2,color:"#06140f",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                            ✓ accept
+                          </button>
+                          <button onClick={()=>declineBuddyRequest(req)}
+                            style={{padding:"6px 10px",borderRadius:6,background:"none",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-                {recommendedLoading&&recommendedBuddies.length===0&&(
-                  <div style={{textAlign:"center",padding:"16px",fontSize:11,color:d.t3,fontStyle:"italic"}}>finding people studying the same level...</div>
+
+                {/* Recommended */}
+                {(recommendedBuddies.length>0||recommendedLoading)&&(
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:4}}>✨ Recommended for you</div>
+                    <div style={{fontSize:11,color:d.t3,marginBottom:14}}>
+                      {recommendedLoading?"finding candidates studying "+jeClass+"...":"other "+jeClass+" candidates"+(examWindow?", same exam window first":"")}
+                    </div>
+                    {recommendedBuddies.map(u=>{
+                      const sameWindow=u.exam_window===examWindow&&examWindow;
+                      return(
+                        <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid ${d.b}44`}}>
+                          <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
+                            {(u.display_name||u.username||"?")[0].toUpperCase()}
+                          </div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
+                            <div style={{fontSize:11,color:d.t3}}>
+                              @{u.username||"—"}{sameWindow&&<span style={{color:d.a2,fontWeight:600}}> · same window</span>}
+                            </div>
+                          </div>
+                          <button onClick={()=>sendBuddyRequest(u)}
+                            style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                            + request
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
 
-                {/* Search */}
+                {/* Search by username */}
                 <div className="card cp" style={{marginBottom:20}}>
-                  <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Add a friend</div>
+                  <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Search by username</div>
                   <div style={{display:"flex",gap:8}}>
                     <input className="inp" placeholder="@username" value={buddySearch}
                       onChange={e=>setBuddySearch(e.target.value)}
@@ -3375,44 +3525,41 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       {buddyLoading?"...":"search"}
                     </button>
                   </div>
-
                   {buddyResults.length>0&&(
                     <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
                       {buddyResults.map(u=>(
                         <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
-                          <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0,overflow:"hidden"}}>
-                            {u.avatar_url?<img src={u.avatar_url} style={{width:36,height:36,borderRadius:"50%",objectFit:"cover"}}/>:(u.display_name||u.username||"?")[0].toUpperCase()}
+                          <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
+                            {(u.display_name||u.username||"?")[0].toUpperCase()}
                           </div>
                           <div style={{flex:1}}>
                             <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
-                            <div style={{fontSize:11,color:d.t3}}>@{u.username} · {CLASSES.find(c=>c.id===u.je_class)?.label?.replace("CFA ","")||u.je_class||"—"}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{u.username} · {CLASSES.find(c=>c.id===u.je_class)?.label?.replace("CFA ","")||"—"}</div>
                           </div>
-                          <button onClick={()=>addBuddy(u)}
-                            style={{padding:"6px 14px",borderRadius:6,background:d.a2,color:"#06140f",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
-                            + add
+                          <button onClick={()=>sendBuddyRequest(u)}
+                            style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                            + request
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
-                  {buddyResults.length===0&&buddySearch&&!buddyLoading&&(
-                    <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>no one found with that username.</div>
+                  {buddyResults.length===0&&buddySearch.trim()&&!buddyLoading&&(
+                    <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>no one found — make sure they've set a username in their profile.</div>
                   )}
                 </div>
 
-                {/* My buddies */}
+                {/* My study buddies */}
                 <div style={{fontSize:12,fontWeight:700,color:d.t3,letterSpacing:".08em",textTransform:"uppercase",marginBottom:12}}>
-                  Your Study Buddies {myBuddies.length>0&&`(${myBuddies.length})`}
+                  My Study Buddies {myBuddies.length>0&&`(${myBuddies.length})`}
                 </div>
-
                 {myBuddies.length===0&&(
                   <div className="card empty">
                     <div style={{fontSize:28,marginBottom:10}}>🤝</div>
                     <div className="et">no study buddies yet</div>
-                    <div className="es">search for a friend's username above and add them.</div>
+                    <div className="es">search by username or send a request to someone recommended above.</div>
                   </div>
                 )}
-
                 {myBuddies.map(b=>{
                   const stats=buddyStats[b.id];
                   const weekHrs=stats?Math.round((stats.weekMins/60)*10)/10:null;
@@ -3422,37 +3569,29 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   return(
                     <div key={b.id} className="card" style={{marginBottom:10,padding:"16px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
-                        <div style={{width:44,height:44,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:16,flexShrink:0,overflow:"hidden",position:"relative"}}>
-                          {b.avatar_url?<img src={b.avatar_url} style={{width:44,height:44,borderRadius:"50%",objectFit:"cover"}}/>:(b.display_name||b.username||"?")[0].toUpperCase()}
+                        <div style={{width:44,height:44,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:16,flexShrink:0,position:"relative"}}>
+                          {(b.display_name||b.username||"?")[0].toUpperCase()}
                           {isActiveToday&&<div style={{position:"absolute",bottom:0,right:0,width:12,height:12,borderRadius:"50%",background:d.a2,border:`2px solid ${d.card}`}}/>}
                         </div>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:14,fontWeight:600,color:d.t}}>{b.display_name||b.username}</div>
-                          <div style={{fontSize:11,color:d.t3}}>@{b.username} · {CLASSES.find(c=>c.id===b.je_class)?.label?.replace("CFA ","")||b.je_class||"—"}</div>
+                          <div style={{fontSize:11,color:d.t3}}>@{b.username||"—"} · {CLASSES.find(c=>c.id===b.je_class)?.label?.replace("CFA ","")||"—"}</div>
                         </div>
                         <button onClick={()=>removeBuddy(b.id)}
-                          style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:16,padding:4}} title="remove">×</button>
+                          style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:16,padding:4}}>×</button>
                       </div>
-                      {stats?(
-                        <div style={{display:"flex",gap:8,marginTop:14}}>
-                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
-                            <div style={{fontSize:16,fontWeight:700,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{weekHrs}h</div>
-                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>This Week</div>
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        {[
+                          {l:"This Week",v:weekHrs!==null?weekHrs+"h":"...",c:d.a1},
+                          {l:"Total Hours",v:totalHrs!==null?totalHrs+"h":"...",c:d.t2},
+                          {l:"Last Studied",v:isActiveToday?"Today ✓":daysSinceLast!==null?daysSinceLast+"d ago":"—",c:isActiveToday?d.a2:d.t3},
+                        ].map(s=>(
+                          <div key={s.l} style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
+                            <div style={{fontSize:15,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}</div>
+                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>{s.l}</div>
                           </div>
-                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
-                            <div style={{fontSize:16,fontWeight:700,color:d.t2,fontFamily:"'DM Serif Display',serif"}}>{totalHrs}h</div>
-                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>Total</div>
-                          </div>
-                          <div style={{flex:1,textAlign:"center",padding:"10px 6px",background:d.hover,borderRadius:8}}>
-                            <div style={{fontSize:16,fontWeight:700,color:isActiveToday?d.a2:d.t3,fontFamily:"'DM Serif Display',serif"}}>
-                              {isActiveToday?"Today":daysSinceLast!==null?daysSinceLast+"d ago":"—"}
-                            </div>
-                            <div style={{fontSize:8.5,color:d.t3,marginTop:2,textTransform:"uppercase"}}>Last Studied</div>
-                          </div>
-                        </div>
-                      ):(
-                        <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>loading their stats...</div>
-                      )}
+                        ))}
+                      </div>
                     </div>
                   );
                 })}
@@ -4060,6 +4199,229 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               </div>
             )}
 
+            )}
+
+            {/* ── MOCK SCORES + PASS PREDICTOR ── */}
+            {tab==="mocks"&&(()=>{
+              // CFA Industry benchmark: candidates who pass average ~70%+ on mocks
+              // MPS (minimum passing score) estimated at 65% based on candidate surveys
+              const MPS=65;
+              const avgScore=mockScores.length?Math.round(mockScores.reduce((a,m)=>a+parseFloat(m.score||0),0)/mockScores.length):null;
+              const latestScore=mockScores.length?parseFloat(mockScores[mockScores.length-1].score):null;
+              // Trend: linear regression over scores
+              let trend=null;
+              if(mockScores.length>=3){
+                const n=mockScores.length;
+                const xs=mockScores.map((_,i)=>i);
+                const ys=mockScores.map(m=>parseFloat(m.score||0));
+                const xm=xs.reduce((a,b)=>a+b,0)/n;
+                const ym=ys.reduce((a,b)=>a+b,0)/n;
+                const slope=(xs.reduce((a,x,i)=>a+(x-xm)*(ys[i]-ym),0))/(xs.reduce((a,x)=>a+(x-xm)**2,0)||1);
+                // Project to exam day
+                const daysLeft2=examDate?Math.max(0,daysBetween(today(),examDate)):null;
+                const weeksLeft=daysLeft2?(daysLeft2/7):null;
+                const mockPerWeek=mockScores.length/(daysLeft2?Math.max(1,daysBetween(mockScores[0]?.date||today(),today())/7):1);
+                const mocksLeft=weeksLeft?Math.round(weeksLeft*mockPerWeek):null;
+                const projectedScore=mocksLeft?Math.min(100,Math.round(latestScore+slope*mocksLeft)):null;
+                trend={slope:Math.round(slope*10)/10,projectedScore};
+              }
+              const passLikelihood=avgScore===null?null:avgScore>=MPS+10?"Strong Pass":avgScore>=MPS?"Likely Pass":avgScore>=MPS-5?"Borderline":"At Risk";
+              const passColor=passLikelihood==="Strong Pass"?d.a2:passLikelihood==="Likely Pass"?d.a2:passLikelihood==="Borderline"?d.gold:d.danger;
+
+              const subjectScores={};
+              mockScores.forEach(m=>{
+                if(m.weakTopics&&Array.isArray(m.weakTopics)){
+                  m.weakTopics.forEach(t=>{subjectScores[t]=(subjectScores[t]||0)+1;});
+                }
+              });
+              const weakestAreas=Object.entries(subjectScores).sort((a,b)=>b[1]-a[1]).slice(0,4);
+
+              return(
+                <div className="pin">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                    <div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>Mock Scores</div>
+                      <div style={{fontSize:12,color:d.t3}}>track every attempt. the trend tells the truth.</div>
+                    </div>
+                    <button onClick={()=>setShowMockForm(true)}
+                      style={{padding:"9px 18px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      + log mock
+                    </button>
+                  </div>
+
+                  {/* Add mock form */}
+                  {showMockForm&&(
+                    <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(10,10,15,.95)",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+                      <div style={{width:"100%",maxWidth:440,background:d.card,borderRadius:16,padding:24,border:`1px solid ${d.b}`}}>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:18}}>Log Mock Exam</div>
+                        {[
+                          {l:"Date",k:"date",type:"date"},
+                          {l:"Provider",k:"provider",type:"select",opts:["Kaplan","Schweser","CFA Institute","AnalystPrep","Salt Solutions","Other"]},
+                          {l:"Score (%)",k:"score",type:"number",placeholder:"e.g. 68"},
+                          {l:"Notes",k:"notes",type:"text",placeholder:"what did you struggle with?"},
+                        ].map(f=>(
+                          <div key={f.k} style={{marginBottom:12}}>
+                            <div style={{fontSize:11,color:d.t3,marginBottom:4,fontWeight:600}}>{f.l}</div>
+                            {f.type==="select"?(
+                              <select value={mockForm[f.k]} onChange={e=>setMockForm(p=>({...p,[f.k]:e.target.value}))}
+                                style={{width:"100%",padding:"9px 12px",borderRadius:8,background:d.hover,border:`1px solid ${d.b}`,color:d.t,fontSize:13,fontFamily:"inherit"}}>
+                                {f.opts.map(o=><option key={o}>{o}</option>)}
+                              </select>
+                            ):(
+                              <input type={f.type} value={mockForm[f.k]} placeholder={f.placeholder||""} min={f.type==="number"?0:undefined} max={f.type==="number"?100:undefined}
+                                onChange={e=>setMockForm(p=>({...p,[f.k]:e.target.value}))}
+                                style={{width:"100%",padding:"9px 12px",borderRadius:8,background:d.hover,border:`1px solid ${d.b}`,color:d.t,fontSize:13,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                            )}
+                          </div>
+                        ))}
+                        <div style={{marginBottom:16}}>
+                          <div style={{fontSize:11,color:d.t3,marginBottom:6,fontWeight:600}}>Weakest topics this mock</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                            {Object.keys(SUBJECT_COLORS).map(sub=>{
+                              const sel=(mockForm.weakTopics||[]).includes(sub);
+                              return(
+                                <div key={sub} onClick={()=>setMockForm(p=>({...p,weakTopics:sel?(p.weakTopics||[]).filter(x=>x!==sub):[...(p.weakTopics||[]),sub]}))}
+                                  style={{padding:"4px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontWeight:600,
+                                    background:sel?(SUBJECT_COLORS[sub]+"20"):d.hover,
+                                    color:sel?SUBJECT_COLORS[sub]:d.t3,
+                                    border:`1px solid ${sel?SUBJECT_COLORS[sub]:d.b}`}}>
+                                  {sub}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:10}}>
+                          <button onClick={()=>{
+                            if(!mockForm.score)return;
+                            const entry={...mockForm,id:Date.now(),date:mockForm.date||today()};
+                            const next=[...mockScores,entry];
+                            setMockScores(next);
+                            if(authSession?.access_token&&user?.id){
+                              fetch(`${SB_URL}/rest/v1/user_mocks`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({id:entry.id,user_id:user.id,data:entry})}).catch(()=>{});
+                            }
+                            setShowMockForm(false);
+                            setMockForm({date:today(),provider:"Kaplan",score:"",notes:"",weakTopics:[]});
+                          }} style={{flex:1,padding:"11px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                            save
+                          </button>
+                          <button onClick={()=>setShowMockForm(false)}
+                            style={{padding:"11px 18px",borderRadius:8,background:"none",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>
+                            cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {mockScores.length===0&&(
+                    <div className="card empty">
+                      <div style={{fontSize:28,marginBottom:10}}>📝</div>
+                      <div className="et">no mocks logged yet</div>
+                      <div className="es">log your first Kaplan or Schweser mock to see your pass prediction.</div>
+                    </div>
+                  )}
+
+                  {mockScores.length>0&&(
+                    <>
+                      {/* Pass likelihood card */}
+                      <div style={{padding:"20px 22px",background:d.card,border:`1px solid ${passColor}30`,borderRadius:14,marginBottom:16}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+                          <div>
+                            <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:6}}>Pass Likelihood</div>
+                            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:40,color:passColor,letterSpacing:"-.04em",lineHeight:1}}>{passLikelihood}</div>
+                            <div style={{fontSize:11,color:d.t3,marginTop:6,fontStyle:"italic"}}>
+                              CFA benchmark: ~{MPS}%+ on standardised mocks correlates with passing.
+                              {trend?.projectedScore&&` At your current trend you'll hit ${trend.projectedScore}% by exam day.`}
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:16}}>
+                            <div style={{textAlign:"center"}}>
+                              <div style={{fontSize:28,fontWeight:700,color:passColor,fontFamily:"'DM Serif Display',serif"}}>{avgScore}%</div>
+                              <div style={{fontSize:9,color:d.t3,marginTop:2,textTransform:"uppercase"}}>avg score</div>
+                            </div>
+                            <div style={{textAlign:"center"}}>
+                              <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{latestScore}%</div>
+                              <div style={{fontSize:9,color:d.t3,marginTop:2,textTransform:"uppercase"}}>latest</div>
+                            </div>
+                            {trend&&<div style={{textAlign:"center"}}>
+                              <div style={{fontSize:28,fontWeight:700,color:trend.slope>=0?d.a2:d.danger,fontFamily:"'DM Serif Display',serif"}}>
+                                {trend.slope>=0?"+":""}{trend.slope}%
+                              </div>
+                              <div style={{fontSize:9,color:d.t3,marginTop:2,textTransform:"uppercase"}}>per mock</div>
+                            </div>}
+                          </div>
+                        </div>
+                        {/* Score bar vs MPS */}
+                        <div style={{marginTop:16}}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:d.t3,marginBottom:4}}>
+                            <span>0%</span>
+                            <span style={{color:d.gold}}>MPS ~{MPS}%</span>
+                            <span>100%</span>
+                          </div>
+                          <div style={{height:8,background:d.b,borderRadius:4,position:"relative",overflow:"hidden"}}>
+                            <div style={{position:"absolute",left:MPS+"%",top:0,bottom:0,width:2,background:d.gold,zIndex:1}}/>
+                            <div style={{height:"100%",width:(avgScore||0)+"%",background:`linear-gradient(90deg,${d.danger},${d.gold},${d.a2})`,borderRadius:4,transition:"width .8s"}}/>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Weakest areas */}
+                      {weakestAreas.length>0&&(
+                        <div style={{padding:"14px 18px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16}}>
+                          <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Your weak spots (across all mocks)</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                            {weakestAreas.map(([sub,count])=>(
+                              <div key={sub} style={{padding:"5px 12px",borderRadius:6,background:(SUBJECT_COLORS[sub]||d.a1)+"18",color:SUBJECT_COLORS[sub]||d.a1,fontSize:11,fontWeight:700}}>
+                                {sub} <span style={{opacity:.7}}>×{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>these show up most often in your weak topics. prioritise them in revision.</div>
+                        </div>
+                      )}
+
+                      {/* Score history */}
+                      <div style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16,overflow:"hidden"}}>
+                        <div style={{padding:"14px 18px",borderBottom:`1px solid ${d.b}`,fontSize:12,fontWeight:700,color:d.t}}>Score History</div>
+                        {/* Bar chart */}
+                        <div style={{padding:"16px 18px",display:"flex",gap:6,alignItems:"flex-end",height:120}}>
+                          {mockScores.map((m,i)=>{
+                            const pct=parseFloat(m.score)||0;
+                            const col=pct>=MPS+10?d.a2:pct>=MPS?d.a2:pct>=MPS-5?d.gold:d.danger;
+                            return(
+                              <div key={m.id} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                                <div style={{fontSize:9,color:col,fontWeight:700}}>{pct}%</div>
+                                <div style={{width:"100%",background:col,borderRadius:"3px 3px 0 0",height:Math.max(4,(pct/100)*80)+"px",transition:"height .5s",position:"relative"}}>
+                                  {pct>=MPS&&<div style={{position:"absolute",inset:0,background:"rgba(255,255,255,.1)",borderRadius:"3px 3px 0 0"}}/>}
+                                </div>
+                                <div style={{fontSize:8,color:d.t4}}>{m.provider?.slice(0,3)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Table */}
+                        {[...mockScores].reverse().map((m,i)=>(
+                          <div key={m.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 18px",borderTop:`1px solid ${d.b}`}}>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:12,fontWeight:600,color:d.t}}>{m.provider}</div>
+                              <div style={{fontSize:10,color:d.t3}}>{m.date}{m.notes&&" · "+m.notes}</div>
+                            </div>
+                            <div style={{fontSize:18,fontWeight:700,fontFamily:"'DM Serif Display',serif",
+                              color:parseFloat(m.score)>=MPS?d.a2:parseFloat(m.score)>=MPS-5?d.gold:d.danger}}>
+                              {m.score}%
+                            </div>
+                            <button onClick={()=>setMockScores(prev=>prev.filter(x=>x.id!==m.id))}
+                              style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:14,padding:"2px 6px"}}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* ── PLANNER ── */}
             {tab==="planner"&&(()=>{
               if(!roadmap) return(
@@ -4325,4 +4687,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
