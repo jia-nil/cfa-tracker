@@ -3,8 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1465,16 +1463,79 @@ function App(){
       }
       return next;
     });
+    // ── Sync to syllabus: last pass = done, first/mid pass = in_progress ────
+    if(item.subject&&item.topic){
+      const sylKey=item.subject+"|"+item.topic;
+      const isLastPass=!item.totalPasses||item.pass===item.totalPasses;
+      const isUnticking=!!roadmapDone[itemKey(date,item)]; // will be toggled off
+      const newStatus=isUnticking?"in_progress":isLastPass?"done":"in_progress";
+      setSyllabusStatus(prev=>{
+        const next={...prev,[sylKey]:newStatus};
+        if(authSession?.access_token&&user?.id){
+          fetch(`${SB_URL}/rest/v1/nev_syllabus`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+            body:JSON.stringify({user_id:user.id,subject:item.subject,topic:item.topic,status:newStatus,updated_at:new Date().toISOString()})}).catch(()=>{});
+        }
+        return next;
+      });
+    }
   }
   // ── Roadmap — recomputed whenever level/window/study days change ──────────
   const windowData=(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow);
   const examDate=windowData?.start||null;
-  const roadmap=useMemo(()=>{
+  // ── Stateful roadmap ─────────────────────────────────────────────────────
+  // roadmapBase: the full generated plan (recalculated when setup changes)
+  // Completed items are tracked in roadmapDone — "today" shows only undone items
+  const roadmapBase=useMemo(()=>{
     if(!jeClass||!examDate) return null;
     return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers});
   },[jeClass,examDate,studyDays,roadmapAnswers]);
+
+  // roadmap is the adaptive view: past undone items bubble up to today
+  const roadmap=useMemo(()=>{
+    if(!roadmapBase||!examDate) return roadmapBase;
+    // Find items that were scheduled for PAST dates but not completed
+    const today_str=today();
+    const overdue=[];
+    const seenKeys=new Set();
+    (roadmapBase.weeks||[]).forEach(w=>{
+      w.days.forEach(dd=>{
+        if(dd.date<today_str){
+          dd.items.forEach(item=>{
+            const k=itemKey(dd.date,item);
+            const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
+            if(!roadmapDone[k]&&!seenKeys.has(topicKey)){
+              seenKeys.add(topicKey);
+              overdue.push({...item,_overdue:true,_originalDate:dd.date});
+            }
+          });
+        }
+      });
+    });
+    if(overdue.length===0) return roadmapBase;
+    // Inject overdue items into today's slot
+    const weeks=(roadmapBase.weeks||[]).map(w=>({
+      ...w,
+      days:w.days.map(dd=>{
+        if(dd.date===today_str){
+          // Prepend overdue items to today, avoid duplicates
+          const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
+          const toAdd=overdue.filter(it=>!existingKeys.has(it.subject+"|"+it.topic+"|"+it.pass));
+          return{...dd,items:[...toAdd,...dd.items]};
+        }
+        return dd;
+      })
+    }));
+    return{...roadmapBase,weeks,_overdueCount:overdue.length};
+  },[roadmapBase,roadmapDone,examDate]);
+
   const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
-  const roadmapTodayItems=(roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[];
+  // Today's items — overdue first, then scheduled, filtered to show undone at top
+  const roadmapTodayAllItems=(roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[];
+  // Sort: undone first, then done (so completed ones sink to bottom)
+  const roadmapTodayItems=[
+    ...roadmapTodayAllItems.filter(it=>!roadmapDone[itemKey(today(),it)]),
+    ...roadmapTodayAllItems.filter(it=>roadmapDone[itemKey(today(),it)]),
+  ];
   const [coachCards,setCoachCards]=useState(null);
   // ── Social state ──────────────────────────────────────────────────────────
   const [feed,setFeed]=useState([]);
@@ -4197,8 +4258,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   </div>
                 </div>
               </div>
-            )}
-
             )}
 
             {/* ── MOCK SCORES + PASS PREDICTOR ── */}
