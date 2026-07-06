@@ -4,8 +4,6 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
-
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1869,10 +1867,14 @@ function App(){
     try{
       const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
         method:"POST",
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates,return=representation"},
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
         body:JSON.stringify({from_user:user.id,to_user:targetUser.id,status:"pending"})
       });
-      if(!r.ok){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
+      if(!r.ok){
+        const errText=await r.text().catch(()=>"");
+        console.error("Buddy request failed:",r.status,errText);
+        setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});
+      }
     }catch(e){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
   }
   async function acceptBuddyRequest(req){
@@ -2290,8 +2292,10 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
   // ── Exam Setup flow — runs once after level is picked ────────────────────
-  // ExamSetupDone is false if: brand new user, OR returning user with stale JEE class (dropper/11th/12th)
+  // needsSetup: brand new user OR stale JEE class
   const needsSetup = !examSetupDone || !jeClass || !CLASSES.find(c=>c.id===jeClass);
+  // needsQuestionnaire: after setup, before roadmap — compulsory personalisation
+  const needsQuestionnaire = examSetupDone && jeClass && !roadmapAnswers && !showRoadmapQs;
   if(needsSetup) return(
     <ExamSetupScreen
       d={d}
@@ -4771,4 +4775,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
