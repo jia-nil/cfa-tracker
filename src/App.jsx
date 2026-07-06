@@ -3,6 +3,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
+
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1429,6 +1432,7 @@ function App(){
   const [myBuddies,setMyBuddies]=useState(()=>{try{const v=localStorage.getItem("nev_buddies");return v?JSON.parse(v):[];}catch(e){return [];}});
   useEffect(()=>{try{localStorage.setItem("nev_buddies",JSON.stringify(myBuddies));}catch(e){}},[myBuddies]);
   const [buddyStats,setBuddyStats]=useState({});
+  const [sentRequests,setSentRequests]=useState(new Set()); // track pending sent requests
   const [recommendedBuddies,setRecommendedBuddies]=useState([]);
   const [recommendedLoading,setRecommendedLoading]=useState(false);
   useEffect(()=>{
@@ -1860,15 +1864,16 @@ function App(){
   // ── Study buddy functions ─────────────────────────────────────────────────
   async function sendBuddyRequest(targetUser){
     if(!user?.id||!authSession?.access_token)return;
+    // Optimistic UI: mark as "sent" immediately
+    setSentRequests(prev=>new Set([...prev,targetUser.id]));
     try{
-      await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
+      const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
         method:"POST",
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates,return=representation"},
         body:JSON.stringify({from_user:user.id,to_user:targetUser.id,status:"pending"})
       });
-      setBuddyResults(prev=>prev.filter(u=>u.id!==targetUser.id));
-      setRecommendedBuddies(prev=>prev.filter(u=>u.id!==targetUser.id));
-    }catch(e){}
+      if(!r.ok){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
+    }catch(e){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
   }
   async function acceptBuddyRequest(req){
     if(!user?.id||!authSession?.access_token)return;
@@ -1899,26 +1904,45 @@ function App(){
   async function loadBuddyRequests(){
     if(!user?.id||!authSession?.access_token)return;
     try{
-      const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.pending&select=*,profiles!nev_buddy_requests_from_user_fkey(username,display_name,avatar_url,je_class)`,{
+      // Step 1: get pending requests to me
+      const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.pending&select=id,from_user,created_at`,{
         headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}
       });
-      const d=await r.json();
-      if(Array.isArray(d))setBuddyRequests(d);
+      const reqs=await r.json();
+      if(!Array.isArray(reqs)||reqs.length===0)return;
+      // Step 2: fetch senders' profiles
+      const fromIds=reqs.map(r=>r.from_user).join(",");
+      const profR=await fetch(`${SB_URL}/rest/v1/profiles?id=in.(${fromIds})&select=id,username,display_name,avatar_url,je_class`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}
+      });
+      const profs=await profR.json();
+      const profMap={};
+      if(Array.isArray(profs))profs.forEach(p=>profMap[p.id]=p);
+      // Merge
+      const enriched=reqs.map(req=>({...req,profiles:profMap[req.from_user]||null}));
+      setBuddyRequests(enriched);
     }catch(e){}
   }
   async function loadMyBuddies(){
     if(!user?.id||!authSession?.access_token)return;
     try{
-      // Get accepted requests where current user is either from or to
+      // Step 1: get all accepted request rows involving this user
       const [r1,r2]=await Promise.all([
-        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?from_user=eq.${user.id}&status=eq.accepted&select=to_user,profiles!nev_buddy_requests_to_user_fkey(id,username,display_name,avatar_url,je_class)`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}}),
-        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.accepted&select=from_user,profiles!nev_buddy_requests_from_user_fkey(id,username,display_name,avatar_url,je_class)`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}})
+        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?from_user=eq.${user.id}&status=eq.accepted&select=to_user`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}}),
+        fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=eq.${user.id}&status=eq.accepted&select=from_user`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}})
       ]);
       const d1=await r1.json(),d2=await r2.json();
-      const buddies=[];
-      if(Array.isArray(d1))d1.forEach(r=>{if(r.profiles)buddies.push(r.profiles);});
-      if(Array.isArray(d2))d2.forEach(r=>{if(r.profiles)buddies.push(r.profiles);});
-      if(buddies.length>0)setMyBuddies(buddies);
+      const buddyIds=[];
+      if(Array.isArray(d1))d1.forEach(r=>r.to_user&&buddyIds.push(r.to_user));
+      if(Array.isArray(d2))d2.forEach(r=>r.from_user&&buddyIds.push(r.from_user));
+      if(buddyIds.length===0)return;
+      // Step 2: fetch profiles for those IDs
+      const ids=buddyIds.join(",");
+      const profR=await fetch(`${SB_URL}/rest/v1/profiles?id=in.(${ids})&select=id,username,display_name,avatar_url,je_class`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}
+      });
+      const profs=await profR.json();
+      if(Array.isArray(profs)&&profs.length>0)setMyBuddies(profs);
     }catch(e){}
   }
   async function searchBuddy(){
@@ -1951,20 +1975,21 @@ function App(){
   function removeBuddy(id){
     setMyBuddies(prev=>prev.filter(b=>b.id!==id));
   }
-  // Returns weekly + total minutes for a buddy (general stats only, no session detail)
+  // Fetch buddy stats from their public profile row (week_mins, total_mins synced on session save)
   async function fetchBuddyStats(buddyId){
     try{
-      const ws=weekStartOf(today());
-      const r=await fetch(SB_URL+"/rest/v1/user_sessions?user_id=eq."+buddyId+"&select=data",{
+      const r=await fetch(SB_URL+"/rest/v1/profiles?id=eq."+buddyId+"&select=week_mins,total_mins,last_studied,session_count",{
         headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}
       });
       const rows=await r.json();
-      if(!Array.isArray(rows))return;
-      const sessionsData=rows.map(r=>r.data||r);
-      const weekMins=sessionsData.filter(s=>s.date>=ws).reduce((a,s)=>a+(s.duration||0),0);
-      const totalMins=sessionsData.reduce((a,s)=>a+(s.duration||0),0);
-      const lastDate=sessionsData.length?[...sessionsData].sort((a,b)=>b.date.localeCompare(a.date))[0].date:null;
-      setBuddyStats(prev=>({...prev,[buddyId]:{weekMins,totalMins,lastDate,sessionCount:sessionsData.length}}));
+      if(!Array.isArray(rows)||!rows.length)return;
+      const p=rows[0];
+      setBuddyStats(prev=>({...prev,[buddyId]:{
+        weekMins:p.week_mins||0,
+        totalMins:p.total_mins||0,
+        lastDate:p.last_studied||null,
+        sessionCount:p.session_count||0,
+      }}));
     }catch(e){}
   }
   async function fetchRecommendedBuddies(){
@@ -4746,3 +4771,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
