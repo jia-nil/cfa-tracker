@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
+
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -285,15 +287,30 @@ function allTopicsForLevel(level){
   const order={H:0,M:1,L:2};
   return out.sort((a,b)=>order[a.weight]-order[b.weight]);
 }
-function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics}){
-  // remainingTopics: if passed, use these instead of full curriculum (for adaptive recalc)
+function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance}){
+  // performance: live signal computed from actual mock scores / PYQ accuracy / syllabus status —
+  // {weakSubjects:Set<subject>, weakTopics:Set<"sub|topic">, strongTopics:Set<"sub|topic">, doneTopics:Set<"sub|topic">}
+  // This is what makes the plan personalised instead of one-size-fits-all: two students on the
+  // same level get different pass-counts per topic based on how THEY are actually performing.
   let topics=remainingTopics||allTopicsForLevel(level);
   if(topics.length===0||!examDate) return {weeks:[],totalDays:0};
   // Filter out topics user already completed in questionnaire (only on first generation)
   if(!remainingTopics&&answers&&!answers.skipped&&answers.completedTopics){
     topics=topics.filter(t=>!answers.completedTopics[t.subject+"|"+t.topic]);
   }
-  const weakSet=new Set(answers?.weakAreas||[]);
+  // Drop topics that are BOTH marked done AND confirmed strong (good PYQ/mock signal) — fully
+  // mastered content should stop eating roadmap slots. Just "done" alone (untested) keeps one
+  // light consolidation pass rather than vanishing.
+  if(!remainingTopics&&performance?.doneTopics){
+    topics=topics.filter(t=>{
+      const key=t.subject+"|"+t.topic;
+      return !(performance.doneTopics.has(key)&&performance.strongTopics?.has(key));
+    });
+  }
+  const weakSet=new Set([...(answers?.weakAreas||[]),...(performance?.weakSubjects||[])]);
+  const weakTopicSet=performance?.weakTopics||new Set();
+  const strongTopicSet=performance?.strongTopics||new Set();
+  const doneTopicSet=performance?.doneTopics||new Set();
   const from=startDate||today();
   const totalDaysToExam=Math.max(1,daysBetween(from,examDate));
   const revisionDays=Math.min(14,Math.max(5,Math.round(totalDaysToExam*0.12)));
@@ -307,9 +324,12 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   const passesFor={H:3,M:2,L:1};
   const sessionPool=[];
   topics.forEach(t=>{
-    const base=passesFor[t.weight]||1;
-    const boost=weakSet.has(t.subject)?1:0; // extra pass for weak areas
-    const passes=base+boost;
+    const key=t.subject+"|"+t.topic;
+    let passes=passesFor[t.weight]||1;
+    if(weakSet.has(t.subject)) passes+=1;            // weak subject (questionnaire OR live mock average <65%)
+    if(weakTopicSet.has(key)) passes+=1;              // weak topic (live PYQ accuracy <60%, min 2 attempts)
+    if(strongTopicSet.has(key)) passes=Math.max(1,passes-1);      // proven strong on PYQs — trim to a light touch-up
+    else if(doneTopicSet.has(key)) passes=Math.max(1,passes-1);   // marked done but untested — one consolidation pass
     for(let p=0;p<passes;p++) sessionPool.push({...t,pass:p+1,totalPasses:passes});
   });
   sessionPool.sort((a,b)=>a.pass-b.pass);
@@ -1385,6 +1405,8 @@ function App(){
   // Revision scheduler state
   const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
   useEffect(()=>{try{localStorage.setItem("slothr_revision",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
+  // Which "studied but not tracked" card currently has its recency picker open
+  const [revisionRecencyPicker,setRevisionRecencyPicker]=useState(null);
   function markStudied(sub,topic){
     const now=today();
     setRevisionLog(prev=>({...prev,[sub+"|"+topic]:{
@@ -1395,6 +1417,25 @@ function App(){
         addDays(now,14),
         addDays(now,30),
       ],
+      doneRevisions:[],
+    }}));
+  }
+  // Backfill scheduling for topics studied before/outside the tracker — the user tells us roughly
+  // how long ago, we back-date lastStudied and compute the 3/7/14/30-day schedule from THAT date.
+  // If it's been a while, some of those dates will already be in the past — which correctly makes
+  // the topic show up as due immediately, instead of pretending it was just studied today.
+  const RECENCY_DAYS_AGO={today:0,week:5,month:21,longer:45};
+  function markStudiedWithRecency(sub,topic,recency){
+    const daysAgo=RECENCY_DAYS_AGO[recency]??0;
+    const lastStudied=addDays(today(),-daysAgo);
+    setRevisionLog(prev=>({...prev,[sub+"|"+topic]:{
+      lastStudied,
+      nextRevisions:[
+        addDays(lastStudied,3),
+        addDays(lastStudied,7),
+        addDays(lastStudied,14),
+        addDays(lastStudied,30),
+      ].filter(d=>true), // keep all four — past-due ones will simply surface as "due now"
       doneRevisions:[],
     }}));
   }
@@ -1478,6 +1519,9 @@ function App(){
         }
         return next;
       });
+      // Finishing the LAST pass of a topic = fully done — feed it into the revision scheduler too,
+      // so completing something via the roadmap keeps the revision tab in sync automatically.
+      if(newStatus==="done")markStudied(item.subject,item.topic);
     }
   }
   // ── Roadmap — recomputed whenever level/window/study days change ──────────
@@ -1509,10 +1553,39 @@ function App(){
       try{localStorage.setItem("nev_roadmap_start",JSON.stringify({key:anchorKey,date:d}));}catch(e){}
     }
   },[jeClass,examDate]);
+  // ── Live personalization signal ──────────────────────────────────────────
+  // This is what makes the roadmap "yours" instead of one-size-fits-all: it's recomputed from
+  // YOUR actual mock scores, PYQ accuracy, and marked-done chapters — not a static template.
+  const roadmapPerformance=useMemo(()=>{
+    const weakSubjects=new Set();
+    Object.keys(SUBJECT_COLORS||{}).forEach(sub=>{
+      const scores=mockScores.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub])).filter(v=>v!=null);
+      if(scores.length){
+        const avg=scores.reduce((a,b)=>a+b,0)/scores.length;
+        if(avg<65) weakSubjects.add(sub);
+      }
+    });
+    const topicPyq={};
+    (pyqHistory||[]).forEach(p=>{
+      const key=p.subject+"|"+p.topic;
+      if(!topicPyq[key]) topicPyq[key]={correct:0,total:0};
+      topicPyq[key].total++;
+      if(p.correct) topicPyq[key].correct++;
+    });
+    const weakTopics=new Set(),strongTopics=new Set();
+    Object.entries(topicPyq).forEach(([key,v])=>{
+      if(v.total<2) return;
+      const acc=v.correct/v.total;
+      if(acc<0.6) weakTopics.add(key);
+      else if(acc>=0.85) strongTopics.add(key);
+    });
+    const doneTopics=new Set(Object.entries(syllabusStatus).filter(([,v])=>v==="done").map(([k])=>k));
+    return {weakSubjects,weakTopics,strongTopics,doneTopics};
+  },[mockScores,pyqHistory,syllabusStatus]);
   const roadmapBase=useMemo(()=>{
     if(!jeClass||!examDate||!roadmapStartDate) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate});
-  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate]);
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:roadmapPerformance});
+  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,roadmapPerformance]);
 
   // roadmap is the adaptive view: past undone items bubble up to today
   const roadmap=useMemo(()=>{
@@ -1527,7 +1600,8 @@ function App(){
           dd.items.forEach(item=>{
             const k=itemKey(dd.date,item);
             const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
-            if(!roadmapDone[k]&&!seenKeys.has(topicKey)){
+            const syllKey=item.subject+"|"+item.topic;
+            if(!roadmapDone[k]&&!seenKeys.has(topicKey)&&syllabusStatus[syllKey]!=="done"){
               seenKeys.add(topicKey);
               overdue.push({...item,_overdue:true,_originalDate:dd.date});
             }
@@ -1550,11 +1624,14 @@ function App(){
       })
     }));
     return{...roadmapBase,weeks,_overdueCount:overdue.length};
-  },[roadmapBase,roadmapDone,examDate]);
+  },[roadmapBase,roadmapDone,examDate,syllabusStatus]);
 
   const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
-  // Today's items — overdue first, then scheduled, filtered to show undone at top
-  const roadmapTodayAllItems=(roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[];
+  // Today's items — overdue first, then scheduled, filtered to show undone at top.
+  // Also drop anything already marked "done" via the Syllabus tab so manually-completed
+  // topics don't keep reappearing here.
+  const roadmapTodayAllItems=((roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[])
+    .filter(it=>syllabusStatus[it.subject+"|"+it.topic]!=="done");
   // Sort: undone first, then done (so completed ones sink to bottom)
   const roadmapTodayItems=[
     ...roadmapTodayAllItems.filter(it=>!roadmapDone[itemKey(today(),it)]),
@@ -1591,7 +1668,17 @@ function App(){
   const [viewProfile,setViewProfile]=useState(null); // userId to view
   const videoRef=useRef(null);
   const canvasRef=useRef(null);
-  function setSyllabusChapter(sub,topic,status){setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));}
+  function setSyllabusChapter(sub,topic,status){
+    setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));
+    const key=sub+"|"+topic;
+    if(status==="done"&&!revisionLog[key]){
+      // First time this chapter is marked done and it isn't tracked for revision yet — start its clock.
+      markStudied(sub,topic);
+    } else if(status==="need_revision"&&!revisionLog[key]){
+      // Flagged as needing revision but never scheduled — make it due right away.
+      setRevisionLog(prev=>({...prev,[key]:{lastStudied:today(),nextRevisions:[today()],doneRevisions:[]}}));
+    }
+  }
   const [coachLoading,setCoachLoading]=useState(false);
 
   // Timer
@@ -2306,6 +2393,41 @@ function App(){
       // Existing goals dedup
       const existingGoalTopics=todayGoals.map(g=>`${g.subject}-${g.topic||"no subject picked"}`).join(", ");
 
+      // ── Deterministic fallback (used if the AI call fails/isn't configured) ──
+      // Same underlying signal as the AI prompt below, just applied directly with rules instead
+      // of a model — so "suggest goals" still actually works without an OpenRouter key.
+      function buildFallbackGoals(){
+        const existingSet=new Set(todayGoals.map(g=>`${g.subject}-${g.topic}`));
+        const poorPyqStructured=Object.values(topicPyqMap)
+          .map(t=>({...t,acc:Math.round((t.correct/t.total)*100),weight:getWeight(t.subject,t.topic,jeClass)||"M"}))
+          .filter(t=>t.acc<60&&t.total>=2)
+          .sort((a,b)=>a.acc-b.acc);
+        const out=[];
+        highWeightGaps.forEach(t=>{
+          if(out.length>=2)return;
+          out.push({text:`Study ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"study",target:60,reasoning:"H-weight chapter with 0 sessions logged."});
+        });
+        poorPyqStructured.forEach(t=>{
+          if(out.length>=4)return;
+          out.push({text:`Drill PYQs on ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"pyq",target:15,reasoning:`${t.acc}% PYQ accuracy on ${t.total} questions.`});
+        });
+        if(out.length<4){
+          mockBySubject.filter(s=>s.avg!==null&&s.avg<65).forEach(s=>{
+            if(out.length>=4)return;
+            const topicTimes=sessions.filter(x=>x.subject===s.sub).reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
+            const topTopic=Object.entries(topicTimes).sort((a,b)=>b[1]-a[1])[0]?.[0];
+            if(topTopic) out.push({text:`Revise ${topTopic} (${s.sub})`,subject:s.sub,topic:topTopic,type:"revision",target:45,reasoning:`${s.sub} mock average ${s.avg}/100.`});
+          });
+        }
+        if(out.length<4){
+          highWeightGaps.slice(2).forEach(t=>{
+            if(out.length>=4)return;
+            out.push({text:`Study ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"study",target:60,reasoning:"H-weight chapter with 0 sessions logged."});
+          });
+        }
+        return out.filter(g=>!existingSet.has(`${g.subject}-${g.topic}`)).slice(0,4);
+      }
+
       const res=await callAI(
         `You are a world-class JEE personal coach. Generate exactly 4 goals for today. Return ONLY valid JSON. No markdown.
 Format: {"goals":[{"text":"short action-oriented string","subject":"Physics|Chemistry|Mathematics","topic":"string","type":"study|pyq|revision","target":number,"reasoning":"one sentence citing the exact data point — weightage, PYQ%, mock score, or session count"}]}
@@ -2345,7 +2467,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
       setGoals(p=>[...p,...res.goals.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:true}))]);
     }catch(e){
       console.error(e);
-      showToast(e.message&&e.message.includes("AI unavailable")?"AI coach isn't reachable — check your OpenRouter key/config.":"couldn't generate goals — try again in a bit.");
+      const fallback=buildFallbackGoals();
+      if(fallback.length>0){
+        setGoals(p=>[...p,...fallback.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:false,fallback:true}))]);
+        showToast("AI coach unreachable — picked goals directly from your study data instead.");
+      } else {
+        showToast("couldn't generate goals — log a bit more study data first.");
+      }
     }
     setGoalLoading(false);
   }
@@ -2956,7 +3084,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     {/* ── High weight coverage ── */}
                     {(() => {
                       const SUBS=Object.keys(TOPICS).filter(sub=>classTopics(sub).length>0);
-                      const highWt=SUBS.flatMap(sub=>classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").map(t=>({sub,t,done:sessions.some(s=>s.subject===sub&&s.topic===t)})));
+                      const highWt=SUBS.flatMap(sub=>classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").map(t=>({sub,t,done:syllabusStatus[sub+"|"+t]==="done"})));
                       const done=highWt.filter(x=>x.done).length;
                       const pct=highWt.length?Math.round(done/highWt.length*100):0;
                       const notDone=highWt.filter(x=>!x.done).slice(0,5);
@@ -3964,6 +4092,16 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               allUpcoming.sort((a,b)=>a.next.localeCompare(b.next));
               allNeverScheduled.sort((a,b)=>wtO[a.wt]-wtO[b.wt]||b.hrs-a.hrs);
               const totalDue=allDue.length;
+              // ── Auto-sync with the personalised roadmap ──────────────────────────
+              // roadmap.revisionTopics is the exact H/M-weight list YOUR roadmap has flagged
+              // for the final revision window. Cross-check it against syllabus completion so
+              // gaps ("flagged for revision but never actually studied") are visible here too —
+              // not just a generic spaced-repetition list disconnected from the plan.
+              const roadmapRevisionGaps=(roadmap?.revisionTopics||[])
+                .filter(t=>syllabusStatus[t.subject+"|"+t.topic]!=="done")
+                .filter((t,i,arr)=>arr.findIndex(x=>x.subject===t.subject&&x.topic===t.topic)===i)
+                .sort((a,b)=>wtO[a.weight]-wtO[b.weight])
+                .slice(0,6);
               return(
                 <div className="pin">
                   {/* Header stats */}
@@ -4041,6 +4179,33 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   )}
 
+                  {/* Flagged by the personalised roadmap for final revision, but not yet studied */}
+                  {roadmapRevisionGaps.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.a3}}>🗺️ Your Roadmap Flags These for Revision</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>not studied yet</div>
+                      </div>
+                      <div style={{fontSize:11,color:d.t3,marginBottom:10,fontStyle:"italic"}}>these are pulled straight from your personalised roadmap's final-revision list — but you haven't marked them done yet, so there's nothing to revise. cover them first.</div>
+                      {roadmapRevisionGaps.map((t,i)=>{
+                        const subColor=SUBJECT_COLORS[t.subject];
+                        const wtColor=t.weight==="H"?d.danger:d.gold;
+                        return(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",marginBottom:4,background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${d.a3}`,borderRadius:4}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                                <span style={{fontSize:12.5,fontWeight:600,color:d.t}}>{t.topic}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${subColor}18`,color:subColor,fontWeight:700}}>{t.subject}</span>
+                                <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{t.weight}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Never scheduled — chapters studied but not in revision system */}
                   {allNeverScheduled.length>0&&(
                     <div style={{marginBottom:24}}>
@@ -4049,22 +4214,43 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                         <div style={{flex:1,height:1,background:d.b}}/>
                         <div style={{fontSize:10,color:d.t3}}>studied but not tracked</div>
                       </div>
+                      <div style={{fontSize:11,color:d.t3,marginBottom:10,fontStyle:"italic"}}>tap a chapter, then tell us roughly when you last studied it — so the due dates are accurate, not reset to "today".</div>
                       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
                         {allNeverScheduled.slice(0,12).map(({sub,topic,wt,hrs})=>{
                           const subColor=SUBJECT_COLORS[sub];
                           const wtColor=wt==="H"?d.danger:wt==="M"?d.gold:d.t4;
+                          const cardKey=sub+"|"+topic;
+                          const pickerOpen=revisionRecencyPicker===cardKey;
                           return(
-                            <div key={sub+topic} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderRadius:4,cursor:"pointer"}}
-                              onClick={()=>markStudied(sub,topic)}>
-                              <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topic}</div>
-                                <div style={{display:"flex",gap:5,marginTop:3}}>
-                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub.slice(0,4)}</span>
-                                  <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
-                                  <span style={{fontSize:9,color:d.t3}}>{fmt(hrs)}</span>
+                            <div key={cardKey} style={{padding:"10px 14px",background:d.card,border:`1px solid ${pickerOpen?d.a1:d.b}`,borderRadius:4}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}
+                                onClick={()=>setRevisionRecencyPicker(pickerOpen?null:cardKey)}>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:12,fontWeight:500,color:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topic}</div>
+                                  <div style={{display:"flex",gap:5,marginTop:3}}>
+                                    <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${subColor}18`,color:subColor,fontWeight:700}}>{sub.slice(0,4)}</span>
+                                    <span style={{fontSize:9,padding:"1px 5px",borderRadius:2,background:`${wtColor}18`,color:wtColor,fontWeight:700}}>{wt}</span>
+                                    <span style={{fontSize:9,color:d.t3}}>{fmt(hrs)}</span>
+                                  </div>
                                 </div>
+                                <span style={{fontSize:16,color:d.t3}}>{pickerOpen?"−":"+"}</span>
                               </div>
-                              <span style={{fontSize:16,color:d.t3}}>+</span>
+                              {pickerOpen&&(
+                                <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10,paddingTop:10,borderTop:`1px solid ${d.b}`}}>
+                                  {[
+                                    {k:"today",l:"today"},
+                                    {k:"week",l:"this week"},
+                                    {k:"month",l:"2–4 weeks ago"},
+                                    {k:"longer",l:"over a month ago"},
+                                  ].map(opt=>(
+                                    <button key={opt.k}
+                                      onClick={()=>{markStudiedWithRecency(sub,topic,opt.k);setRevisionRecencyPicker(null);}}
+                                      style={{padding:"5px 10px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,color:d.t2,fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                                      {opt.l}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -4072,7 +4258,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   )}
 
-                  {Object.keys(revisionLog).length===0&&allNeverScheduled.length===0&&(
+                  {Object.keys(revisionLog).length===0&&allNeverScheduled.length===0&&roadmapRevisionGaps.length===0&&(
                     <div className="card empty">
                       <div style={{fontSize:28,marginBottom:10}}>↺</div>
                       <div className="et">nothing to revise yet.</div>
@@ -4839,4 +5025,3 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
-
