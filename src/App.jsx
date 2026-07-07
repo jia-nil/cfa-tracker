@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1487,10 +1486,33 @@ function App(){
   // ── Stateful roadmap ─────────────────────────────────────────────────────
   // roadmapBase: the full generated plan (recalculated when setup changes)
   // Completed items are tracked in roadmapDone — "today" shows only undone items
+  // roadmapStartDate anchors day-1 of the plan to the date it was FIRST generated for this
+  // (level, examDate) combo. Without this, every reload/day re-ran generateRoadmap with
+  // startDate defaulting to "today", which reset day-1 back to the same weight-sorted topics
+  // every single day — that was the "I see the same topics everyday" bug.
+  const roadmapAnchorKeyRef=useRef(null);
+  const [roadmapStartDate,setRoadmapStartDate]=useState(()=>{
+    try{const v=JSON.parse(localStorage.getItem("nev_roadmap_start")||"null");return v?.date||null;}catch(e){return null;}
+  });
+  useEffect(()=>{
+    if(!jeClass||!examDate) return;
+    const anchorKey=jeClass+"|"+examDate;
+    if(roadmapAnchorKeyRef.current===anchorKey) return;
+    roadmapAnchorKeyRef.current=anchorKey;
+    let stored=null;
+    try{stored=JSON.parse(localStorage.getItem("nev_roadmap_start")||"null");}catch(e){}
+    if(stored&&stored.key===anchorKey){
+      setRoadmapStartDate(stored.date);
+    } else {
+      const d=today();
+      setRoadmapStartDate(d);
+      try{localStorage.setItem("nev_roadmap_start",JSON.stringify({key:anchorKey,date:d}));}catch(e){}
+    }
+  },[jeClass,examDate]);
   const roadmapBase=useMemo(()=>{
-    if(!jeClass||!examDate) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers});
-  },[jeClass,examDate,studyDays,roadmapAnswers]);
+    if(!jeClass||!examDate||!roadmapStartDate) return null;
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate});
+  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate]);
 
   // roadmap is the adaptive view: past undone items bubble up to today
   const roadmap=useMemo(()=>{
@@ -1659,6 +1681,7 @@ function App(){
             setTimerOn(false);
             setTimerDone(true);
             setSessions(p=>[...p,{id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:countdownSet,date:today(),notes:timerNotes||"Countdown session"}]);
+            if(timerTopic)markStudied(timerSub,timerTopic);
           }
         }
       },500); // 500ms for smoother but still accurate
@@ -1793,6 +1816,7 @@ function App(){
     if(rawSec>=30){
       const entry={id:Date.now(),subject:timerSub,topic:timerTopic||"General",duration:m,date:today(),notes:timerNotes||"Timer session"};
       setSessions(p=>[...p,entry]);
+      if(timerTopic)markStudied(timerSub,timerTopic);
       if(authSession?.access_token&&user?.id){
         // Save session
         fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
@@ -1867,14 +1891,10 @@ function App(){
     try{
       const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
         method:"POST",
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates,return=representation"},
         body:JSON.stringify({from_user:user.id,to_user:targetUser.id,status:"pending"})
       });
-      if(!r.ok){
-        const errText=await r.text().catch(()=>"");
-        console.error("Buddy request failed:",r.status,errText);
-        setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});
-      }
+      if(!r.ok){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
     }catch(e){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
   }
   async function acceptBuddyRequest(req){
@@ -1994,27 +2014,66 @@ function App(){
       }}));
     }catch(e){}
   }
+  // ── "People you may know" style ranking ────────────────────────────────────
+  // Mirrors the core signal behind Facebook's friend suggestions: rank candidates
+  // by mutual connections first, then by other affinity signals (same exam window,
+  // recent activity, similar study volume) — not just a flat "same level" filter.
   async function fetchRecommendedBuddies(){
     if(!jeClass||!user?.id)return;
     setRecommendedLoading(true);
     try{
-      // Match by same level, and prefer same exam window if set
-      // Don't filter by is_public — new users haven't set it yet. Show all same-level candidates.
-      let url=SB_URL+"/rest/v1/profiles?je_class=eq."+jeClass+"&id=neq."+user.id+"&select=id,username,display_name,avatar_url,je_class,exam_window&limit=20";
+      const myBuddyIds=new Set(myBuddies.map(b=>b.id));
+      // Step 1: candidate pool — same level, not me, not already a buddy.
+      // Cast a wider net than before since we now rank instead of just filtering.
+      const url=SB_URL+"/rest/v1/profiles?je_class=eq."+jeClass+"&id=neq."+user.id+"&select=id,username,display_name,avatar_url,je_class,exam_window,week_mins,total_mins,last_studied,session_count&limit=60";
       const r=await fetch(url,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}});
+      if(!r.ok){showToast("couldn't load buddy suggestions — check your connection.");setRecommendedLoading(false);return;}
       const d=await r.json();
-      if(Array.isArray(d)){
-        const existing=new Set(myBuddies.map(b=>b.id));
-        const filtered=d.filter(u=>!existing.has(u.id));
-        // Sort: same exam window first
-        filtered.sort((a,b)=>{
-          const aMatch=a.exam_window===examWindow?0:1;
-          const bMatch=b.exam_window===examWindow?0:1;
-          return aMatch-bMatch;
+      if(!Array.isArray(d)){setRecommendedLoading(false);return;}
+      const candidates=d.filter(u=>!myBuddyIds.has(u.id));
+      if(candidates.length===0){setRecommendedBuddies([]);setRecommendedLoading(false);return;}
+
+      // Step 2: mutual connections — accepted buddy edges touching any candidate.
+      const candIds=candidates.map(c=>c.id);
+      let mutualMap={}; // candidateId -> count of shared buddies with me
+      if(myBuddyIds.size>0&&candIds.length>0){
+        const idsList="("+candIds.join(",")+")";
+        const [e1,e2]=await Promise.all([
+          fetch(`${SB_URL}/rest/v1/nev_buddy_requests?from_user=in.${idsList}&status=eq.accepted&select=from_user,to_user`,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}}),
+          fetch(`${SB_URL}/rest/v1/nev_buddy_requests?to_user=in.${idsList}&status=eq.accepted&select=from_user,to_user`,{headers:{"apikey":SB_ANON,"Authorization":"Bearer "+(authSession?.access_token||"")}}),
+        ]);
+        const [edges1,edges2]=await Promise.all([e1.json(),e2.json()]);
+        const allEdges=[...(Array.isArray(edges1)?edges1:[]),...(Array.isArray(edges2)?edges2:[])];
+        allEdges.forEach(edge=>{
+          // whichever side is the candidate, the other side is one of THEIR buddies
+          if(candIds.includes(edge.from_user)&&myBuddyIds.has(edge.to_user)){
+            mutualMap[edge.from_user]=(mutualMap[edge.from_user]||0)+1;
+          }
+          if(candIds.includes(edge.to_user)&&myBuddyIds.has(edge.from_user)){
+            mutualMap[edge.to_user]=(mutualMap[edge.to_user]||0)+1;
+          }
         });
-        setRecommendedBuddies(filtered.slice(0,6));
       }
-    }catch(e){}
+
+      // Step 3: score + rank, same spirit as a "people you may know" feed
+      const now=today();
+      const scored=candidates.map(u=>{
+        const mutualCount=mutualMap[u.id]||0;
+        const sameWindow=examWindow&&u.exam_window===examWindow;
+        const activeRecently=u.last_studied&&daysBetween(u.last_studied,now)<=3;
+        const score=
+          mutualCount*30 +               // mutual buddies = strongest signal, like FB
+          (sameWindow?15:0) +            // studying for the same sitting
+          (activeRecently?8:0) +         // actually active, not a ghost profile
+          Math.min(10,(u.session_count||0)/3); // established study habit, small weight
+        return {...u,_mutualCount:mutualCount,_sameWindow:sameWindow,_activeRecently:activeRecently,_score:score};
+      });
+      scored.sort((a,b)=>b._score-a._score);
+      setRecommendedBuddies(scored.slice(0,8));
+    }catch(e){
+      console.error(e);
+      showToast("couldn't load buddy suggestions right now.");
+    }
     setRecommendedLoading(false);
   }
   async function fetchProfile(uid){
@@ -2284,7 +2343,10 @@ TODAY'S EXISTING GOALS (skip these): ${existingGoalTopics||"none"}
 Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Bucket B (consolidation).`,true);
 
       setGoals(p=>[...p,...res.goals.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:true}))]);
-    }catch(e){console.error(e);}
+    }catch(e){
+      console.error(e);
+      showToast(e.message&&e.message.includes("AI unavailable")?"AI coach isn't reachable — check your OpenRouter key/config.":"couldn't generate goals — try again in a bit.");
+    }
     setGoalLoading(false);
   }
 
@@ -2292,10 +2354,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
   // ─── Onboarding ───────────────────────────────────────────────────────────
 
   // ── Exam Setup flow — runs once after level is picked ────────────────────
-  // needsSetup: brand new user OR stale JEE class
+  // ExamSetupDone is false if: brand new user, OR returning user with stale JEE class (dropper/11th/12th)
   const needsSetup = !examSetupDone || !jeClass || !CLASSES.find(c=>c.id===jeClass);
-  // needsQuestionnaire: after setup, before roadmap — compulsory personalisation
-  const needsQuestionnaire = examSetupDone && jeClass && !roadmapAnswers && !showRoadmapQs;
   if(needsSetup) return(
     <ExamSetupScreen
       d={d}
@@ -3577,10 +3637,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div className="card cp" style={{marginBottom:20}}>
                     <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:4}}>✨ Recommended for you</div>
                     <div style={{fontSize:11,color:d.t3,marginBottom:14}}>
-                      {recommendedLoading?"finding candidates studying "+jeClass+"...":"other "+jeClass+" candidates"+(examWindow?", same exam window first":"")}
+                      {recommendedLoading?"finding candidates studying "+jeClass+"...":"ranked by mutual buddies, exam window, and activity"}
                     </div>
                     {recommendedBuddies.map(u=>{
-                      const sameWindow=u.exam_window===examWindow&&examWindow;
+                      const reasons=[];
+                      if(u._mutualCount>0)reasons.push(`${u._mutualCount} mutual bud${u._mutualCount>1?"dies":"dy"}`);
+                      if(u._sameWindow)reasons.push("same window");
+                      if(u._activeRecently)reasons.push("active recently");
                       return(
                         <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid ${d.b}44`}}>
                           <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
@@ -3589,7 +3652,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
                             <div style={{fontSize:11,color:d.t3}}>
-                              @{u.username||"—"}{sameWindow&&<span style={{color:d.a2,fontWeight:600}}> · same window</span>}
+                              @{u.username||"—"}{reasons.length>0&&<span style={{color:d.a2,fontWeight:600}}> · {reasons.join(" · ")}</span>}
                             </div>
                           </div>
                           <button onClick={()=>sendBuddyRequest(u)}
@@ -4597,11 +4660,12 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               async function findPartners(){
                 setPartnerLoading(true);
                 try{
-                  const r=await fetch(`${SB_URL}/rest/v1/profiles?cfa_level=eq.${jeClass}&id=neq.${user?.id}&select=id,username,display_name,avatar_url,cfa_level&limit=20`,
+                  const r=await fetch(`${SB_URL}/rest/v1/profiles?je_class=eq.${jeClass}&id=neq.${user?.id}&select=id,username,display_name,avatar_url,je_class&limit=20`,
                     {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||""}`}});
+                  if(!r.ok){showToast("couldn't load partner candidates.");setPartnerLoading(false);return;}
                   const d2=await r.json();
                   if(Array.isArray(d2))setPartnerResults(d2);
-                }catch(e){}
+                }catch(e){showToast("couldn't load partner candidates.");}
                 setPartnerLoading(false);
               }
 
@@ -4634,7 +4698,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           </div>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:13,fontWeight:600,color:d.t}}>{p.display_name||p.username}</div>
-                            <div style={{fontSize:11,color:d.t3}}>@{p.username} · CFA {p.cfa_level}</div>
+                            <div style={{fontSize:11,color:d.t3}}>@{p.username} · {CLASSES.find(c=>c.id===p.je_class)?.label||p.je_class}</div>
                           </div>
                           <button onClick={()=>setMyPartner(p)}
                             style={{padding:"7px 16px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
@@ -4775,3 +4839,4 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
     </>
   );
 }
+
