@@ -4,6 +4,7 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -965,6 +966,31 @@ c.push(".srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-b
 c.push(".srow:hover{background:transparent;}.ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}");
 c.push(".stopic{font-size:13px;flex:1;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
 c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid "+d.b+";}.sdate{font-size:10px;color:"+d.t4+";flex-shrink:0;}");
+
+// ── Mobile overflow fixes ────────────────────────────────────────────────
+// The classic cause of "have to scroll left-right" in a flex/grid-heavy app: grid and flex
+// children default to min-width:auto, meaning their CONTENT's natural width (long numbers,
+// unbroken labels) can silently force the row wider than its container, even though ancestors
+// like .inner already have overflow-x:hidden — that only clips it after the fact, it doesn't
+// stop the layout from being pushed wide in the first place on some browsers/situations.
+c.push(".g2>*,.g3>*,.g4>*,.rowb>*,.row>*,.coach-grid>*{min-width:0;}");
+c.push("table{max-width:100%;}");
+c.push("img,svg{max-width:100%;height:auto;}");
+// 100vw includes the vertical scrollbar's width on desktop, making it wider than the actual
+// viewport and causing a small but real horizontal overflow. calc(100% - SWpx) achieves the
+// same "fit beside the sidebar" result without that extra scrollbar-width overflow.
+c.push(".content{width:calc(100% - "+SW+"px);}");
+c.push("@media(max-width:480px){"+
+  ".fs-ring-wrap{width:min(78vw,260px);height:min(78vw,260px);}"+
+  ".fs-time{font-size:clamp(40px,13vw,72px);}"+
+  ".fs-topic{font-size:12px;}"+
+  ".fs-actions{flex-wrap:wrap;justify-content:center;}"+
+  ".fs-btn{padding:11px 18px;font-size:12px;}"+
+  ".ring-wrap{width:min(50vw,160px);height:min(50vw,160px);}"+
+  ".ring-time{font-size:clamp(22px,7vw,36px);}"+
+  ".streak-num{font-size:clamp(36px,12vw,54px);}"+
+  ".stat-num{font-size:clamp(20px,6vw,30px)!important;}"+
+"}");
 return c.join("\n");
 }
 
@@ -3027,8 +3053,8 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               return(
                 <div className="pin">
                   {/* ── Countdown banner ── */}
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16}}>
-                    <div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:16,flexWrap:"wrap",gap:14}}>
+                    <div style={{minWidth:0}}>
                       <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t4,marginBottom:4}}>
                         {windowData?windowData.label:"Exam Window"}
                       </div>
@@ -3036,7 +3062,7 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                         {daysLeft!==null?<>{daysLeft} <span style={{fontSize:16,color:d.t3}}>days left</span></>:"set your exam date"}
                       </div>
                     </div>
-                    <div style={{display:"flex",gap:20,alignItems:"center"}}>
+                    <div style={{display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
                       <div style={{textAlign:"center"}}>
                         <div style={{fontSize:22,fontWeight:700,color:readColor,fontFamily:"'DM Serif Display',serif"}}>{readiness}</div>
                         <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>readiness</div>
