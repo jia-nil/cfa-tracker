@@ -42,12 +42,16 @@ const SB_AUTH = {
     return await r.json();
   },
   async loadData(table, userId, accessToken) {
-    const r = await fetch(
-      `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*&order=created_at.asc`,
-      {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`}}
-    );
-    if(!r.ok) return [];
-    return await r.json();
+    try{
+      const r = await fetch(
+        `${SB_URL}/rest/v1/${table}?user_id=eq.${userId}&select=*&order=created_at.asc`,
+        {headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`}}
+      );
+      if(!r.ok) return null; // null = fetch failed, distinct from a genuinely empty [] result
+      return await r.json();
+    }catch(e){
+      return null;
+    }
   },
 };
 
@@ -427,6 +431,35 @@ function Select({value,onChange,options,placeholder,disabled,d,minWidth}){
   );
 }
 
+// ── Manually add a topic to today's roadmap ────────────────────────────────
+function ManualTopicAdder({d,jeClass,onAdd}){
+  const [open,setOpen]=useState(false);
+  const [sub,setSub]=useState("");
+  const [topic,setTopic]=useState("");
+  const SUBS=Object.keys(TOPICS).filter(s=>(TOPICS[s][jeClass]||[]).length>0);
+  const topics=sub?(TOPICS[sub][jeClass]||[]):[];
+  if(!open) return(
+    <button onClick={()=>setOpen(true)}
+      style={{width:"100%",padding:"11px",borderRadius:10,background:"transparent",border:`1.5px dashed ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",marginTop:4}}>
+      + add a topic manually
+    </button>
+  );
+  return(
+    <div style={{padding:"12px 14px",background:d.card,border:`1px solid ${d.b}`,borderRadius:10,marginTop:4,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+      <Select d={d} value={sub} onChange={v=>{setSub(v);setTopic("");}} placeholder="subject" options={SUBS.map(s=>({value:s,label:s}))}/>
+      <Select d={d} value={topic} onChange={setTopic} placeholder="topic" disabled={!sub} options={topics.map(t=>({value:t,label:t}))}/>
+      <button disabled={!sub||!topic} onClick={()=>{onAdd(sub,topic);setSub("");setTopic("");setOpen(false);}}
+        style={{padding:"7px 14px",borderRadius:7,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:!sub||!topic?.4:1}}>
+        add
+      </button>
+      <button onClick={()=>setOpen(false)}
+        style={{padding:"7px 12px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+        cancel
+      </button>
+    </div>
+  );
+}
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const THEME = {
   dark:{
@@ -674,7 +707,6 @@ const STREAK_MILESTONES = [
 const TABS=[
   {id:"overview",label:"Overview",icon:"⌂"},
   {id:"rank",label:"Readiness",icon:"🎯"},
-  {id:"goals",label:"Today's Goals",icon:"◎"},
   {id:"planner",label:"Planner",icon:"📅"},
   {id:"syllabus",label:"Syllabus",icon:"📋"},
   {id:"revision",label:"Revision",icon:"↺"},
@@ -938,19 +970,50 @@ return c.join("\n");
 }
 
 // ── ExamSetupScreen — fully self-contained 4-step setup ──────────────────────
-function ExamSetupScreen({d,initialLevel,onComplete}){
-  const [step,setStep]=useState(initialLevel?2:1);
+function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSession,SB_URL,SB_ANON}){
+  const [step,setStep]=useState(()=>{
+    if(existingUsername) return initialLevel?3:2;
+    return 1;
+  });
   const [level,setLevel]=useState(initialLevel||null);
   const [examWindow,setExamWindow]=useState(null);
   const [studyDays,setStudyDays]=useState([0,1,2,3,4]);
   const [dailyHours,setDailyHours]=useState(2);
+  const [username,setUsername]=useState(existingUsername||"");
+  const [usernameError,setUsernameError]=useState("");
+  const [usernameSaving,setUsernameSaving]=useState(false);
   const DAY_NAMES=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const windows=(CFA_EXAM_WINDOWS[level]||[]).filter(w=>new Date(w.start)>new Date());
   const recommended=(level&&CFA_RECOMMENDED_HOURS[level])||300;
   const classLabel=(level&&CLASSES.find(c=>c.id===level)?.label)||"";
   function toggleDay(i){setStudyDays(prev=>prev.includes(i)?prev.filter(x=>x!==i):[...prev,i].sort());}
   const card={display:"flex",alignItems:"center",gap:12,padding:"14px 16px",border:"1.5px solid "+d.b,borderRadius:12,cursor:"pointer",marginBottom:8,background:d.card,transition:"all .15s"};
-  const totalSteps=4;
+  const totalSteps=5;
+  async function continueFromUsername(){
+    const clean=username.trim().toLowerCase().replace(/[^a-z0-9_]/g,"");
+    if(clean.length<3){setUsernameError("at least 3 characters");return;}
+    if(clean.length>20){setUsernameError("max 20 characters");return;}
+    setUsernameSaving(true);setUsernameError("");
+    try{
+      if(SB_URL&&user?.id){
+        const checkR=await fetch(`${SB_URL}/rest/v1/profiles?username=eq.${clean}&id=neq.${user.id}&select=id`,{
+          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||""}`}
+        });
+        if(checkR.ok){
+          const existing=await checkR.json();
+          if(Array.isArray(existing)&&existing.length){setUsernameError("that username is taken");setUsernameSaving(false);return;}
+        }
+        await fetch(`${SB_URL}/rest/v1/profiles`,{
+          method:"POST",
+          headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||""}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+          body:JSON.stringify({id:user.id,username:clean,display_name:user?.name,is_public:true})
+        }).catch(()=>{});
+      }
+      setUsername(clean);
+      setUsernameSaving(false);
+      setStep(2);
+    }catch(e){setUsernameError("couldn't save — try again");setUsernameSaving(false);}
+  }
   return(
     <div style={{position:"fixed",inset:0,zIndex:9999,background:d.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 16px",boxSizing:"border-box",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{"@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');"}</style>
@@ -958,11 +1021,32 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
         <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,letterSpacing:"-.04em",marginBottom:4}}>nevile<span style={{color:d.a1}}>te</span></div>
         <div style={{fontSize:12,color:d.t3,marginBottom:20}}>step {step} of {totalSteps}</div>
         <div style={{display:"flex",gap:4,marginBottom:28}}>
-          {[1,2,3,4].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
+          {[1,2,3,4,5].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
         </div>
 
-        {/* Step 1 — Level */}
+        {/* Step 1 — Username */}
         {step===1&&(
+          <div>
+            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>what should we call you?</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>this is how study buddies and the leaderboard will see you. lowercase letters, numbers, underscores only.</div>
+            <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:14,color:d.t3}}>@</span>
+              <input autoFocus value={username}
+                onChange={e=>{setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,""));setUsernameError("");}}
+                onKeyDown={e=>e.key==="Enter"&&continueFromUsername()}
+                placeholder="yourname"
+                style={{flex:1,padding:"12px 14px",borderRadius:10,background:d.card,border:`1.5px solid ${usernameError?d.danger:d.b}`,color:d.t,fontSize:15,fontFamily:"inherit",outline:"none"}}/>
+            </div>
+            {usernameError&&<div style={{fontSize:11,color:d.danger,marginBottom:14}}>{usernameError}</div>}
+            <button disabled={username.trim().length<3||usernameSaving} onClick={continueFromUsername}
+              style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:username.trim().length<3||usernameSaving?0.4:1,marginTop:14}}>
+              {usernameSaving?"checking...":"continue →"}
+            </button>
+          </div>
+        )}
+
+        {/* Step 2 — Level */}
+        {step===2&&(
           <div>
             <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which level are you taking?</div>
             <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap is built around this level's real curriculum and weighting.</div>
@@ -970,7 +1054,7 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
               <div key={c.id} style={card}
                 onMouseOver={e=>e.currentTarget.style.borderColor=d.a1}
                 onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
-                onClick={()=>{setLevel(c.id);setExamWindow(null);setStep(2);}}>
+                onClick={()=>{setLevel(c.id);setExamWindow(null);setStep(3);}}>
                 <div style={{width:36,height:36,borderRadius:9,background:d.a1+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:d.a1,flexShrink:0}}>{c.icon}</div>
                 <div>
                   <div style={{fontSize:13.5,fontWeight:600,color:d.t}}>{c.label}</div>
@@ -980,11 +1064,12 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
                 </div>
               </div>
             ))}
+            <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit"}}>← back</button>
           </div>
         )}
 
-        {/* Step 2 — Exam window */}
-        {step===2&&(
+        {/* Step 3 — Exam window */}
+        {step===3&&(
           <div>
             <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>when's your exam?</div>
             <div style={{fontSize:13,color:d.t3,marginBottom:22}}>upcoming CFA Institute windows for {classLabel}</div>
@@ -999,7 +1084,7 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
                 <div key={w.id} style={card}
                   onMouseOver={e=>e.currentTarget.style.borderColor=d.a1}
                   onMouseOut={e=>e.currentTarget.style.borderColor=d.b}
-                  onClick={()=>{setExamWindow(w.id);setStep(3);}}>
+                  onClick={()=>{setExamWindow(w.id);setStep(4);}}>
                   <div style={{width:44,height:44,borderRadius:10,background:d.a1+"18",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1.2}}>
                     <div style={{fontSize:11,fontWeight:800,color:d.a1}}>{w.label.split(" ")[0].slice(0,3).toUpperCase()}</div>
                     <div style={{fontSize:12,fontWeight:700,color:d.a1}}>{w.label.split(" ")[1]}</div>
@@ -1012,12 +1097,12 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
                 </div>
               );
             })}
-            <button onClick={()=>setStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit"}}>← back</button>
+            <button onClick={()=>setStep(2)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",marginTop:10,fontFamily:"inherit"}}>← back</button>
           </div>
         )}
 
-        {/* Step 3 — Study days */}
-        {step===3&&(
+        {/* Step 4 — Study days */}
+        {step===4&&(
           <div>
             <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which days can you study?</div>
             <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap will only schedule sessions on these days — be realistic.</div>
@@ -1048,16 +1133,16 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
             {studyDays.length>0&&<div style={{fontSize:12,color:d.t3,marginBottom:18,fontStyle:"italic"}}>
               {studyDays.length * dailyHours}h/week. CFA Institute candidates average {recommended}h total for {classLabel}.
             </div>}
-            <button disabled={studyDays.length===0} onClick={()=>setStep(4)}
+            <button disabled={studyDays.length===0} onClick={()=>setStep(5)}
               style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
               continue →
             </button>
-            <button onClick={()=>setStep(2)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
           </div>
         )}
 
-        {/* Step 4 — Hours target */}
-        {step===4&&(
+        {/* Step 5 — Hours target */}
+        {step===5&&(
           <div>
             <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>your study hour target</div>
             <div style={{fontSize:13,color:d.t3,marginBottom:22}}>CFA Institute candidates report averaging {recommended}h for {classLabel}. pick a target or set your own.</div>
@@ -1083,11 +1168,11 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
               <span style={{fontSize:12,color:d.t3}}>hours</span>
             </div>
             <button
-              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:Math.abs(dailyHours)||2,targetHours:dailyHours<0?Math.abs(dailyHours):recommended})}
+              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:Math.abs(dailyHours)||2,targetHours:dailyHours<0?Math.abs(dailyHours):recommended,username})}
               style={{width:"100%",padding:"14px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginBottom:10}}>
-              build my roadmap →
+              continue → tell us what you've covered
             </button>
-            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            <button onClick={()=>setStep(4)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
           </div>
         )}
       </div>
@@ -1096,7 +1181,7 @@ function ExamSetupScreen({d,initialLevel,onComplete}){
 }
 
 // ── Roadmap Questionnaire ─────────────────────────────────────────────────────
-function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
+function RoadmapQuestionnaire({d,jeClass,onSave}){
   const SUBS=Object.keys(TOPICS).filter(s=>(TOPICS[s][jeClass]||[]).length>0);
   const [step,setStep]=useState(0); // 0=completed topics, 1=weekly hours, 2=weak areas
   const [completedTopics,setCompletedTopics]=useState({});
@@ -1118,6 +1203,7 @@ function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
   return(
     <div style={{position:"fixed",inset:0,zIndex:9998,background:"rgba(10,10,15,.97)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"20px 16px",overflowY:"auto",fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{width:"100%",maxWidth:520,margin:"auto",paddingBottom:40}}>
+        <div style={{fontSize:12,color:d.t3,marginBottom:10,textAlign:"center"}}>a few quick questions before we build your roadmap — this is what makes it yours instead of a generic checklist.</div>
         <div style={{display:"flex",gap:4,marginBottom:24}}>
           {[0,1,2].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
         </div>
@@ -1125,7 +1211,7 @@ function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
         {step===0&&(
           <div>
             <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>what have you already covered?</div>
-            <div style={{fontSize:13,color:d.t3,marginBottom:6}}>tick anything you've studied before — even partially. we'll skip these in your roadmap.</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:6}}>tick anything you've studied before — even partially. we'll skip these in your roadmap. it's fine to tick nothing if you're starting fresh.</div>
             <div style={{fontSize:12,color:d.a2,marginBottom:20}}>{doneCount}/{totalTopics} topics marked done</div>
             {SUBS.map(sub=>{
               const topics=TOPICS[sub][jeClass]||[];
@@ -1167,10 +1253,6 @@ function RoadmapQuestionnaire({d,jeClass,onSave,onSkip}){
               <button onClick={()=>setStep(1)}
                 style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
                 continue →
-              </button>
-              <button onClick={onSkip}
-                style={{padding:"13px 20px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontSize:13,fontFamily:"inherit"}}>
-                skip
               </button>
             </div>
           </div>
@@ -1473,11 +1555,32 @@ function App(){
   const [sentRequests,setSentRequests]=useState(new Set()); // track pending sent requests
   const [recommendedBuddies,setRecommendedBuddies]=useState([]);
   const [recommendedLoading,setRecommendedLoading]=useState(false);
+  async function loadSentRequests(){
+    if(!user?.id||!authSession?.access_token)return;
+    try{
+      const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests?from_user=eq.${user.id}&status=eq.pending&select=to_user`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`}
+      });
+      if(!r.ok)return;
+      const d=await r.json();
+      if(Array.isArray(d))setSentRequests(new Set(d.map(x=>x.to_user)));
+    }catch(e){}
+  }
   useEffect(()=>{
     if(tab==="buddy"){
       myBuddies.forEach(b=>fetchBuddyStats(b.id));
       loadBuddyRequests();
       loadMyBuddies();
+      loadSentRequests();
+      // Poll for changes (accepted requests, new incoming requests) while the tab is open —
+      // there's no realtime subscription, so this is what makes acceptance show up without
+      // the user having to leave and re-enter the tab.
+      const poll=setInterval(()=>{
+        loadBuddyRequests();
+        loadMyBuddies();
+        loadSentRequests();
+      },20000);
+      return ()=>clearInterval(poll);
     }
   },[tab,myBuddies.length]);
   useEffect(()=>{
@@ -1556,7 +1659,10 @@ function App(){
   // ── Live personalization signal ──────────────────────────────────────────
   // This is what makes the roadmap "yours" instead of one-size-fits-all: it's recomputed from
   // YOUR actual mock scores, PYQ accuracy, and marked-done chapters — not a static template.
-  const roadmapPerformance=useMemo(()=>{
+  // NOTE: this is LIVE (recomputes on every tick) — it feeds the "frozen" snapshot below, and
+  // is also useful for other displays. It must NOT be used directly to drive roadmapBase, or
+  // ticking a single checkbox would regenerate and reshuffle the entire remaining schedule.
+  const roadmapPerformanceLive=useMemo(()=>{
     const weakSubjects=new Set();
     Object.keys(SUBJECT_COLORS||{}).forEach(sub=>{
       const scores=mockScores.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub])).filter(v=>v!=null);
@@ -1582,15 +1688,60 @@ function App(){
     const doneTopics=new Set(Object.entries(syllabusStatus).filter(([,v])=>v==="done").map(([k])=>k));
     return {weakSubjects,weakTopics,strongTopics,doneTopics};
   },[mockScores,pyqHistory,syllabusStatus]);
-  const roadmapBase=useMemo(()=>{
-    if(!jeClass||!examDate||!roadmapStartDate) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:roadmapPerformance});
-  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,roadmapPerformance]);
 
-  // roadmap is the adaptive view: past undone items bubble up to today
+  // ── Frozen snapshot used for actual generation ────────────────────────────
+  // Only refreshed when the PLAN ITSELF changes (level/exam/study days/questionnaire) or the
+  // user explicitly hits "rebalance". This is what stops ticking off a topic — which changes
+  // syllabusStatus, which changes roadmapPerformanceLive — from silently regenerating and
+  // reshuffling every future day's assignments. That reshuffling was the "I tick something off
+  // and it shows me the same thing again" bug.
+  const [rebalanceNonce,setRebalanceNonce]=useState(0);
+  const [frozenPerformance,setFrozenPerformance]=useState(null);
+  const planKey=jeClass+"|"+examDate+"|"+JSON.stringify(studyDays)+"|"+JSON.stringify(roadmapAnswers)+"|"+rebalanceNonce;
+  const planKeyRef=useRef(null);
+  useEffect(()=>{
+    if(planKeyRef.current!==planKey){
+      planKeyRef.current=planKey;
+      setFrozenPerformance(roadmapPerformanceLive);
+    }
+  },[planKey,roadmapPerformanceLive]);
+  function rebalanceRoadmap(){
+    setRebalanceNonce(n=>n+1);
+    showToast("rebalanced — passes adjusted to your latest mock/PYQ performance.");
+  }
+
+  const roadmapBase=useMemo(()=>{
+    if(!jeClass||!examDate||!roadmapStartDate||!frozenPerformance) return null;
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:frozenPerformance});
+  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,frozenPerformance]);
+
+  // ── Manual overrides ──────────────────────────────────────────────────────
+  // User-added or user-removed items for specific days — lets people directly edit "what to
+  // study today" instead of being stuck with whatever the algorithm picked.
+  const [roadmapManualAdds,setRoadmapManualAdds]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem("nev_roadmap_manual_adds")||"{}");}catch(e){return {};}
+  });
+  const [roadmapRemoved,setRoadmapRemoved]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem("nev_roadmap_removed")||"{}");}catch(e){return {};}
+  });
+  useEffect(()=>{try{localStorage.setItem("nev_roadmap_manual_adds",JSON.stringify(roadmapManualAdds));}catch(e){}},[roadmapManualAdds]);
+  useEffect(()=>{try{localStorage.setItem("nev_roadmap_removed",JSON.stringify(roadmapRemoved));}catch(e){}},[roadmapRemoved]);
+  function addManualTopicToday(sub,topic){
+    const wt=getWeight(sub,topic,jeClass)||"M";
+    const item={subject:sub,topic,weight:wt,pass:1,totalPasses:1,_manual:true};
+    setRoadmapManualAdds(prev=>({...prev,[today()]:[...(prev[today()]||[]),item]}));
+    showToast(`added "${topic}" to today.`);
+  }
+  function removeRoadmapItem(date,item){
+    const k=itemKey(date,item);
+    setRoadmapRemoved(prev=>({...prev,[k]:true}));
+  }
+
+  // roadmap is the adaptive view: past undone items get caught up on, either bubbled into today
+  // (light slippage) or redistributed across the remaining days (real backlog) so you're never
+  // just handed an ever-growing pile on a single day.
   const roadmap=useMemo(()=>{
     if(!roadmapBase||!examDate) return roadmapBase;
-    // Find items that were scheduled for PAST dates but not completed
     const today_str=today();
     const overdue=[];
     const seenKeys=new Set();
@@ -1601,7 +1752,7 @@ function App(){
             const k=itemKey(dd.date,item);
             const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
             const syllKey=item.subject+"|"+item.topic;
-            if(!roadmapDone[k]&&!seenKeys.has(topicKey)&&syllabusStatus[syllKey]!=="done"){
+            if(!roadmapDone[k]&&!roadmapRemoved[k]&&!seenKeys.has(topicKey)&&syllabusStatus[syllKey]!=="done"){
               seenKeys.add(topicKey);
               overdue.push({...item,_overdue:true,_originalDate:dd.date});
             }
@@ -1609,29 +1760,53 @@ function App(){
         }
       });
     });
-    if(overdue.length===0) return roadmapBase;
-    // Inject overdue items into today's slot
-    const weeks=(roadmapBase.weeks||[]).map(w=>({
-      ...w,
-      days:w.days.map(dd=>{
-        if(dd.date===today_str){
-          // Prepend overdue items to today, avoid duplicates
-          const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
-          const toAdd=overdue.filter(it=>!existingKeys.has(it.subject+"|"+it.topic+"|"+it.pass));
-          return{...dd,items:[...toAdd,...dd.items]};
-        }
-        return dd;
-      })
-    }));
-    return{...roadmapBase,weeks,_overdueCount:overdue.length};
-  },[roadmapBase,roadmapDone,examDate,syllabusStatus]);
+    if(overdue.length===0) return {...roadmapBase,_overdueCount:0,_backlogRedistributed:false};
+
+    // Small slippage (a day or two behind) — just bubble into today, cheap and non-disruptive.
+    const backlogThreshold=Math.max(4,(roadmapBase.perDaySessions||2)*2);
+    if(overdue.length<=backlogThreshold){
+      const weeks=(roadmapBase.weeks||[]).map(w=>({
+        ...w,
+        days:w.days.map(dd=>{
+          if(dd.date===today_str){
+            const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
+            const toAdd=overdue.filter(it=>!existingKeys.has(it.subject+"|"+it.topic+"|"+it.pass));
+            return{...dd,items:[...toAdd,...dd.items]};
+          }
+          return dd;
+        })
+      }));
+      return{...roadmapBase,weeks,_overdueCount:overdue.length,_backlogRedistributed:false};
+    }
+
+    // Real backlog — spread overdue + remaining future items evenly across the remaining study
+    // days instead of dumping the whole pile on today. This is what "makes up for skipped days"
+    // without burying you.
+    const futureItems=(roadmapBase.weeks||[]).flatMap(w=>w.days)
+      .filter(dd=>dd.date>=today_str)
+      .flatMap(dd=>dd.items.filter(it=>{
+        const k=itemKey(dd.date,it);
+        return !roadmapDone[k]&&!roadmapRemoved[k]&&syllabusStatus[it.subject+"|"+it.topic]!=="done";
+      }));
+    const allRemaining=[...overdue,...futureItems];
+    const redistributed=generateRoadmap({
+      level:jeClass,examDate,studyDays,answers:roadmapAnswers,
+      startDate:today_str,
+      remainingTopics:allRemaining,
+    });
+    return {...redistributed,_overdueCount:overdue.length,_backlogRedistributed:true};
+  },[roadmapBase,roadmapDone,roadmapRemoved,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers]);
 
   const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
   // Today's items — overdue first, then scheduled, filtered to show undone at top.
-  // Also drop anything already marked "done" via the Syllabus tab so manually-completed
-  // topics don't keep reappearing here.
-  const roadmapTodayAllItems=((roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[])
-    .filter(it=>syllabusStatus[it.subject+"|"+it.topic]!=="done");
+  // Also drop anything already marked "done" via the Syllabus tab, anything manually removed,
+  // and fold in anything manually added — so this is a genuinely editable "what to study today".
+  const roadmapTodayAllItems=[
+    ...((roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[])
+      .filter(it=>syllabusStatus[it.subject+"|"+it.topic]!=="done")
+      .filter(it=>!roadmapRemoved[itemKey(today(),it)]),
+    ...(roadmapManualAdds[today()]||[]),
+  ];
   // Sort: undone first, then done (so completed ones sink to bottom)
   const roadmapTodayItems=[
     ...roadmapTodayAllItems.filter(it=>!roadmapDone[itemKey(today(),it)]),
@@ -1804,6 +1979,23 @@ function App(){
   const weekStart=(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toISOString().split("T")[0];})();
   const weekTime=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
   const streak=calcStreak(sessions);
+  // ── Streak milestone celebration ──────────────────────────────────────────
+  const [celebrateMilestone,setCelebrateMilestone]=useState(null);
+  const [seenMilestones,setSeenMilestones]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem("nev_streak_milestones_seen")||"[]");}catch(e){return [];}
+  });
+  useEffect(()=>{
+    if(streak<=0)return;
+    const hit=[...STREAK_MILESTONES].reverse().find(m=>m.days<=streak);
+    if(hit&&!seenMilestones.includes(hit.days)){
+      setCelebrateMilestone(hit);
+      setSeenMilestones(prev=>{
+        const next=[...prev,hit.days];
+        try{localStorage.setItem("nev_streak_milestones_seen",JSON.stringify(next));}catch(e){}
+        return next;
+      });
+    }
+  },[streak]);
   const todayGoals=goals.filter(g=>g.date===today());
   const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
   // Sync all data to localStorage
@@ -1817,10 +2009,13 @@ function App(){
   useEffect(()=>{
     if(!authSession?.access_token||!user?.id)return;
     const token=authSession.access_token, uid=user.id;
-    SB_AUTH.loadData("user_sessions",uid,token).then(d=>setSessions(d?.length?d.map(r=>r.data||r):[]));
-    SB_AUTH.loadData("user_goals",uid,token).then(d=>setGoals(d?.length?d.map(r=>r.data||r):[]));
-    SB_AUTH.loadData("user_mocks",uid,token).then(d=>setMocks(d?.length?d.map(r=>r.data||r):[]));
-    SB_AUTH.loadData("user_pyq",uid,token).then(d=>setPyqHistory(d?.length?d.map(r=>r.data||r):[]));
+    SB_AUTH.loadData("user_sessions",uid,token).then(d=>{
+      if(d===null){showToast("couldn't sync your sessions — showing your last saved data.");return;}
+      setSessions(d.map(r=>r.data||r));
+    });
+    SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d!==null)setGoals(d.map(r=>r.data||r));});
+    SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d!==null)setMocks(d.map(r=>r.data||r));});
+    SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d!==null)setPyqHistory(d.map(r=>r.data||r));});
     fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
       .then(r=>r.json())
       .then(d=>{
@@ -1975,14 +2170,15 @@ function App(){
     if(!user?.id||!authSession?.access_token)return;
     // Optimistic UI: mark as "sent" immediately
     setSentRequests(prev=>new Set([...prev,targetUser.id]));
+    showToast(`request sent to @${targetUser.username||"them"}.`);
     try{
       const r=await fetch(`${SB_URL}/rest/v1/nev_buddy_requests`,{
         method:"POST",
         headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates,return=representation"},
         body:JSON.stringify({from_user:user.id,to_user:targetUser.id,status:"pending"})
       });
-      if(!r.ok){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
-    }catch(e){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});}
+      if(!r.ok){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});showToast("couldn't send that request — try again.");}
+    }catch(e){setSentRequests(prev=>{const n=new Set(prev);n.delete(targetUser.id);return n;});showToast("couldn't send that request — try again.");}
   }
   async function acceptBuddyRequest(req){
     if(!user?.id||!authSession?.access_token)return;
@@ -2314,10 +2510,11 @@ function App(){
     }catch{setCoachCards([{type:"error",title:"Error",icon:"⚠",color:"danger",insight:"broke. try again.",action:""}]);}
     setCoachLoading(false);
   }
-  async function aiSuggestGoals(){
+  async function suggestTodayFocus(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
-    if(uniqueDays<3){showToast("log 3 days of study first. then i'll plan your day. 😏");return;}
+    if(uniqueDays<3){showToast("log 3 days of study first. then i'll suggest today's focus. 😏");return;}
     setGoalLoading(true);
+    let buildFallbackFocus=()=>[];
     try{
       // ── Study totals ──────────────────────────────────────────────────────
       const studySummary=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(", ");
@@ -2338,7 +2535,6 @@ function App(){
       }).filter(s=>s.avg!==null).sort((a,b)=>a.avg-b.avg);
 
       // ── BUCKET A: High-weightage chapters soon studied ─────────────────
-      // These are genuine coverage gaps that cost marks
       const highWeightGaps=Object.keys(TOPICS).flatMap(sub=>
         classTopics(sub)
           .filter(t=>
@@ -2349,7 +2545,6 @@ function App(){
       ).slice(0,6);
 
       // ── BUCKET B: Chapters studied but performing badly ───────────────────
-      // Combines mock weakness + PYQ accuracy per topic
       const topicPyqMap=pyqHistory.reduce((acc,p)=>{
         const key=`${p.subject}||${p.topic}`;
         if(!acc[key]) acc[key]={subject:p.subject,topic:p.topic,correct:0,total:0};
@@ -2358,7 +2553,6 @@ function App(){
         return acc;
       },{});
 
-      // Topics studied but with <60% PYQ accuracy (min 2 attempts), weighted by JEE weight
       const poorPyqTopics=Object.values(topicPyqMap)
         .map(t=>({
           ...t,
@@ -2368,18 +2562,15 @@ function App(){
         }))
         .filter(t=>t.acc<60&&t.total>=2)
         .sort((a,b)=>{
-          // H-weight poor topics first, then by worst accuracy
           const wOrder={"H":0,"M":1,"L":2};const wdiff=(wOrder[b.weight]||1)-(wOrder[a.weight]||1);
           return wdiff!==0?wdiff:a.acc-b.acc;
         })
         .slice(0,5)
         .map(t=>`${t.subject}-${t.topic}(PYQ:${t.acc}%,${t.total}Qs,${t.weight}-weight)`);
 
-      // Topics with study sessions but low mock performance in that subject
       const mockWeakTopics=mockBySubject
         .filter(s=>s.avg!==null&&s.avg<65)
         .map(s=>{
-          // Find the most-studied topic in this weak subject as a revision candidate
           const topicTimes=sessions
             .filter(x=>x.subject===s.sub)
             .reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
@@ -2390,14 +2581,11 @@ function App(){
           return topTopics;
         }).flat().slice(0,4);
 
-      // Existing goals dedup
-      const existingGoalTopics=todayGoals.map(g=>`${g.subject}-${g.topic||"no subject picked"}`).join(", ");
+      const existingTopics=roadmapTodayItems.map(g=>`${g.subject}-${g.topic}`).join(", ");
 
       // ── Deterministic fallback (used if the AI call fails/isn't configured) ──
-      // Same underlying signal as the AI prompt below, just applied directly with rules instead
-      // of a model — so "suggest goals" still actually works without an OpenRouter key.
-      function buildFallbackGoals(){
-        const existingSet=new Set(todayGoals.map(g=>`${g.subject}-${g.topic}`));
+      function buildFallbackFocusImpl(){
+        const existingSet=new Set(roadmapTodayItems.map(g=>`${g.subject}-${g.topic}`));
         const poorPyqStructured=Object.values(topicPyqMap)
           .map(t=>({...t,acc:Math.round((t.correct/t.total)*100),weight:getWeight(t.subject,t.topic,jeClass)||"M"}))
           .filter(t=>t.acc<60&&t.total>=2)
@@ -2405,47 +2593,40 @@ function App(){
         const out=[];
         highWeightGaps.forEach(t=>{
           if(out.length>=2)return;
-          out.push({text:`Study ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"study",target:60,reasoning:"H-weight chapter with 0 sessions logged."});
+          out.push({subject:t.subject,topic:t.topic,reason:"H-weight chapter with 0 sessions logged."});
         });
         poorPyqStructured.forEach(t=>{
           if(out.length>=4)return;
-          out.push({text:`Drill PYQs on ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"pyq",target:15,reasoning:`${t.acc}% PYQ accuracy on ${t.total} questions.`});
+          out.push({subject:t.subject,topic:t.topic,reason:`${t.acc}% PYQ accuracy on ${t.total} questions.`});
         });
         if(out.length<4){
           mockBySubject.filter(s=>s.avg!==null&&s.avg<65).forEach(s=>{
             if(out.length>=4)return;
             const topicTimes=sessions.filter(x=>x.subject===s.sub).reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
             const topTopic=Object.entries(topicTimes).sort((a,b)=>b[1]-a[1])[0]?.[0];
-            if(topTopic) out.push({text:`Revise ${topTopic} (${s.sub})`,subject:s.sub,topic:topTopic,type:"revision",target:45,reasoning:`${s.sub} mock average ${s.avg}/100.`});
+            if(topTopic) out.push({subject:s.sub,topic:topTopic,reason:`${s.sub} mock average ${s.avg}/100.`});
           });
         }
         if(out.length<4){
           highWeightGaps.slice(2).forEach(t=>{
             if(out.length>=4)return;
-            out.push({text:`Study ${t.topic} (${t.subject})`,subject:t.subject,topic:t.topic,type:"study",target:60,reasoning:"H-weight chapter with 0 sessions logged."});
+            out.push({subject:t.subject,topic:t.topic,reason:"H-weight chapter with 0 sessions logged."});
           });
         }
         return out.filter(g=>!existingSet.has(`${g.subject}-${g.topic}`)).slice(0,4);
       }
+      buildFallbackFocus=buildFallbackFocusImpl;
 
       const res=await callAI(
-        `You are a world-class JEE personal coach. Generate exactly 4 goals for today. Return ONLY valid JSON. No markdown.
-Format: {"goals":[{"text":"short action-oriented string","subject":"Physics|Chemistry|Mathematics","topic":"string","type":"study|pyq|revision","target":number,"reasoning":"one sentence citing the exact data point — weightage, PYQ%, mock score, or session count"}]}
+        `You are a world-class JEE personal coach. Suggest exactly 4 topics to focus on today. Return ONLY valid JSON. No markdown.
+Format: {"goals":[{"subject":"Physics|Chemistry|Mathematics","topic":"string","reasoning":"one sentence citing the exact data point — weightage, PYQ%, mock score, or session count"}]}
 
-GOAL MIX RULES — this is the most important instruction:
-- 2 goals should address HIGH-WEIGHTAGE chapters soon studied (pure coverage gaps)
-- i know your sessions. your weak chapters. i don't miss.'ll be gentle.
-- If there aren't enough of one type, fill from the other — but always aim for this balanced split
-- Cover at least 2 different subjects across the 4 goals
+FOCUS MIX RULES:
+- 2 topics should address HIGH-WEIGHTAGE chapters soon studied (pure coverage gaps)
+- 2 topics should address chapters already studied but performing badly (PYQ accuracy or mock score)
+- Cover at least 2 different subjects across the 4 topics
 - NEVER suggest L-weight chapters that aren't studied — not worth the time at this stage
-- For "study" goals: target 45–90 minutes. For "pyq" goals: target 10–20 questions. For "revision": 30–60 min.
-- If >4hrs studied today, cap study goals at 45 min, lean towards revision and pyq
-- Avoid duplicating topics in today's existing goals
-
-GOAL TYPE GUIDANCE:
-- Unstudied H-weight chapter → type: "study"
-- Studied chapter with bad PYQ accuracy → type: "pyq" (drill it with practice questions)
-- Studied chapter with bad mock score → type: "revision" (go back and consolidate)
+- Avoid duplicating topics already on today's list
 - reasoning must be specific: "H-weight, 0 sessions logged" OR "44% PYQ accuracy on 6 questions" OR "Chemistry avg mock 61/100"`,
 
         `Class: ${jeClass}. Streak: ${streak} days.
@@ -2460,19 +2641,22 @@ BUCKET B — Chapters studied but performing badly (push for consolidation):
   PYQ weak topics: ${poorPyqTopics.join(", ")||"none yet"}
   Mock-weak chapter candidates: ${mockWeakTopics.join(", ")||"none yet"}
 
-TODAY'S EXISTING GOALS (skip these): ${existingGoalTopics||"none"}
+TODAY'S EXISTING TOPICS (skip these): ${existingTopics||"none"}
 
-Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Bucket B (consolidation).`,true);
+Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Bucket B (consolidation).`,true);
 
-      setGoals(p=>[...p,...res.goals.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:true}))]);
+      (res.goals||[]).forEach(g=>{
+        if(g.subject&&g.topic) addManualTopicToday(g.subject,g.topic);
+      });
+      showToast("added 4 focus topics to today, based on your weak spots.");
     }catch(e){
       console.error(e);
-      const fallback=buildFallbackGoals();
+      const fallback=buildFallbackFocus();
       if(fallback.length>0){
-        setGoals(p=>[...p,...fallback.map(g=>({...g,id:Date.now()+Math.random(),date:today(),achieved:false,aiGenerated:false,fallback:true}))]);
-        showToast("AI coach unreachable — picked goals directly from your study data instead.");
+        fallback.forEach(g=>addManualTopicToday(g.subject,g.topic));
+        showToast("AI coach unreachable — picked focus topics directly from your study data instead.");
       } else {
-        showToast("couldn't generate goals — log a bit more study data first.");
+        showToast("couldn't suggest focus topics — log a bit more study data first.");
       }
     }
     setGoalLoading(false);
@@ -2692,7 +2876,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           <nav className="s-nav">
             {/* Study tools */}
             {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"8px 12px 4px"}}>Study</div>}
-            {["overview","rank","goals","planner","syllabus","revision","mocks","sessions","coach","streaks"].map(id=>{
+            {["overview","rank","planner","syllabus","revision","mocks","sessions","coach","streaks"].map(id=>{
               const t=TABS.find(x=>x.id===id);
               if(!t)return null;
               return(
@@ -2772,7 +2956,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 <div className="psub">
                   {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}${examDate?" · "+Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000))+"d left":""}. tick tock.`}
                   {tab==="coach"&&"your CFA exam co-pilot. i know things about you."}
-                  {tab==="goals"&&(todayGoals.length===0?"no goals. bold strategy.":todayGoals.filter(g=>g.achieved).length===todayGoals.length?`all ${todayGoals.length} done.`:`${todayGoals.filter(g=>g.achieved).length}/${todayGoals.length} done.`)}
                   {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
                   {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
                   {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
@@ -2824,6 +3007,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               const readColor=readiness>=70?d.a2:readiness>=40?d.gold:d.danger;
               const readLabel=readiness>=70?"On Track":readiness>=40?"Needs Work":"At Risk";
 
+              if(!roadmapAnswers){
+                return(
+                  <div className="pin">
+                    <RoadmapQuestionnaire d={d} jeClass={jeClass} onSave={(ans)=>{saveRoadmapAnswers(ans);}}/>
+                  </div>
+                );
+              }
               return(
                 <div className="pin">
                   {/* ── Countdown banner ── */}
@@ -2854,15 +3044,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     </div>
                   </div>
 
-                  {/* ── Questionnaire modal ── */}
-                  {showRoadmapQs&&(
-                    <RoadmapQuestionnaire
-                      d={d} jeClass={jeClass}
-                      onSave={(ans)=>{saveRoadmapAnswers(ans);setShowRoadmapQs(false);}}
-                      onSkip={()=>{saveRoadmapAnswers({skipped:true});setShowRoadmapQs(false);}}
-                    />
-                  )}
-
                   {/* ── Today's study plan ── */}
                   <div style={{marginBottom:20}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -2874,16 +3055,17 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       </div>
                     </div>
 
-                    {/* Personalise CTA when no questionnaire answers yet */}
-                  {!roadmapAnswers&&!showRoadmapQs&&todayRoadmap.length>0&&(
-                    <div style={{padding:"14px 18px",borderRadius:10,background:d.a1+"10",border:`1px solid ${d.a1}25`,marginBottom:14,display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  {/* Backlog notice */}
+                  {roadmap?._overdueCount>0&&(
+                    <div style={{padding:"12px 16px",borderRadius:10,background:roadmap._backlogRedistributed?d.a3+"10":d.gold+"10",border:`1px solid ${roadmap._backlogRedistributed?d.a3:d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                       <div style={{flex:1,minWidth:200}}>
-                        <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:3}}>personalise your roadmap</div>
-                        <div style={{fontSize:12,color:d.t3}}>tell us what you've already covered and where you're weakest — we'll adjust what appears here.</div>
+                        {roadmap._backlogRedistributed
+                          ? `📦 you had ${roadmap._overdueCount} topics piling up — spread them across your remaining study days instead of dumping them all today.`
+                          : `⏰ ${roadmap._overdueCount} topic${roadmap._overdueCount!==1?"s":""} carried over from missed days.`}
                       </div>
-                      <button onClick={()=>setShowRoadmapQs(true)}
-                        style={{padding:"9px 18px",borderRadius:8,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,flexShrink:0}}>
-                        answer 3 questions →
+                      <button onClick={rebalanceRoadmap}
+                        style={{padding:"6px 12px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",flexShrink:0}}>
+                        🔄 rebalance now
                       </button>
                     </div>
                   )}
@@ -2918,6 +3100,8 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                               <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{item.subject}</span>
                               <span style={{fontSize:10,color:d.t4}}>{item.weight==="H"?"● high weight":item.weight==="M"?"● medium weight":"● lower weight"}</span>
                               {item.totalPasses>1&&<span style={{fontSize:10,color:d.t4}}>pass {item.pass}/{item.totalPasses}</span>}
+                              {item._manual&&<span style={{fontSize:10,color:d.a1}}>+ added by you</span>}
+                              {item._overdue&&!item._manual&&<span style={{fontSize:10,color:d.gold}}>carried over</span>}
                             </div>
                           </div>
                           {!done&&(
@@ -2926,9 +3110,22 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                               ▶ start
                             </button>
                           )}
+                          <button onClick={()=>removeRoadmapItem(today(),item)} title="remove from today"
+                            style={{width:26,height:26,borderRadius:6,background:"transparent",border:"none",color:d.t4,cursor:"pointer",fontSize:14,flexShrink:0}}>
+                            ✕
+                          </button>
                         </div>
                       );
                     })}
+
+                    {/* Manually add a topic to today */}
+                    <div style={{display:"flex",gap:8,marginTop:8}}>
+                      <div style={{flex:1}}><ManualTopicAdder d={d} jeClass={jeClass} onAdd={addManualTopicToday}/></div>
+                    </div>
+                    <button onClick={suggestTodayFocus} disabled={goalLoading}
+                      style={{width:"100%",padding:"11px",borderRadius:10,background:"transparent",border:`1.5px solid ${d.a1}40`,color:d.a1,cursor:"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit",marginTop:8,opacity:goalLoading?.6:1}}>
+                      {goalLoading?"looking at your weak spots...":"✨ suggest today's focus (from your weak spots)"}
+                    </button>
 
                     {isRevisionPhase&&(
                       <div>
@@ -3140,91 +3337,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     ))}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* ── GOALS ── */}
-            {tab==="goals"&&(
-              <div className="pin">
-                <div style={{marginBottom:28}}>
-                  <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>today's goals.</div>
-                  <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>no goals yet. add one.</div>
-                </div>
-                <div className="g2" style={{gap:14,marginBottom:28}}>
-                  <div className="card cp">
-                    <div className="cl mb12">Add Goal</div>
-                    <div className="field"><label className="fl">Subject</label><Select value={goalSub} onChange={v=>{setGoalSub(v);setGoalTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/></div>
-                    <div className="field"><label className="fl">Topic</label><Select value={goalTopic} onChange={setGoalTopic} options={[{value:"",label:"All topics"},...classTopics(goalSub).map(t=>({value:t,label:t}))]} d={d}/></div>
-                    <div className="field"><label className="fl">Type</label><Select value={goalType} onChange={setGoalType} options={[{value:"study",label:"Study (time)"},{value:"pyq",label:"Solve PYQs (count)"},{value:"revision",label:"Revision"}]} d={d}/></div>
-                    <div className="field"><label className="fl">{goalType==="pyq"?"Questions target":"Minutes target"}</label><input className="inp" type="number" placeholder={goalType==="pyq"?"e.g. 15":"e.g. 90"} min="1" max={goalType==="pyq"?"50":"480"} value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/></div>
-                    <div className="field"><label className="fl">Note (optional)</label><input className="inp" placeholder="e.g. Focus on integration by parts" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/></div>
-                    <button className="btn btn-d btn-full" onClick={addGoal}>+ Add Goal</button>
-                  </div>
-                  <div className="card cp">
-                    <div className="rowb mb12">
-                      <div><div style={{fontSize:13,fontWeight:500}}>let me plan your day 😏</div><div style={{fontSize:11,color:d.t3,marginTop:2}}>i know your weak spots. i'll be gentle.</div></div>
-                      <button className="btn btn-d" style={{padding:"7px 12px",fontSize:11.5}} onClick={aiSuggestGoals} disabled={goalLoading}>{goalLoading?"looking...":"suggest goals"}</button>
-                    </div>
-                    {goalLoading&&[80,90,75,85].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}
-                    {/* Signal breakdown — two bucket framing */}
-                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                      <div style={{fontSize:10,fontWeight:600,letterSpacing:".07em",textTransform:"uppercase",color:d.t4,marginBottom:2}}>what it looks at</div>
-                      {(()=>{
-                        const hGaps=Object.keys(TOPICS).flatMap(sub=>classTopics(sub).filter(t=>!sessions.some(s=>s.subject===sub&&s.topic===t)&&(getWeight(sub,t,jeClass)||"M")==="H")).length;
-                        const weakPyqs=pyqHistory.length;
-                        const hasMocks=mocks.length>0;
-                        const sigs=[
-                          {icon:"📥", label:"not started", bucket:"A", detail:`${hGaps} high-weight chapter${hGaps!==1?"s":""} soon started`, active:hGaps>0, color:d.a1},
-                          {icon:"🔁", label:"needs work", bucket:"B", detail:hasMocks?`Practice test scores + ${weakPyqs>0?weakPyqs+" PYQ attempts":"no PYQ data yet"}`:"take a test first", active:hasMocks||weakPyqs>0, color:d.a3},
-                          {icon:"⏱", label:"today", bucket:"", detail:`${fmt(todayTime)||"0m"} studied · adjusts goal intensity`, active:true, color:d.a2},
-                          {icon:"📊", label:"mock scores", bucket:"", detail:mocks.length?Object.keys(SUBJECT_COLORS).map(s=>{const sc2=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[s]));return s.slice(0,4)+" "+Math.round(sc2.reduce((a,b)=>a+b,0)/sc2.length)+"/100";}).join(" · "):"take a test first", active:mocks.length>0, color:d.gold},
-                        ];
-                        return sigs.map(sig=>(
-                          <div key={sig.label} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 11px",borderRadius:3,background:sig.active?sig.color+"08":d.hover,border:"1px solid "+(sig.active?sig.color+"22":d.b)}}>
-                            <span style={{fontSize:13,flexShrink:0}}>{sig.icon}</span>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                                <span style={{fontSize:11.5,fontWeight:500,color:sig.active?d.t:d.t3}}>{sig.label}</span>
-                                {sig.bucket&&<span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:`${sig.color}18`,color:sig.color}}>Bucket {sig.bucket}</span>}
-                              </div>
-                              <div style={{fontSize:10.5,color:d.t4,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sig.detail}</div>
-                            </div>
-                            <div style={{width:6,height:6,borderRadius:"50%",background:sig.active?sig.color:d.t4,flexShrink:0,opacity:sig.active?1:.4}}/>
-                          </div>
-                        ));
-                      })()}
-                      <div style={{fontSize:10.5,color:d.t4,padding:"6px 8px",lineHeight:1.6}}>
-                        i know your weak spots. let me plan your day.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="card cp">
-                  <div className="rowb mb12">
-                    <div className="cl">{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"short"})}</div>
-                    <div style={{fontSize:11,color:d.t3}}>{todayGoals.filter(g=>g.achieved).length}/{todayGoals.length} done</div>
-                  </div>
-                  {todayGoals.length>0&&<div style={{marginBottom:12}}><div className="btrack" style={{height:4}}><div className="bfill" style={{width:`${todayGoals.length?(todayGoals.filter(g=>g.achieved).length/todayGoals.length)*100:0}%`,background:`linear-gradient(90deg,${d.a1},${d.a2})`}}/></div></div>}
-                  {todayGoals.length===0&&<div className="empty" style={{padding:"22px 0"}}><div className="et">no goals yet.</div><div className="es">let me plan your day. i know exactly what you need. 😏</div></div>}
-                  {todayGoals.map(g=>{
-                    const prog=g.type==="study"?sessions.filter(s=>s.date===today()&&s.subject===g.subject&&(!g.topic||s.topic===g.topic)).reduce((a,s)=>a+s.duration,0):g.type==="pyq"?pyqHistory.filter(p=>p.date===today()&&p.subject===g.subject&&(!g.topic||p.topic===g.topic)).length:g.achieved?g.target:0;
-                    const pct=Math.min((prog/g.target)*100,100);
-                    return(
-                      <div key={g.id} className={"goal-item"+g.achieved?" achieved":""}>
-                        <div className={"goal-check"+g.achieved?" done":""} onClick={()=>setGoals(p=>p.map(x=>x.id===g.id?{...x,achieved:!x.achieved}:x))}>{g.achieved?"✓":""}</div>
-                        <div className="f1">
-                          <div className="rowb">
-                            <div className={"goal-text"+g.achieved?" done":""}>{g.text}</div>
-                            {g.aiGenerated&&<div className="goal-ai-badge">AI</div>}
-                          </div>
-                          <div className="goal-meta"><span style={{color:SUBJECT_COLORS[g.subject]}}>{g.subject}</span>{g.topic&&<span> · {g.topic}</span>}<span> · {g.type==="pyq"?`${prog}/${g.target} Qs`:`${fmt(prog)} / ${fmt(g.target)}`}</span>{g.reasoning&&<span style={{color:d.t4}}> — {g.reasoning}</span>}</div>
-                          <div className="goal-prog"><div className="goal-prog-fill" style={{width:`${pct}%`}}/></div>
-                        </div>
-                        <button onClick={()=>setGoals(p=>p.filter(x=>x.id!==g.id))} style={{background:"none",border:"none",color:d.t4,cursor:"pointer",fontSize:15,padding:"0 2px",marginLeft:4}}>×</button>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             )}
 
@@ -3767,11 +3879,12 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div style={{fontSize:11,color:d.t3,marginBottom:14}}>
                       {recommendedLoading?"finding candidates studying "+jeClass+"...":"ranked by mutual buddies, exam window, and activity"}
                     </div>
-                    {recommendedBuddies.map(u=>{
+                    {recommendedBuddies.filter(u=>!myBuddies.find(b=>b.id===u.id)).map(u=>{
                       const reasons=[];
                       if(u._mutualCount>0)reasons.push(`${u._mutualCount} mutual bud${u._mutualCount>1?"dies":"dy"}`);
                       if(u._sameWindow)reasons.push("same window");
                       if(u._activeRecently)reasons.push("active recently");
+                      const isSent=sentRequests.has(u.id);
                       return(
                         <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid ${d.b}44`}}>
                           <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
@@ -3783,9 +3896,9 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                               @{u.username||"—"}{reasons.length>0&&<span style={{color:d.a2,fontWeight:600}}> · {reasons.join(" · ")}</span>}
                             </div>
                           </div>
-                          <button onClick={()=>sendBuddyRequest(u)}
-                            style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
-                            + request
+                          <button onClick={()=>!isSent&&sendBuddyRequest(u)} disabled={isSent}
+                            style={{padding:"6px 14px",borderRadius:6,background:isSent?"transparent":d.a1,color:isSent?d.t3:"#fff",border:isSent?`1px solid ${d.b}`:"none",cursor:isSent?"default":"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                            {isSent?"✓ sent":"+ request"}
                           </button>
                         </div>
                       );
@@ -3806,9 +3919,11 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       {buddyLoading?"...":"search"}
                     </button>
                   </div>
-                  {buddyResults.length>0&&(
+                  {buddyResults.filter(u=>!myBuddies.find(b=>b.id===u.id)).length>0&&(
                     <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
-                      {buddyResults.map(u=>(
+                      {buddyResults.filter(u=>!myBuddies.find(b=>b.id===u.id)).map(u=>{
+                        const isSent=sentRequests.has(u.id);
+                        return(
                         <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0"}}>
                           <div style={{width:36,height:36,borderRadius:"50%",background:`linear-gradient(135deg,${d.a1},${d.a3})`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",fontSize:13,flexShrink:0}}>
                             {(u.display_name||u.username||"?")[0].toUpperCase()}
@@ -3817,12 +3932,13 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                             <div style={{fontSize:13,fontWeight:600,color:d.t}}>{u.display_name||u.username}</div>
                             <div style={{fontSize:11,color:d.t3}}>@{u.username} · {CLASSES.find(c=>c.id===u.je_class)?.label?.replace("CFA ","")||"—"}</div>
                           </div>
-                          <button onClick={()=>sendBuddyRequest(u)}
-                            style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
-                            + request
+                          <button onClick={()=>!isSent&&sendBuddyRequest(u)} disabled={isSent}
+                            style={{padding:"6px 14px",borderRadius:6,background:isSent?"transparent":d.a1,color:isSent?d.t3:"#fff",border:isSent?`1px solid ${d.b}`:"none",cursor:isSent?"default":"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                            {isSent?"✓ sent":"+ request"}
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                   {buddyResults.length===0&&buddySearch.trim()&&!buddyLoading&&(
@@ -3912,11 +4028,15 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   </div>
                   <div style={{fontSize:18,fontWeight:700,color:d.t,marginBottom:6}}>{user?.name||"Student"}</div>
 
-                  {/* Username — editable like Instagram */}
-                  {!editingUsername?(
-                    <div onClick={()=>{setUsernameInput(profile?.username||"");setEditingUsername(true);}}
+                  {/* Username — set once during onboarding, locked after that */}
+                  {profile?.username?(
+                    <div style={{display:"inline-flex",alignItems:"center",gap:6,marginBottom:4,padding:"3px 10px",borderRadius:6,background:d.hover}}>
+                      <span style={{fontSize:13,color:d.t2}}>@{profile.username}</span>
+                    </div>
+                  ):!editingUsername?(
+                    <div onClick={()=>{setUsernameInput("");setEditingUsername(true);}}
                       style={{display:"inline-flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:4,padding:"3px 10px",borderRadius:6,background:d.hover}}>
-                      <span style={{fontSize:13,color:d.t2}}>@{profile?.username||"set a username"}</span>
+                      <span style={{fontSize:13,color:d.t2}}>set a username</span>
                       <span style={{fontSize:10,color:d.t4}}>✏️</span>
                     </div>
                   ):(
@@ -3929,6 +4049,7 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           style={{flex:1,padding:"6px 10px",borderRadius:6,background:d.hover,border:`1px solid ${usernameError?d.danger:d.b}`,color:d.t,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
                       </div>
                       {usernameError&&<div style={{fontSize:10,color:d.danger,marginTop:4}}>{usernameError}</div>}
+                      <div style={{fontSize:9.5,color:d.t4,marginTop:5,textAlign:"center"}}>you can only set this once — choose carefully.</div>
                       <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"center"}}>
                         <button onClick={saveUsername} disabled={usernameSaving}
                           style={{padding:"6px 14px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",opacity:usernameSaving?.6:1}}>
@@ -3993,12 +4114,6 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                       <span style={{fontSize:12,color:d.t3}}>Study Days</span>
                       <span style={{fontSize:12,fontWeight:600,color:d.t}}>
                         {studyDays&&studyDays.length?studyDays.map(i=>["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]).join(", "):"not set"}
-                      </span>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${d.b}`}}>
-                      <span style={{fontSize:12,color:d.t3}}>Status</span>
-                      <span style={{fontSize:12,fontWeight:600,color:d.t}}>
-                        {{student:"Full-time student",working:"Working professional",graduated:"Graduated"}[eduStatus]||"not set"}
                       </span>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0"}}>
@@ -4482,19 +4597,31 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                 <div className="g2 mb13">
                   <div>
                     <div className="cl mb10">milestones</div>
-                    {STREAK_MILESTONES.map(b=>{
-                      const reached=streak>=b.days;
-                      return(
-                        <div key={b.days} className={"milestone-row"+reached?" reached":""}>
-                          <div style={{fontSize:18,width:30,textAlign:"center"}}>{b.icon}</div>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</div>
-                            <div style={{fontSize:10.5,color:d.t4}}>{b.days} day streak</div>
-                          </div>
-                          {reached?<div className="m-check">✓</div>:<div className="m-lock">{b.days}</div>}
-                        </div>
-                      );
-                    })}
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{borderBottom:`1px solid ${d.b}`}}>
+                          <th style={{textAlign:"left",padding:"6px 4px",fontSize:9.5,color:d.t4,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600}}></th>
+                          <th style={{textAlign:"left",padding:"6px 4px",fontSize:9.5,color:d.t4,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600}}>milestone</th>
+                          <th style={{textAlign:"right",padding:"6px 4px",fontSize:9.5,color:d.t4,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600}}>days</th>
+                          <th style={{textAlign:"right",padding:"6px 4px",fontSize:9.5,color:d.t4,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600}}>status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {STREAK_MILESTONES.map(b=>{
+                          const reached=streak>=b.days;
+                          return(
+                            <tr key={b.days} style={{borderBottom:`1px solid ${d.b}44`,background:reached?d.a2+"08":"transparent"}}>
+                              <td style={{padding:"9px 4px",fontSize:16,width:30}}>{b.icon}</td>
+                              <td style={{padding:"9px 4px",fontSize:12.5,fontWeight:500,color:reached?d.t:d.t3}}>{b.label}</td>
+                              <td style={{padding:"9px 4px",fontSize:11.5,color:d.t4,textAlign:"right"}}>{b.days}</td>
+                              <td style={{padding:"9px 4px",textAlign:"right"}}>
+                                {reached?<span style={{color:d.a2,fontWeight:700,fontSize:12}}>✓ done</span>:<span style={{color:d.t4,fontSize:11}}>{b.days-streak} to go</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                   <div>
                     {nextMilestone&&(
@@ -4517,6 +4644,35 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                           <span style={{fontSize:13,fontWeight:600,color:s.c}}>{s.val}</span>
                         </div>
                       ))}
+                    </div>
+                    <div className="card cp mb12">
+                      <div className="cl mb10">last 8 weeks</div>
+                      <table style={{width:"100%",borderCollapse:"collapse"}}>
+                        <thead>
+                          <tr style={{borderBottom:`1px solid ${d.b}`}}>
+                            <th style={{textAlign:"left",padding:"5px 4px",fontSize:9,color:d.t4,textTransform:"uppercase"}}>week of</th>
+                            <th style={{textAlign:"right",padding:"5px 4px",fontSize:9,color:d.t4,textTransform:"uppercase"}}>days</th>
+                            <th style={{textAlign:"right",padding:"5px 4px",fontSize:9,color:d.t4,textTransform:"uppercase"}}>hours</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({length:8},(_,i)=>{
+                            const wStart=weekStartOf(addDays(today(),-7*(7-i)));
+                            const wEnd=addDays(wStart,6);
+                            const weekSessions=sessions.filter(s=>s.date>=wStart&&s.date<=wEnd);
+                            const daysActive=new Set(weekSessions.map(s=>s.date)).size;
+                            const hrs=weekSessions.reduce((a,s)=>a+s.duration,0);
+                            const isCurrentWeek=i===7;
+                            return(
+                              <tr key={wStart} style={{borderBottom:`1px solid ${d.b}44`,background:isCurrentWeek?d.a1+"08":"transparent"}}>
+                                <td style={{padding:"6px 4px",fontSize:11,color:isCurrentWeek?d.t:d.t3}}>{wStart.slice(5)}{isCurrentWeek?" (now)":""}</td>
+                                <td style={{padding:"6px 4px",fontSize:11,color:daysActive>=5?d.a2:d.t3,textAlign:"right",fontWeight:daysActive>=5?700:400}}>{daysActive}/7</td>
+                                <td style={{padding:"6px 4px",fontSize:11,color:d.t3,textAlign:"right"}}>{fmt(hrs)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                     <div className="card cp">
                       <div className="cl mb10">60-day history — every square is a day you showed up</div>
@@ -5022,6 +5178,36 @@ Generate a balanced 4-goal mix: roughly 2 from Bucket A (coverage) + 2 from Buck
           </div>
         </div>
       </div>
+
+      {/* ── Toast (was previously state-only with no UI — errors were being set but never shown) ── */}
+      {toast&&(
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:10001,
+          background:d.card,border:`1px solid ${d.b}`,borderRadius:10,padding:"12px 20px",
+          boxShadow:"0 8px 24px rgba(0,0,0,.35)",fontSize:13,color:d.t,maxWidth:"90vw",textAlign:"center"}}>
+          {toast}
+        </div>
+      )}
+
+      {/* ── Streak milestone celebration ── */}
+      {celebrateMilestone&&(
+        <div style={{position:"fixed",inset:0,zIndex:10002,background:"rgba(10,10,15,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+          onClick={()=>setCelebrateMilestone(null)}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:d.card,border:`1.5px solid ${d.a1}`,borderRadius:20,padding:"40px 32px",textAlign:"center",maxWidth:340,boxShadow:`0 0 60px ${d.a1}40`}}>
+            <div style={{fontSize:56,marginBottom:10,animation:"celebrate-bounce .6s ease"}}>{celebrateMilestone.icon}</div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,marginBottom:6}}>{celebrateMilestone.label}!</div>
+            <div style={{fontSize:13,color:d.t3,marginBottom:24}}>
+              {celebrateMilestone.days} day{celebrateMilestone.days!==1?"s":""} in a row. keep the chain going — one skipped day and it's back to zero.
+            </div>
+            <button onClick={()=>setCelebrateMilestone(null)}
+              style={{padding:"11px 28px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
+              let's go →
+            </button>
+          </div>
+          <style>{"@keyframes celebrate-bounce{0%{transform:scale(0.3);opacity:0;}50%{transform:scale(1.15);}100%{transform:scale(1);opacity:1;}}"}</style>
+        </div>
+      )}
     </>
   );
 }
+
