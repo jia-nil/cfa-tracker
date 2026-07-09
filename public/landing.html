@@ -3,169 +3,108 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Slothr — JEE Advanced Study Tracker</title>
-  <meta name="description" content="Slothr is a free JEE Advanced study tracker with AI coaching, NTA simulation, and PYQ practice."/>
+  <title>Nevilete — CFA Study Tracker</title>
+  <meta name="description" content="Nevilete is an AI-powered CFA study tracker designed to help candidates plan, track study sessions, monitor progress, and stay consistent from Level I to Level III."/>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0;}
-    body{background:#0e0d0b;color:#f5f0e8;font-family:'DM Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
-    a{color:#e8723c;text-decoration:none;}
+    body{background:#0b1020;color:#f8fafc;font-family:'DM Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+    a{color:#5b8cff;text-decoration:none;}
     .wrap{max-width:960px;margin:0 auto;padding:0 24px;}
-
-    /* Nav */
     nav{padding:20px 0;display:flex;align-items:center;justify-content:space-between;}
-    .logo{font-family:'DM Serif Display',serif;font-size:22px;font-weight:900;letter-spacing:-.04em;}
-    .logo span{color:#e8723c;}
-    .nav-link{font-size:13px;color:#8a8070;margin-left:24px;}
-    .nav-link:hover{color:#f5f0e8;}
-    .nav-cta{background:#e8723c;color:#fff !important;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13px;margin-left:16px;}
-
-    /* Hero */
+    .logo{font-family:'DM Serif Display',serif;font-size:22px;font-weight:900;}
+    .logo span{color:#5b8cff;}
+    .nav-link{font-size:13px;color:#94a3b8;margin-left:24px;}
+    .nav-cta{background:#5b8cff;color:#fff!important;padding:8px 18px;border-radius:8px;font-weight:700;}
     .hero{padding:100px 0 80px;text-align:center;}
-    .hero-emoji{font-size:56px;margin-bottom:20px;}
-    .hero-title{font-family:'DM Serif Display',serif;font-size:clamp(36px,6vw,64px);font-weight:900;letter-spacing:-.04em;line-height:1.1;margin-bottom:16px;}
-    .hero-title span{color:#e8723c;}
-    .hero-sub{font-size:clamp(14px,2vw,18px);color:#8a8070;max-width:480px;margin:0 auto 36px;line-height:1.7;}
-    .hero-tag{display:inline-block;background:rgba(232,114,60,.12);color:#e8723c;border:1px solid rgba(232,114,60,.3);padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:20px;}
-    .btn-primary{display:inline-block;background:#e8723c;color:#fff;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px;letter-spacing:.01em;}
-    .btn-primary:hover{background:#d4612a;}
-    .btn-secondary{display:inline-block;color:#8a8070;padding:14px 24px;font-size:14px;margin-left:8px;}
-
-    /* Features */
+    .hero-tag{display:inline-block;padding:6px 14px;border-radius:999px;background:rgba(91,140,255,.12);color:#5b8cff;border:1px solid rgba(91,140,255,.25);font-size:12px;font-weight:700;text-transform:uppercase;margin-bottom:20px;}
+    .hero-emoji{font-size:48px;margin-bottom:18px;}
+    .hero-title{font-family:'DM Serif Display',serif;font-size:clamp(40px,6vw,64px);line-height:1.05;margin-bottom:18px;}
+    .hero-title span{color:#5b8cff;}
+    .hero-sub{max-width:620px;margin:0 auto 34px;color:#94a3b8;line-height:1.8;}
+    .btn-primary{display:inline-block;background:#5b8cff;color:#fff;padding:14px 30px;border-radius:8px;font-weight:700;}
+    .btn-secondary{display:inline-block;margin-left:10px;color:#94a3b8;}
+    .stats{padding:60px 0;border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08);}
+    .stats-grid,.feat-grid{display:grid;gap:22px;}
+    .stats-grid{grid-template-columns:repeat(3,1fr);text-align:center;}
+    .stat-num{font-size:42px;font-family:'DM Serif Display',serif;color:#5b8cff;}
+    .stat-label{color:#94a3b8;font-size:13px;}
     .features{padding:80px 0;}
-    .feat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:48px;}
-    .feat-card{background:#161410;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:28px 24px;}
-    .feat-icon{font-size:28px;margin-bottom:16px;}
-    .feat-title{font-size:16px;font-weight:700;margin-bottom:8px;letter-spacing:-.02em;}
-    .feat-desc{font-size:13px;color:#8a8070;line-height:1.7;}
-    .section-label{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#e8723c;margin-bottom:12px;}
-    .section-title{font-family:'DM Serif Display',serif;font-size:clamp(24px,4vw,36px);font-weight:900;letter-spacing:-.03em;}
-
-    /* Stats */
-    .stats{padding:60px 0;border-top:1px solid rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.06);}
-    .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;text-align:center;}
-    .stat-num{font-family:'DM Serif Display',serif;font-size:42px;font-weight:900;color:#e8723c;letter-spacing:-.04em;}
-    .stat-label{font-size:12px;color:#8a8070;margin-top:4px;font-weight:500;}
-
-    /* CTA */
-    .cta{padding:100px 0;text-align:center;}
-    .cta-title{font-family:'DM Serif Display',serif;font-size:clamp(28px,4vw,44px);font-weight:900;letter-spacing:-.04em;margin-bottom:12px;}
-    .cta-sub{font-size:15px;color:#8a8070;margin-bottom:36px;}
-
-    /* Footer */
-    footer{padding:32px 0;border-top:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
-    .footer-links{display:flex;gap:20px;}
-    .footer-link{font-size:12px;color:#4a4540;}
-    .footer-link:hover{color:#8a8070;}
-
-    @media(max-width:600px){
-      .hero{padding:60px 0 48px;}
-      .stats-grid{grid-template-columns:1fr;}
-      nav .nav-link{display:none;}
-      footer{flex-direction:column;align-items:flex-start;}
-    }
+    .section-label{color:#5b8cff;font-size:11px;text-transform:uppercase;font-weight:700;margin-bottom:10px;}
+    .section-title{font-family:'DM Serif Display',serif;font-size:36px;margin-bottom:40px;}
+    .feat-grid{grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
+    .feat-card{background:#12182b;border:1px solid rgba(255,255,255,.08);padding:26px;border-radius:14px;}
+    .feat-title{font-weight:700;margin:12px 0;}
+    .feat-desc{color:#94a3b8;line-height:1.7;font-size:14px;}
+    .cta{text-align:center;padding:90px 0;}
+    .cta-title{font-family:'DM Serif Display',serif;font-size:42px;margin-bottom:12px;}
+    .cta-sub{color:#94a3b8;margin-bottom:30px;}
+    footer{padding:30px 0;border-top:1px solid rgba(255,255,255,.08);display:flex;justify-content:space-between;flex-wrap:wrap;}
+    .footer-link{color:#94a3b8;margin-left:18px;font-size:13px;}
+    @media(max-width:600px){.stats-grid{grid-template-columns:1fr}.hero{padding:70px 0 50px}.nav-link{display:none}}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <nav>
-      <div class="logo">sloth<span>r</span></div>
-      <div>
-        <a href="/privacy.html" class="nav-link">Privacy</a>
-        <a href="https://jee-tracker-livid.vercel.app" class="nav-link nav-cta">Get Started →</a>
-      </div>
-    </nav>
-  </div>
+<div class="wrap">
+<nav>
+<div class="logo">Nevi<span>lete</span></div>
+<div>
+<a href="/privacy.html" class="nav-link">Privacy</a>
+<a href="https://nevilete.online" class="nav-link nav-cta">Get Started →</a>
+</div>
+</nav>
 
-  <!-- Hero -->
-  <div class="wrap">
-    <div class="hero">
-      <div class="hero-tag">Free · JEE Advanced</div>
-      <div class="hero-emoji">🦥</div>
-      <h1 class="hero-title">sloth<span>r</span></h1>
-      <p class="hero-sub">your smartest situationship. AI-powered JEE Advanced study tracker with NTA simulation, PYQ practice, and personalised coaching.</p>
-      <a href="https://jee-tracker-livid.vercel.app" class="btn-primary">start for free →</a>
-      <a href="#features" class="btn-secondary">see features</a>
-    </div>
-  </div>
+<section class="hero">
+<div class="hero-tag">Built for CFA Candidates</div>
+<div class="hero-emoji">✦</div>
+<h1 class="hero-title">Nevi<span>lete</span></h1>
+<p class="hero-sub">An AI-powered CFA study tracker that helps you build consistency, log study sessions, monitor progress, and prepare confidently for CFA Level I, II, and III.</p>
+<a href="https://nevilete.online" class="btn-primary">Start Tracking →</a>
+<a href="#features" class="btn-secondary">Explore Features</a>
+</section>
+</div>
 
-  <!-- Stats -->
-  <div class="stats">
-    <div class="wrap">
-      <div class="stats-grid">
-        <div>
-          <div class="stat-num">54</div>
-          <div class="stat-label">Questions per paper</div>
-        </div>
-        <div>
-          <div class="stat-num">12+</div>
-          <div class="stat-label">Years of JEE Advanced PYQs</div>
-        </div>
-        <div>
-          <div class="stat-num">Free</div>
-          <div class="stat-label">Always free to use</div>
-        </div>
-      </div>
-    </div>
-  </div>
+<section class="stats">
+<div class="wrap">
+<div class="stats-grid">
+<div><div class="stat-num">∞</div><div class="stat-label">Study Sessions</div></div>
+<div><div class="stat-num">365</div><div class="stat-label">Day Streak Potential</div></div>
+<div><div class="stat-num">AI</div><div class="stat-label">Performance Insights</div></div>
+</div>
+</div>
+</section>
 
-  <!-- Features -->
-  <div class="features" id="features">
-    <div class="wrap">
-      <div class="section-label">What slothr does</div>
-      <div class="section-title">everything your prep needs.<br/>nothing it doesn't.</div>
-      <div class="feat-grid">
-        <div class="feat-card">
-          <div class="feat-icon">⏱</div>
-          <div class="feat-title">Study Timer</div>
-          <div class="feat-desc">Track exactly how much time you spend on each subject. Stopwatch and Pomodoro modes. Daily streaks keep you accountable.</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">📊</div>
-          <div class="feat-title">AI Coach</div>
-          <div class="feat-desc">After 3 days of data, your AI coach analyses your weak chapters, effort vs score gaps, and tells you exactly where you're leaking marks.</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">🎯</div>
-          <div class="feat-title">NTA Simulation</div>
-          <div class="feat-desc">Full JEE Advanced papers in exact NTA interface. 54 questions, 3 hours, correct marking scheme. Real exam feel, zero cost.</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">📚</div>
-          <div class="feat-title">PYQ Practice</div>
-          <div class="feat-desc">Chapter-wise previous year questions with full solutions. Track your accuracy per topic. Know your weak spots before the exam does.</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">◎</div>
-          <div class="feat-title">Smart Goals</div>
-          <div class="feat-desc">Set daily study goals. Let AI suggest a balanced plan based on your weak chapters and how much time you have left before JEE.</div>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon">🔥</div>
-          <div class="feat-title">Streaks & Analytics</div>
-          <div class="feat-desc">Daily streaks, weekly study hours, subject breakdown. See your consistency at a glance. Miss a day and slothr notices.</div>
-        </div>
-      </div>
-    </div>
-  </div>
+<section class="features" id="features">
+<div class="wrap">
+<div class="section-label">Everything you need to pass the CFA exams</div>
+<div class="section-title">Focus on learning.<br>We'll handle the tracking.</div>
+<div class="feat-grid">
+<div class="feat-card"><div>⏱</div><div class="feat-title">Study Timer</div><div class="feat-desc">Track every focused study session with stopwatch and Pomodoro modes.</div></div>
+<div class="feat-card"><div>🧠</div><div class="feat-title">AI Insights</div><div class="feat-desc">Identify weak topics, monitor consistency, and receive personalized recommendations.</div></div>
+<div class="feat-card"><div>📚</div><div class="feat-title">Curriculum Tracker</div><div class="feat-desc">Mark readings, LOS, and practice questions as you progress through the curriculum.</div></div>
+<div class="feat-card"><div>📈</div><div class="feat-title">Analytics</div><div class="feat-desc">Visualize study hours, completion rate, and long-term progress with clean dashboards.</div></div>
+<div class="feat-card"><div>🎯</div><div class="feat-title">Smart Goals</div><div class="feat-desc">Set realistic daily and weekly goals based on your exam date.</div></div>
+<div class="feat-card"><div>🔥</div><div class="feat-title">Streaks</div><div class="feat-desc">Stay motivated with streaks, milestones, and habit tracking.</div></div>
+</div>
+</div>
+</section>
 
-  <!-- CTA -->
-  <div class="cta">
-    <div class="wrap">
-      <div class="cta-title">study less. rank more.<br/>nap often.</div>
-      <div class="cta-sub">free forever. no ads. just you and your prep.</div>
-      <a href="https://jee-tracker-livid.vercel.app" class="btn-primary">open slothr →</a>
-    </div>
-  </div>
+<section class="cta">
+<div class="wrap">
+<div class="cta-title">Stay consistent.<br>Pass confidently.</div>
+<div class="cta-sub">Built for ambitious CFA candidates who value discipline over cramming.</div>
+<a href="https://nevilete.online" class="btn-primary">Open Nevilete →</a>
+</div>
+</section>
 
-  <div class="wrap">
-    <footer>
-      <div class="logo" style="font-size:16px;">sloth<span style="color:#e8723c;">r</span></div>
-      <div class="footer-links">
-        <a href="/privacy.html" class="footer-link">Privacy Policy</a>
-        <a href="mailto:hello@slothr.in" class="footer-link">Contact</a>
-      </div>
-    </footer>
-  </div>
+<div class="wrap">
+<footer>
+<div class="logo" style="font-size:16px;">Nevi<span>lete</span></div>
+<div>
+<a class="footer-link" href="/privacy.html">Privacy Policy</a>
+<a class="footer-link" href="mailto:hello@nevilete.online">Contact</a>
+</div>
+</footer>
+</div>
 </body>
 </html>
