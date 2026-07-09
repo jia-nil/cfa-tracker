@@ -4,7 +4,6 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const OR_KEY  = "YOUR_OPENROUTER_KEY";
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -2009,13 +2008,24 @@ function App(){
   useEffect(()=>{
     if(!authSession?.access_token||!user?.id)return;
     const token=authSession.access_token, uid=user.id;
-    SB_AUTH.loadData("user_sessions",uid,token).then(d=>{
-      if(d===null){showToast("couldn't sync your sessions — showing your last saved data.");return;}
-      setSessions(d.map(r=>r.data||r));
-    });
-    SB_AUTH.loadData("user_goals",uid,token).then(d=>{if(d!==null)setGoals(d.map(r=>r.data||r));});
-    SB_AUTH.loadData("user_mocks",uid,token).then(d=>{if(d!==null)setMocks(d.map(r=>r.data||r));});
-    SB_AUTH.loadData("user_pyq",uid,token).then(d=>{if(d!==null)setPyqHistory(d.map(r=>r.data||r));});
+    // Merge server data in rather than blindly overwriting — a failed fetch (null) or a
+    // suspicious empty response while we already have local data (e.g. an RLS policy silently
+    // returning 200+[] instead of an error) must never wipe out real progress. This directly
+    // guards against the streak/session data getting silently zeroed out.
+    function mergeIn(setter,d,prevGetter){
+      if(d===null){showToast("couldn't fully sync — showing your last saved data.");return;}
+      const server=d.map(r=>r.data||r);
+      setter(prev=>{
+        if(server.length===0&&prev.length>0) return prev; // suspicious empty — keep local
+        const serverIds=new Set(server.map(s=>s.id));
+        const localOnly=prev.filter(s=>!serverIds.has(s.id));
+        return [...server,...localOnly];
+      });
+    }
+    SB_AUTH.loadData("user_sessions",uid,token).then(d=>mergeIn(setSessions,d));
+    SB_AUTH.loadData("user_goals",uid,token).then(d=>mergeIn(setGoals,d));
+    SB_AUTH.loadData("user_mocks",uid,token).then(d=>mergeIn(setMocks,d));
+    SB_AUTH.loadData("user_pyq",uid,token).then(d=>mergeIn(setPyqHistory,d));
     fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
       .then(r=>r.json())
       .then(d=>{
@@ -4410,14 +4420,35 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
               const onPace=neededWeeklyHrs!==null?currentWeeklyHrs>=neededWeeklyHrs*0.85:null;
               const hoursPct=Math.min(100,Math.round((hoursLoggedSoFar/recommendedHrs)*100));
 
+              // ── Performance signal — the piece that was missing ────────────────
+              // Everything above measures EFFORT (hours, coverage, pacing). None of it asks
+              // "are you actually good at this material?" A student who skims every chapter
+              // once could score well here without being exam-ready. Mock scores + PYQ accuracy
+              // are the closest proxy we have to "would you actually pass right now."
+              const mockScoresFlat=mocks.flatMap(m=>[m.physics,m.chemistry,m.math].filter(v=>v!=null));
+              const mockAvg=mockScoresFlat.length?Math.round(mockScoresFlat.reduce((a,b)=>a+b,0)/mockScoresFlat.length):null;
+              const performanceScore=
+                mockAvg!==null&&pyqAcc!==null ? Math.round(mockAvg*0.65+pyqAcc*0.35) :
+                mockAvg!==null ? mockAvg :
+                pyqAcc!==null ? pyqAcc :
+                null; // no accuracy data at all yet — handled separately below, not defaulted to a fake neutral score
+
               // Score each factor 0-100
               const factors={
-                hoursProgress:{score:hoursPct,weight:25,label:"Hours Logged",hint:Math.round(hoursLoggedSoFar)+" / "+recommendedHrs+"h target"},
-                coverage:{score:coveragePct,weight:20,label:"Syllabus Coverage",hint:studiedChapters+"/"+totalChapters+" topics"},
-                consistency:{score:Math.min(100,Math.round((streak/60)*100)),weight:20,label:"Consistency (Streak)",hint:streak+" day streak"},
-                pacing:{score:onPace===null?50:(onPace?100:Math.max(20,Math.round((currentWeeklyHrs/Math.max(neededWeeklyHrs,1))*100))),weight:20,label:"On Pace for Exam",hint:neededWeeklyHrs!==null?currentWeeklyHrs+"h/wk vs "+neededWeeklyHrs+"h/wk needed":"set exam date for pacing"},
-                highWeight:{score:highWtPct,weight:15,label:"High-Weight Topics",hint:highWtDone+"/"+highWtTotal+" done"},
+                hoursProgress:{score:hoursPct,weight:20,label:"Hours Logged",hint:Math.round(hoursLoggedSoFar)+" / "+recommendedHrs+"h target"},
+                coverage:{score:coveragePct,weight:15,label:"Syllabus Coverage",hint:studiedChapters+"/"+totalChapters+" topics"},
+                consistency:{score:Math.min(100,Math.round((streak/60)*100)),weight:15,label:"Consistency (Streak)",hint:streak+" day streak"},
+                pacing:{score:onPace===null?50:(onPace?100:Math.max(20,Math.round((currentWeeklyHrs/Math.max(neededWeeklyHrs,1))*100))),weight:15,label:"On Pace for Exam",hint:neededWeeklyHrs!==null?currentWeeklyHrs+"h/wk vs "+neededWeeklyHrs+"h/wk needed":"set exam date for pacing"},
+                highWeight:{score:highWtPct,weight:10,label:"High-Weight Topics",hint:highWtDone+"/"+highWtTotal+" done"},
+                performance:{score:performanceScore===null?50:performanceScore,weight:performanceScore===null?5:25,label:"Actual Performance",hint:mockAvg!==null&&pyqAcc!==null?`${mockAvg}/100 mock avg · ${pyqAcc}% PYQ accuracy`:mockAvg!==null?`${mockAvg}/100 mock avg`:pyqAcc!==null?`${pyqAcc}% PYQ accuracy`:"take a mock or log PYQs — this is worth the most once you have data"},
               };
+              // If there's no performance data yet, redistribute most (not all) of its weight back
+              // to hours/coverage — it keeps a small standing weight so "take a mock" still shows
+              // up as a suggestion, rather than quietly scoring it 50 as if "average" would.
+              if(performanceScore===null){
+                factors.hoursProgress.weight+=10;
+                factors.coverage.weight+=10;
+              }
               const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
               const overallPct=Math.round(totalScore);
 
@@ -4433,7 +4464,7 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
 
               // What moves the needle most
               const improvements=Object.entries(factors)
-                .filter(([,f])=>f.score<80)
+                .filter(([,f])=>f.score<80&&f.weight>0)
                 .sort((a,b)=>b[1].weight-a[1].weight)
                 .slice(0,3)
                 .map(([k,f])=>({
@@ -4446,6 +4477,7 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     consistency:"don't break your streak. even 30 min counts",
                     pacing:neededWeeklyHrs?("aim for "+neededWeeklyHrs+"h/week — you're at "+currentWeeklyHrs+"h"):"set your exam window in profile to get a real pacing target",
                     highWeight:"prioritise Ethics, FRA, Equity and Fixed Income — heaviest weighted",
+                    performance:mockAvg===null&&pyqAcc===null?"take a mock exam or log some PYQs — right now nothing here measures if you're actually learning it":mockAvg!==null&&mockAvg<65?"your mock average is below a safe passing margin — go back and consolidate, not just cover new ground":"your PYQ accuracy needs work — drill the topics you're getting wrong, not the ones you already know",
                   }[k]
                 }));
 
