@@ -2,9 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const OR_KEY  = "YOUR_OPENROUTER_KEY";
-
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -348,8 +345,9 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   }
   while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;}
   const weeksMap={};
+  const calendarWeekStart=weekStartOf(from); // the Monday of the week the plan starts in
   assignments.forEach(a=>{
-    const wIdx=Math.floor(daysBetween(from,a.date)/7);
+    const wIdx=Math.floor(daysBetween(calendarWeekStart,a.date)/7);
     if(!weeksMap[wIdx]) weeksMap[wIdx]=[];
     weeksMap[wIdx].push(a);
   });
@@ -976,10 +974,6 @@ c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px
 c.push(".g2>*,.g3>*,.g4>*,.rowb>*,.row>*,.coach-grid>*{min-width:0;}");
 c.push("table{max-width:100%;}");
 c.push("img,svg{max-width:100%;height:auto;}");
-// 100vw includes the vertical scrollbar's width on desktop, making it wider than the actual
-// viewport and causing a small but real horizontal overflow. calc(100% - SWpx) achieves the
-// same "fit beside the sidebar" result without that extra scrollbar-width overflow.
-c.push(".content{width:calc(100% - "+SW+"px);}");
 c.push("@media(max-width:480px){"+
   ".fs-ring-wrap{width:min(78vw,260px);height:min(78vw,260px);}"+
   ".fs-time{font-size:clamp(40px,13vw,72px);}"+
@@ -1862,6 +1856,8 @@ function App(){
   const [cameraStream,setCameraStream]=useState(null);
   const [showCamera,setShowCamera]=useState(false);
   const [leaderboard,setLeaderboard]=useState([]);
+  const [leaderboardLoading,setLeaderboardLoading]=useState(false);
+  const [leaderboardError,setLeaderboardError]=useState(false);
   const [feedTab,setFeedTab]=useState("following");
   const [searchResults,setSearchResults]=useState([]);
   const [openComments,setOpenComments]=useState(null);
@@ -2164,18 +2160,6 @@ function App(){
   function resetTimer(){setTimerOn(false);setTimerSec(0);timerSecRef.current=0;setCountdownSec(countdownSet*60);setTimerDone(false);}
   function applyCustom(){const m=parseInt(customMins);if(m>0&&m<=600){setCountdownSet(m);setCountdownSec(m*60);setCustomMins("");};}
 
-  async function callAI(sys,usr,json=false){
-    const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://nevilete.com","X-Title":"Nevilete"},
-      body:JSON.stringify({model:"anthropic/claude-sonnet-4-5",max_tokens:1500,messages:[{role:"system",content:sys},{role:"user",content:usr}]})
-    });
-    if(!r.ok){const e=await r.text();throw new Error("AI unavailable: "+e);}
-    const data=await r.json();
-    const txt=data.choices?.[0]?.message?.content||"";
-    if(json) return JSON.parse(txt.replace(/```json|```/g,"").trim());
-    return txt;
-  }
   async function togglePrivacy(){
     if(!user?.id)return;
     setPrivacySaving(true);
@@ -2521,56 +2505,34 @@ function App(){
     setCameraStream(null);setShowCamera(false);
   }
   async function fetchLeaderboard(){
-    const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
-      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-    });
-    const d=await r.json();
-    if(Array.isArray(d))setLeaderboard(d.slice(0,50));
-  }
-
-
-  async function runCoach(){
-    const uniqueDays=new Set(sessions.map(s=>s.date)).size;
-    if(uniqueDays<3){setCoachCards({locked:true,msg:"not enough data yet. log in consistently for 3 days to unlock AI insights."});return;}
-    setCoachLoading(true);setCoachCards(null);
+    setLeaderboardLoading(true);setLeaderboardError(false);
     try{
-      const ss=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(",");
-      const ms=mocks.map(m=>`${m.name}:P=${m.physics},C=${m.chemistry},M=${m.math},T=${m.physics+m.chemistry+m.math}`).join(";");
-      const tt=sessions.reduce((a,s)=>{const k=`${s.subject}-${s.topic}`;a[k]=(a[k]||0)+s.duration;return a;},{});
-      const ef=Object.entries(tt).filter(([,t])=>t>120).map(([k])=>k).join(",");
-      const ps=pyqHistory.length?`${pyqHistory.length} PYQs, ${pyqAccuracy}% accuracy`:"No PYQs yet";
-      const cards=await callAI(`You are an elite CFA exam coach. Return ONLY valid JSON. No markdown.
-{"cards":[{"type":"effort_trap","title":"Effort vs Score Gap","icon":"⚠","color":"danger","insight":"2-3 sharp sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"strengths","title":"Your Strengths","icon":"💪","color":"success","insight":"2-3 sentences","topics":["t1"],"action":"1 sentence"},{"type":"critical_gaps","title":"Critical Gaps","icon":"🎯","color":"warning","insight":"2-3 sentences","topics":["t1","t2"],"action":"1 sentence"},{"type":"time_analysis","title":"Time Analysis","icon":"⏱","color":"info","insight":"2-3 sentences","recommendation":"1 sentence"},{"type":"pyq_analysis","title":"PYQ Performance","icon":"📝","color":"info","insight":"2-3 sentences","action":"1 sentence"},{"type":"weekly_focus","title":"This Week's Focus","icon":"📅","color":"primary","insight":"2 sentences","plan":["Mon-Tue","Wed-Thu","Fri-Sun"]}]}`,
-        `CFA Level:${jeClass}. Study:${ss}. Mocks:${ms}. Topics>2h:${ef||"none"}. PYQs:${ps}. Streak:${streak}d. Be sharp and specific.`,true);
-      setCoachCards(cards.cards);
-    }catch{setCoachCards([{type:"error",title:"Error",icon:"⚠",color:"danger",insight:"broke. try again.",action:""}]);}
-    setCoachLoading(false);
+      const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
+        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
+      });
+      if(!r.ok){setLeaderboardError(true);setLeaderboardLoading(false);return;}
+      const d=await r.json();
+      if(Array.isArray(d))setLeaderboard(d.slice(0,50));
+      else setLeaderboardError(true);
+    }catch(e){
+      setLeaderboardError(true);
+    }
+    setLeaderboardLoading(false);
   }
-  async function suggestTodayFocus(){
+
+  function suggestTodayFocus(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
     if(uniqueDays<3){showToast("log 3 days of study first. then i'll suggest today's focus. 😏");return;}
     setGoalLoading(true);
-    let buildFallbackFocus=()=>[];
     try{
-      // ── Study totals ──────────────────────────────────────────────────────
-      const studySummary=Object.entries(totBySub).map(([s,t])=>`${s}:${fmt(t)}`).join(", ");
-
-      // ── Today's load ──────────────────────────────────────────────────────
-      const todayBySubject=Object.keys(SUBJECT_COLORS).reduce((a,sub)=>({
-        ...a,[sub]:sessions.filter(s=>s.date===today()&&s.subject===sub).reduce((sum,s)=>sum+s.duration,0)
-      }),{});
-      const todayStudySummary=Object.entries(todayBySubject).map(([s,t])=>`${s}:${fmt(t)||"0m"}`).join(", ");
-      const todayTotalMins=Object.values(todayBySubject).reduce((a,b)=>a+b,0);
-
       // ── Mock scores per subject ───────────────────────────────────────────
       const mockBySubject=Object.keys(SUBJECT_COLORS).map(sub=>{
         const scores=mocks.map(m=>({Physics:m.physics,Chemistry:m.chemistry,Mathematics:m.math}[sub]));
         const avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
-        const latest=scores.length?scores[scores.length-1]:null;
-        return{sub,avg,latest};
+        return{sub,avg};
       }).filter(s=>s.avg!==null).sort((a,b)=>a.avg-b.avg);
 
-      // ── BUCKET A: High-weightage chapters soon studied ─────────────────
+      // ── BUCKET A: High-weightage chapters not yet studied ─────────────────
       const highWeightGaps=Object.keys(TOPICS).flatMap(sub=>
         classTopics(sub)
           .filter(t=>
@@ -2589,111 +2551,46 @@ function App(){
         return acc;
       },{});
 
-      const poorPyqTopics=Object.values(topicPyqMap)
-        .map(t=>({
-          ...t,
-          acc:Math.round((t.correct/t.total)*100),
-          weight: getWeight(t.subject,t.topic,jeClass)||"M",
-          studied: sessions.some(s=>s.subject===t.subject&&s.topic===t.topic)
-        }))
+      // ── Build the 4-topic mix: ~2 coverage gaps + ~2 consolidation ──────────
+      const existingSet=new Set(roadmapTodayItems.map(g=>`${g.subject}-${g.topic}`));
+      const poorPyqStructured=Object.values(topicPyqMap)
+        .map(t=>({...t,acc:Math.round((t.correct/t.total)*100),weight:getWeight(t.subject,t.topic,jeClass)||"M"}))
         .filter(t=>t.acc<60&&t.total>=2)
-        .sort((a,b)=>{
-          const wOrder={"H":0,"M":1,"L":2};const wdiff=(wOrder[b.weight]||1)-(wOrder[a.weight]||1);
-          return wdiff!==0?wdiff:a.acc-b.acc;
-        })
-        .slice(0,5)
-        .map(t=>`${t.subject}-${t.topic}(PYQ:${t.acc}%,${t.total}Qs,${t.weight}-weight)`);
-
-      const mockWeakTopics=mockBySubject
-        .filter(s=>s.avg!==null&&s.avg<65)
-        .map(s=>{
-          const topicTimes=sessions
-            .filter(x=>x.subject===s.sub)
-            .reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
-          const topTopics=Object.entries(topicTimes)
-            .sort((a,b)=>b[1]-a[1])
-            .slice(0,2)
-            .map(([t])=>`${s.sub}-${t}(mock:${s.avg}/100,${getWeight(s.sub,t,jeClass)||"M"}-weight)`);
-          return topTopics;
-        }).flat().slice(0,4);
-
-      const existingTopics=roadmapTodayItems.map(g=>`${g.subject}-${g.topic}`).join(", ");
-
-      // ── Deterministic fallback (used if the AI call fails/isn't configured) ──
-      function buildFallbackFocusImpl(){
-        const existingSet=new Set(roadmapTodayItems.map(g=>`${g.subject}-${g.topic}`));
-        const poorPyqStructured=Object.values(topicPyqMap)
-          .map(t=>({...t,acc:Math.round((t.correct/t.total)*100),weight:getWeight(t.subject,t.topic,jeClass)||"M"}))
-          .filter(t=>t.acc<60&&t.total>=2)
-          .sort((a,b)=>a.acc-b.acc);
-        const out=[];
-        highWeightGaps.forEach(t=>{
-          if(out.length>=2)return;
+        .sort((a,b)=>a.acc-b.acc);
+      const out=[];
+      highWeightGaps.forEach(t=>{
+        if(out.length>=2)return;
+        out.push({subject:t.subject,topic:t.topic,reason:"H-weight chapter with 0 sessions logged."});
+      });
+      poorPyqStructured.forEach(t=>{
+        if(out.length>=4)return;
+        out.push({subject:t.subject,topic:t.topic,reason:`${t.acc}% PYQ accuracy on ${t.total} questions.`});
+      });
+      if(out.length<4){
+        mockBySubject.filter(s=>s.avg!==null&&s.avg<65).forEach(s=>{
+          if(out.length>=4)return;
+          const topicTimes=sessions.filter(x=>x.subject===s.sub).reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
+          const topTopic=Object.entries(topicTimes).sort((a,b)=>b[1]-a[1])[0]?.[0];
+          if(topTopic) out.push({subject:s.sub,topic:topTopic,reason:`${s.sub} mock average ${s.avg}/100.`});
+        });
+      }
+      if(out.length<4){
+        highWeightGaps.slice(2).forEach(t=>{
+          if(out.length>=4)return;
           out.push({subject:t.subject,topic:t.topic,reason:"H-weight chapter with 0 sessions logged."});
         });
-        poorPyqStructured.forEach(t=>{
-          if(out.length>=4)return;
-          out.push({subject:t.subject,topic:t.topic,reason:`${t.acc}% PYQ accuracy on ${t.total} questions.`});
-        });
-        if(out.length<4){
-          mockBySubject.filter(s=>s.avg!==null&&s.avg<65).forEach(s=>{
-            if(out.length>=4)return;
-            const topicTimes=sessions.filter(x=>x.subject===s.sub).reduce((a,x)=>{a[x.topic]=(a[x.topic]||0)+x.duration;return a;},{});
-            const topTopic=Object.entries(topicTimes).sort((a,b)=>b[1]-a[1])[0]?.[0];
-            if(topTopic) out.push({subject:s.sub,topic:topTopic,reason:`${s.sub} mock average ${s.avg}/100.`});
-          });
-        }
-        if(out.length<4){
-          highWeightGaps.slice(2).forEach(t=>{
-            if(out.length>=4)return;
-            out.push({subject:t.subject,topic:t.topic,reason:"H-weight chapter with 0 sessions logged."});
-          });
-        }
-        return out.filter(g=>!existingSet.has(`${g.subject}-${g.topic}`)).slice(0,4);
       }
-      buildFallbackFocus=buildFallbackFocusImpl;
+      const focus=out.filter(g=>!existingSet.has(`${g.subject}-${g.topic}`)).slice(0,4);
 
-      const res=await callAI(
-        `You are a world-class JEE personal coach. Suggest exactly 4 topics to focus on today. Return ONLY valid JSON. No markdown.
-Format: {"goals":[{"subject":"Physics|Chemistry|Mathematics","topic":"string","reasoning":"one sentence citing the exact data point — weightage, PYQ%, mock score, or session count"}]}
-
-FOCUS MIX RULES:
-- 2 topics should address HIGH-WEIGHTAGE chapters soon studied (pure coverage gaps)
-- 2 topics should address chapters already studied but performing badly (PYQ accuracy or mock score)
-- Cover at least 2 different subjects across the 4 topics
-- NEVER suggest L-weight chapters that aren't studied — not worth the time at this stage
-- Avoid duplicating topics already on today's list
-- reasoning must be specific: "H-weight, 0 sessions logged" OR "44% PYQ accuracy on 6 questions" OR "Chemistry avg mock 61/100"`,
-
-        `Class: ${jeClass}. Streak: ${streak} days.
-STUDY TIME (total): ${studySummary}
-TODAY studied: ${todayStudySummary} (${fmt(todayTotalMins)} total today)
-MOCK SCORES: ${mockBySubject.map(s=>`${s.sub} avg=${s.avg}/100 latest=${s.latest}/100`).join("; ")||"no mocks yet"}
-
-BUCKET A — High-weight chapters NEVER studied (push for coverage):
-${highWeightGaps.map(t=>`  • ${t.subject} - ${t.topic} [H-weight, 0 sessions]`).join("\n")||"  None — all H-weight chapters started!"}
-
-BUCKET B — Chapters studied but performing badly (push for consolidation):
-  PYQ weak topics: ${poorPyqTopics.join(", ")||"none yet"}
-  Mock-weak chapter candidates: ${mockWeakTopics.join(", ")||"none yet"}
-
-TODAY'S EXISTING TOPICS (skip these): ${existingTopics||"none"}
-
-Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Bucket B (consolidation).`,true);
-
-      (res.goals||[]).forEach(g=>{
-        if(g.subject&&g.topic) addManualTopicToday(g.subject,g.topic);
-      });
-      showToast("added 4 focus topics to today, based on your weak spots.");
+      if(focus.length>0){
+        focus.forEach(g=>addManualTopicToday(g.subject,g.topic));
+        showToast(`added ${focus.length} focus topic${focus.length!==1?"s":""} to today, based on your weak spots.`);
+      } else {
+        showToast("couldn't find anything new to suggest — log a bit more study data first.");
+      }
     }catch(e){
       console.error(e);
-      const fallback=buildFallbackFocus();
-      if(fallback.length>0){
-        fallback.forEach(g=>addManualTopicToday(g.subject,g.topic));
-        showToast("AI coach unreachable — picked focus topics directly from your study data instead.");
-      } else {
-        showToast("couldn't suggest focus topics — log a bit more study data first.");
-      }
+      showToast("couldn't suggest focus topics — try again.");
     }
     setGoalLoading(false);
   }
@@ -2715,6 +2612,7 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
         setEduStatus(setup.eduStatus);
         setTargetHours(setup.targetHours);
         setExamSetupDone(true);
+        if(setup.username) setProfile(p=>({...(p||{}),username:setup.username}));
         try{
           localStorage.setItem("slothr_class",setup.level);
           localStorage.setItem("nev_exam_window",setup.examWindow);
@@ -3350,29 +3248,6 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     )}
                   </div>);
                 })()}
-                {!coachCards&&!coachLoading&&false&&(<div/>)}
-                {coachCards?.locked&&(
-                  <div className="card cp" style={{textAlign:"center",padding:"32px 24px"}}>
-                    <div style={{fontSize:28,marginBottom:12}}>🔒</div>
-                    <div style={{fontSize:14,fontWeight:600,color:d.t,marginBottom:8}}>not enough data yet.</div>
-                    <div style={{fontSize:12,color:d.t3,lineHeight:1.7}}>{coachCards.msg}</div>
-                  </div>
-                )}
-                {!coachCards?.locked&&coachLoading&&<div className="card cp">{[100,85,92,78,88,70].map((w,i)=><div key={i} className="shim" style={{width:`${w}%`}}/>)}</div>}
-                {coachCards&&(
-                  <div className="coach-grid">
-                    {coachCards.map((card,i)=>(
-                      <div key={i} className={"coach-card "+card.color}>
-                        <div className="cc-icon">{card.icon}</div>
-                        <div className="cc-title">{card.title}</div>
-                        <div className="cc-insight">{card.insight}</div>
-                        {card.topics?.length>0&&<div className="cc-topics">{card.topics.map(t=><span key={t} className="cc-topic" style={{background:`${coachCardColor(card.color)}14`,color:coachCardColor(card.color)}}>{t}</span>)}</div>}
-                        {card.plan&&card.plan.map((p,pi)=><div key={pi} style={{fontSize:11,color:d.t3,padding:"3px 0",borderBottom:`1px solid ${d.div}`}}>{p}</div>)}
-                        {(card.recommendation||card.action)&&<div className="cc-action">{card.recommendation||card.action}</div>}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -3383,28 +3258,8 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                   <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>sessions.</div>
                   <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>{sessions.length===0?"nothing yet.":`${sessions.length} session${sessions.length!==1?"s":""} · ${fmt(totalTime)} total. not bad.`}</div>
                 </div>
-                <div className="g2" style={{gap:14,marginBottom:28}}>
+                <div style={{marginBottom:28}}>
                   {renderTimer()}
-                  <div className="card cp">
-                    <div className="cl mb12">today's sessions</div>
-                    {sessions.filter(s=>s.date===today()).length===0?(
-                      <div className="empty" style={{padding:"18px 0"}}><div className="et">nothing yet.</div><div className="es">timer is right there.</div></div>
-                    ):sessions.filter(s=>s.date===today()).map(s=>(
-                      <div key={s.id} className="srow">
-                        <div className="dot" style={{background:SUBJECT_COLORS[s.subject]}}/>
-                        <div className="ssub" style={{color:SUBJECT_COLORS[s.subject]}}>{s.subject}</div>
-                        <div className="stopic">{s.topic}</div>
-                        <div className="snotes">{s.notes||""}</div>
-                        <div className="sdur">{fmt(s.duration)}</div>
-                      </div>
-                    ))}
-                    {sessions.filter(s=>s.date===today()).length>0&&(
-                      <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${d.div}`,display:"flex",justifyContent:"space-between",fontSize:12}}>
-                        <span style={{color:d.t3}}>total today</span>
-                        <span style={{fontWeight:600,color:d.a2}}>{fmt(todayTime)} today</span>
-                      </div>
-                    )}
-                  </div>
                 </div>
                 <div className="card cp">
                   <div className="rowb mb10"><div className="cl">all sessions</div><div style={{fontSize:11,color:d.t4}}>{sessions.length} sessions · {fmt(totalTime)} total. not bad.</div></div>
@@ -3521,8 +3376,8 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     const subColor=SUBJECT_COLORS[sub]||d.a1;
                     return(
                       <div key={sub} style={{marginBottom:14}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2}}>
-                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1}}>{sub}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2,flexWrap:"wrap"}}>
+                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1,minWidth:80}}>{sub}</div>
                           <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length}</div>
                           <div style={{width:60,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                             <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2}}/>
@@ -3547,10 +3402,10 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                                 const probScore=getTopicProbability(sub,topic);
                                 const prob=getProbabilityLabel(probScore);
                                 return(
-                                  <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s"}}>
-                                    <div style={{flex:1,minWidth:0}}>
-                                      <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
-                                      <div style={{display:"flex",gap:6,marginTop:3,alignItems:"center"}}>
+                                  <div key={topic} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",background:status==="done"?`${d.a2}05`:status==="in_progress"?`${d.a3}05`:status==="need_revision"?`${d.a1}05`:"transparent",borderBottom:`1px solid ${d.b}44`,transition:"background .12s",flexWrap:"wrap"}}>
+                                    <div style={{flex:1,minWidth:140}}>
+                                      <div style={{fontSize:12,fontWeight:500,color:status==="done"?d.t3:d.t,textDecoration:status==="done"?"line-through":"none",textDecorationColor:d.t4,overflow:"hidden",textOverflow:"ellipsis"}}>{topic}</div>
+                                      <div style={{display:"flex",gap:6,marginTop:3,alignItems:"center",flexWrap:"wrap"}}>
                                         <span title={prob.label} style={{fontSize:8.5,fontWeight:700,color:prob.color,background:prob.color+"15",padding:"1px 6px",borderRadius:2,display:"flex",alignItems:"center",gap:3}}>
                                           <span>{prob.emoji}</span>{prob.short}
                                         </span>
@@ -4165,7 +4020,14 @@ Suggest a balanced 4-topic mix: roughly 2 from Bucket A (coverage) + 2 from Buck
                     <div className="cl">Weekly Leaderboard</div>
                     <div style={{fontSize:10,color:d.t3}}>top 50 · resets Monday</div>
                   </div>
-                  {leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
+                  {leaderboardLoading&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
+                  {!leaderboardLoading&&leaderboardError&&(
+                    <div style={{textAlign:"center",padding:"20px 0"}}>
+                      <div style={{fontSize:12,color:d.t3,fontStyle:"italic",marginBottom:8}}>couldn't load the leaderboard right now.</div>
+                      <button onClick={fetchLeaderboard} style={{padding:"6px 14px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>retry</button>
+                    </div>
+                  )}
+                  {!leaderboardLoading&&!leaderboardError&&leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>nobody's logged hours this week yet — be the first.</div>}
                   {leaderboard.slice(0,20).map((entry,i)=>{
                     const isMe=entry.id===user?.id;
                     const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
