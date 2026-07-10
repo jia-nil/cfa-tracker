@@ -789,7 +789,7 @@ function AuthScreen({onAuth}) {
   return (
     <div style={{
       position:"fixed", top:0, left:0, right:0, bottom:0, zIndex:9999,
-      background:"#0e0d0b", display:"flex", alignItems:"center",
+      background:"#09212D", display:"flex", alignItems:"center",
       justifyContent:"center", padding:"20px 16px", boxSizing:"border-box",
       fontFamily:"'DM Sans',sans-serif", overflowY:"auto",
     }}>
@@ -797,13 +797,13 @@ function AuthScreen({onAuth}) {
       <div style={{width:"100%", maxWidth:380, margin:"auto"}}>
         <div style={{textAlign:"center", marginBottom:32}}>
           <img src="/logo.png" alt="Nevilete" style={{width:64,height:64,borderRadius:16,marginBottom:10,objectFit:"cover"}}/>
-          <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
-            nevile<span style={{color:"#e8723c"}}>te</span>
+          <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#F2E6BF", fontFamily:"'DM Serif Display',serif"}}>
+            nevile<span style={{color:"#5AA3AD"}}>te</span>
           </div>
-          <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your CFA exam co-pilot.</div>
+          <div style={{fontSize:12, color:"#7A93A0", marginTop:4}}>your CFA exam co-pilot.</div>
         </div>
         <button onClick={()=>window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`}
-          style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#1a1510",
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#132A36",
             border:"none", fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:14,
             display:"flex", alignItems:"center", justifyContent:"center", gap:10,
             fontFamily:"inherit", boxSizing:"border-box"}}>
@@ -812,7 +812,7 @@ function AuthScreen({onAuth}) {
         </button>
         <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14}}>
           <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
-          <span style={{fontSize:11, color:"#4a4540"}}>or</span>
+          <span style={{fontSize:11, color:"#4E6975"}}>or</span>
           <div style={{flex:1, height:1, background:"rgba(255,255,255,.08)"}}/>
         </div>
         <div style={{marginBottom:10}}>
@@ -823,18 +823,18 @@ function AuthScreen({onAuth}) {
           <input style={inp} type="password" placeholder="password (min 6 chars)" value={password}
             onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
         </div>
-        {error&&<div style={{fontSize:12, color:error.includes("created")?"#4d9e78":"#d4604a",
+        {error&&<div style={{fontSize:12, color:error.includes("created")?"#4d9e78":"#e08a6a",
           marginBottom:12, textAlign:"center", lineHeight:1.5}}>{error}</div>}
         <button onClick={handleSubmit} disabled={loading}
-          style={{width:"100%", padding:"12px", borderRadius:8, background:"#e8723c",
-            color:"#fff", border:"none", fontSize:14, fontWeight:700,
+          style={{width:"100%", padding:"12px", borderRadius:8, background:"#5AA3AD",
+            color:"#09212D", border:"none", fontSize:14, fontWeight:700,
             cursor:loading?"not-allowed":"pointer", opacity:loading?.6:1,
             fontFamily:"inherit", boxSizing:"border-box"}}>
           {loading?"...":(mode==="login"?"log in":"sign up")}
         </button>
-        <div style={{textAlign:"center", marginTop:14, fontSize:12, color:"#8a8070"}}>
+        <div style={{textAlign:"center", marginTop:14, fontSize:12, color:"#7A93A0"}}>
           {mode==="login"?"no account? ":"have one? "}
-          <span style={{color:"#e8723c", cursor:"pointer"}}
+          <span style={{color:"#5AA3AD", cursor:"pointer"}}
             onClick={()=>{setMode(m=>m==="login"?"signup":"login");setError("");}}>
             {mode==="login"?"sign up":"log in"}
           </span>
@@ -1573,6 +1573,7 @@ function App(){
   const [editingNote,setEditingNote]=useState(null); // "sub|topic"
   // ── Study buddy ───────────────────────────────────────────────────────────
   const [buddySearch,setBuddySearch]=useState("");
+  const [hasSearchedBuddy,setHasSearchedBuddy]=useState(false);
   const [buddyResults,setBuddyResults]=useState([]);
   const [buddyLoading,setBuddyLoading]=useState(false);
   const [buddyRequests,setBuddyRequests]=useState([]);
@@ -1623,6 +1624,36 @@ function App(){
   // ── Planner / Roadmap completion state ───────────────────────────────────
   const [roadmapDone,setRoadmapDone]=useState(()=>{try{const c=localStorage.getItem("nev_roadmap_done");return c?JSON.parse(c):{};}catch(e){return {};}});
   useEffect(()=>{try{localStorage.setItem("nev_roadmap_done",JSON.stringify(roadmapDone));}catch(e){}},[roadmapDone]);
+  // Any topic marked "done" (via the roadmap, a manual syllabus override, or from before this
+  // auto-sync existed) that has no revision schedule yet gets backfilled automatically — this is
+  // what makes "completed topics" actually show up in the revision panel without the user having
+  // to manually add each one. Uses the real roadmap completion date when findable, so the 3/7/14/
+  // 30-day due dates are accurate instead of resetting the clock to today.
+  useEffect(()=>{
+    const toBackfill=Object.keys(syllabusStatus).filter(key=>syllabusStatus[key]==="done"&&!revisionLog[key]);
+    if(toBackfill.length===0)return;
+    setRevisionLog(prev=>{
+      const next={...prev};
+      toBackfill.forEach(key=>{
+        if(next[key])return; // already backfilled — avoid clobbering an active schedule
+        const [sub,topic]=key.split("|");
+        let completionDate=null;
+        Object.keys(roadmapDone).forEach(k=>{
+          if(!roadmapDone[k])return;
+          const parts=k.split("|");
+          if(parts.length<4)return;
+          if(parts[1]===sub&&parts[2]===topic&&(!completionDate||parts[0]>completionDate)) completionDate=parts[0];
+        });
+        const lastStudied=completionDate||today();
+        next[key]={
+          lastStudied,
+          nextRevisions:[addDays(lastStudied,3),addDays(lastStudied,7),addDays(lastStudied,14),addDays(lastStudied,30)],
+          doneRevisions:[],
+        };
+      });
+      return next;
+    });
+  },[syllabusStatus]);
   function toggleRoadmapItem(date,item){
     const key=itemKey(date,item);
     setRoadmapDone(prev=>{
@@ -2312,6 +2343,7 @@ function App(){
   async function searchBuddy(){
     if(!buddySearch.trim())return;
     setBuddyLoading(true);
+    setBuddyResults([]);
     const q=buddySearch.replace("@","").toLowerCase().trim();
     try{
       // Search by exact username first, then partial
@@ -2321,7 +2353,7 @@ function App(){
       const exactD=await exactR.json();
       if(Array.isArray(exactD)&&exactD.length>0){
         setBuddyResults(exactD.filter(u=>u.id!==user?.id&&!myBuddies.find(b=>b.id===u.id)));
-        setBuddyLoading(false);return;
+        setHasSearchedBuddy(true);setBuddyLoading(false);return;
       }
       // Fallback: partial match
       const r=await fetch(SB_URL+"/rest/v1/profiles?username=ilike."+encodeURIComponent("%"+q+"%")+"&select=id,username,display_name,avatar_url,je_class&limit=10",{
@@ -2330,6 +2362,7 @@ function App(){
       const d=await r.json();
       if(Array.isArray(d))setBuddyResults(d.filter(u=>u.id!==user?.id&&!myBuddies.find(b=>b.id===u.id)));
     }catch(e){console.error("Buddy search error:",e);}
+    setHasSearchedBuddy(true);
     setBuddyLoading(false);
   }
   function addBuddy(u){
@@ -3105,6 +3138,45 @@ function App(){
                     )}
                   </div>
 
+                  {/* ── What to revise today ── */}
+                  {(()=>{
+                    const dueToday=Object.entries(revisionLog)
+                      .filter(([,entry])=>entry.nextRevisions?.length>0&&entry.nextRevisions[0]<=today())
+                      .map(([key,entry])=>{
+                        const [sub,topic]=key.split("|");
+                        return{sub,topic,key,overdueDays:daysBetween(entry.nextRevisions[0],today()),weight:getWeight(sub,topic,jeClass)||"M"};
+                      })
+                      .sort((a,b)=>({H:0,M:1,L:2}[a.weight]-{H:0,M:1,L:2}[b.weight])||b.overdueDays-a.overdueDays);
+                    if(dueToday.length===0) return null;
+                    return(
+                      <div style={{marginBottom:20}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:20,color:d.t,letterSpacing:"-.02em"}}>What to revise today</div>
+                          <div style={{fontSize:11,color:d.t3}}>{dueToday.length} due</div>
+                        </div>
+                        {dueToday.slice(0,6).map((r,i)=>{
+                          const col=SUBJECT_COLORS[r.sub]||d.a1;
+                          return(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${col}`,borderRadius:10,marginBottom:6}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:600,color:d.t}}>{r.topic}</div>
+                                <div style={{display:"flex",gap:6,alignItems:"center",marginTop:3,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{r.sub}</span>
+                                  <span style={{fontSize:10,color:r.overdueDays>0?d.gold:d.t4}}>{r.overdueDays>0?`${r.overdueDays}d overdue`:"due today"}</span>
+                                </div>
+                              </div>
+                              <button onClick={()=>markRevisionDone(r.sub,r.topic)}
+                                style={{padding:"6px 14px",borderRadius:7,background:d.a2,color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                                ✓ revised
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {dueToday.length>6&&<div style={{fontSize:11,color:d.t3,textAlign:"center",marginTop:6,cursor:"pointer"}} onClick={()=>setTab("revision")}>+{dueToday.length-6} more — open Revision tab</div>}
+                      </div>
+                    );
+                  })()}
+
                   {/* ── Quick stats row ── */}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:20}}>
                     {[
@@ -3831,7 +3903,7 @@ function App(){
                   <div style={{fontSize:12,fontWeight:700,color:d.t,marginBottom:10}}>Search by username</div>
                   <div style={{display:"flex",gap:8}}>
                     <input className="inp" placeholder="@username" value={buddySearch}
-                      onChange={e=>setBuddySearch(e.target.value)}
+                      onChange={e=>{setBuddySearch(e.target.value);setHasSearchedBuddy(false);}}
                       onKeyDown={e=>e.key==="Enter"&&searchBuddy()}
                       style={{flex:1}}/>
                     <button onClick={searchBuddy} disabled={buddyLoading}
@@ -3861,7 +3933,7 @@ function App(){
                       })}
                     </div>
                   )}
-                  {buddyResults.length===0&&buddySearch.trim()&&!buddyLoading&&(
+                  {buddyResults.length===0&&hasSearchedBuddy&&!buddyLoading&&(
                     <div style={{fontSize:11,color:d.t3,marginTop:10,fontStyle:"italic"}}>no one found — make sure they've set a username in their profile.</div>
                   )}
                 </div>
@@ -4104,6 +4176,18 @@ function App(){
                 .filter((t,i,arr)=>arr.findIndex(x=>x.subject===t.subject&&x.topic===t.topic)===i)
                 .sort((a,b)=>wtO[a.weight]-wtO[b.weight])
                 .slice(0,6);
+              // ── Revision Planner — chronological view of what's coming, like the roadmap ──
+              const planner={};
+              Object.entries(revisionLog).forEach(([key,entry])=>{
+                const next=entry.nextRevisions?.[0];
+                if(!next) return;
+                const daysOut=daysBetween(today(),next);
+                if(daysOut<0||daysOut>21) return; // overdue ones already shown above; cap at 3 weeks out
+                const [sub,topic]=key.split("|");
+                if(!planner[next]) planner[next]=[];
+                planner[next].push({sub,topic,wt:getWeight(sub,topic,jeClass)||"M"});
+              });
+              const plannerDays=Object.keys(planner).sort();
               return(
                 <div className="pin">
                   {/* Header stats */}
@@ -4121,6 +4205,40 @@ function App(){
                       </div>
                     ))}
                   </div>
+
+                  {/* Revision Planner — chronological view */}
+                  {plannerDays.length>0&&(
+                    <div style={{marginBottom:24}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:700,color:d.t2}}>📅 Revision Planner</div>
+                        <div style={{flex:1,height:1,background:d.b}}/>
+                        <div style={{fontSize:10,color:d.t3}}>next 21 days</div>
+                      </div>
+                      <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:6}}>
+                        {plannerDays.map(date=>{
+                          const items=planner[date];
+                          const dt=new Date(date+"T00:00:00");
+                          const dayName=dt.toLocaleDateString("en-IN",{weekday:"short"});
+                          const isToday=date===today();
+                          return(
+                            <div key={date} style={{flexShrink:0,width:110,background:isToday?d.a1+"10":d.card,border:`1px solid ${isToday?d.a1:d.b}`,borderRadius:10,padding:"10px 10px"}}>
+                              <div style={{fontSize:9,fontWeight:700,color:isToday?d.a1:d.t3,textTransform:"uppercase",marginBottom:2}}>{isToday?"Today":dayName}</div>
+                              <div style={{fontSize:11,color:d.t4,marginBottom:8}}>{dt.toLocaleDateString("en-IN",{day:"numeric",month:"short"})}</div>
+                              {items.slice(0,3).map((it,i)=>{
+                                const col=SUBJECT_COLORS[it.sub]||d.a1;
+                                return(
+                                  <div key={i} title={it.topic} style={{fontSize:10,color:d.t2,padding:"3px 0",borderTop:i>0?`1px solid ${d.b}44`:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                    <span style={{color:col,fontWeight:700}}>●</span> {it.topic}
+                                  </div>
+                                );
+                              })}
+                              {items.length>3&&<div style={{fontSize:9,color:d.t4,marginTop:2}}>+{items.length-3} more</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Due now */}
                   {allDue.length>0&&(
