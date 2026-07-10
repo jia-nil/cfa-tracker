@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -29,7 +31,7 @@ const SB_AUTH = {
       method:"POST",
       headers:{"apikey":SB_ANON,"Authorization":`Bearer ${accessToken}`},
     });
-    localStorage.removeItem("slothr_auth");
+    localStorage.removeItem("nev_auth");
   },
   async getUser(accessToken) {
     const r = await fetch(`${SB_URL}/auth/v1/user`, {
@@ -254,7 +256,7 @@ function isOverdue(dateStr){return dateStr<today();}
 function isDueToday(dateStr){return dateStr===today();}
 function isDueSoon(dateStr){const d=daysBetween(today(),dateStr);return d>=0&&d<=2;}
 function calcStreak(sessions){
-  const days=[...new Set(sessions.map(s=>s.date))].sort().reverse();
+  const days=[...new Set(sessions.map(s=>typeof s==="string"?s:s.date))].sort().reverse();
   if(!days.length)return 0;
   // Use local date string to avoid timezone issues
   const todayStr=(()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");})();
@@ -771,7 +773,7 @@ function AuthScreen({onAuth}) {
         access_token:session.access_token, refresh_token:session.refresh_token,
         expires_at:Date.now()+(session.expires_in||3600)*1000, user:session.user,
       };
-      localStorage.setItem("slothr_auth", JSON.stringify(stored));
+      localStorage.setItem("nev_auth", JSON.stringify(stored));
       onAuth(stored);
     } catch(e) { setError(e.message); }
     setLoading(false);
@@ -794,9 +796,9 @@ function AuthScreen({onAuth}) {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
       <div style={{width:"100%", maxWidth:380, margin:"auto"}}>
         <div style={{textAlign:"center", marginBottom:32}}>
-          <div style={{fontSize:40, marginBottom:8}}>🦥</div>
+          <img src="/logo.png" alt="Nevilete" style={{width:64,height:64,borderRadius:16,marginBottom:10,objectFit:"cover"}}/>
           <div style={{fontSize:26, fontWeight:900, letterSpacing:"-.06em", color:"#f5f0e8", fontFamily:"'DM Serif Display',serif"}}>
-            sloth<span style={{color:"#e8723c"}}>r</span>
+            nevile<span style={{color:"#e8723c"}}>te</span>
           </div>
           <div style={{fontSize:12, color:"#8a8070", marginTop:4}}>your CFA exam co-pilot.</div>
         </div>
@@ -962,8 +964,9 @@ c.push(".m-check{width:18px;height:18px;border-radius:50%;background:"+d.a2+";di
 c.push(".m-lock{width:18px;height:18px;border-radius:50%;background:"+d.b+";display:flex;align-items:center;justify-content:center;font-size:9px;color:"+d.t4+";flex-shrink:0;}");
 c.push(".srow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid "+d.b+";margin-bottom:0;}");
 c.push(".srow:hover{background:transparent;}.ssub{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;width:70px;flex-shrink:0;}");
-c.push(".stopic{font-size:13px;flex:1;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
+c.push(".stopic{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.snotes{font-size:11px;color:"+d.t3+";flex:1.5;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}");
 c.push(".sdur{font-size:10.5px;color:"+d.t3+";background:"+d.hover+";padding:2px 8px;border-radius:20px;flex-shrink:0;border:1px solid "+d.b+";}.sdate{font-size:10px;color:"+d.t4+";flex-shrink:0;}");
+c.push("@media(max-width:600px){.snotes,.sdate{display:none;}.ssub{width:50px;font-size:9px;}}");
 
 // ── Mobile overflow fixes ────────────────────────────────────────────────
 // The classic cause of "have to scroll left-right" in a flex/grid-heavy app: grid and flex
@@ -1377,10 +1380,10 @@ function App(){
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authSession,setAuthSession]=useState(()=>{
     try{
-      const s=localStorage.getItem("slothr_auth");
+      const s=localStorage.getItem("nev_auth")||localStorage.getItem("slothr_auth");
       if(!s)return null;
       const p=JSON.parse(s);
-      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("slothr_auth");return null;}
+      if(p.expires_at&&p.expires_at<Date.now()){localStorage.removeItem("nev_auth");return null;}
       return p;
     }catch(e){return null;}
   });
@@ -1391,12 +1394,12 @@ function App(){
     id:authSession.user?.id,
   }:{name:"Student",email:"",avatar:null,id:null};
   function handleAuthSuccess(stored){
-    const prev=()=>{try{return JSON.parse(localStorage.getItem("slothr_auth"));}catch(e){return null;}};
+    const prev=()=>{try{return JSON.parse(localStorage.getItem("nev_auth")||localStorage.getItem("slothr_auth"));}catch(e){return null;}};
     const p=prev();
     if(p?.user?.id&&p.user.id!==stored?.user?.id){
       // Different user — wipe everything so old account data doesn't bleed
-      const ALL_KEYS=["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq",
-        "slothr_syllabus","slothr_class","slothr_revision","nev_sessions","nev_completed",
+      const ALL_KEYS=["nev_auth","nev_session_log","nev_mock_exams","nev_goal_log","nev_pyq_log",
+        "nev_syllabus_status","nev_class","nev_revision_log","nev_sessions","nev_completed",
         "nev_syllabus","nev_mocks","nev_topic_notes","nev_roadmap_answers","nev_roadmap_done",
         "nev_exam_window","nev_study_days","nev_edu_status","nev_target_hours",
         "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
@@ -1406,7 +1409,7 @@ function App(){
       setSyllabusStatus({});setJeClass(null);setExamWindow(null);setStudyDays([0,1,2,3,4]);
       setRoadmapAnswers(null);
     }
-    localStorage.setItem("slothr_auth",JSON.stringify(stored));
+    localStorage.setItem("nev_auth",JSON.stringify(stored));
     setAuthSession(stored);
     // Auto-upsert profile so buddy search finds this user immediately
     const u=stored.user;
@@ -1422,8 +1425,8 @@ function App(){
     if(authSession?.access_token)SB_AUTH.signOut(authSession.access_token).catch(()=>{});
     setAuthSession(null);
     setSessions([]);setMocks([]);setGoals([]);setPyqHistory([]);
-    const ALL_KEYS=["slothr_auth","slothr_sessions","slothr_mocks","slothr_goals","slothr_pyq",
-      "slothr_syllabus","slothr_class","slothr_revision","nev_sessions","nev_completed",
+    const ALL_KEYS=["nev_auth","nev_session_log","nev_mock_exams","nev_goal_log","nev_pyq_log",
+      "nev_syllabus_status","nev_class","nev_revision_log","nev_sessions","nev_completed",
       "nev_syllabus","nev_mocks","nev_topic_notes","nev_roadmap_answers","nev_roadmap_done",
       "nev_exam_window","nev_study_days","nev_edu_status","nev_target_hours",
       "nev_exam_setup_done","nev_profile","nev_buddies","nev_setup"];
@@ -1469,7 +1472,7 @@ function App(){
   const [dark,setDark]=useState(true);
   const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
-  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
+  const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("nev_class")||localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
   // ── Exam setup state ─────────────────────────────────────────────────────
   const [examWindow,setExamWindow]=useState(()=>{try{return localStorage.getItem("nev_exam_window")||null;}catch(e){return null;}});
   const [studyDays,setStudyDays]=useState(()=>{try{const v=localStorage.getItem("nev_study_days");return v?JSON.parse(v):[0,1,2,3,4];}catch(e){return [0,1,2,3,4];}});
@@ -1480,8 +1483,13 @@ function App(){
   useEffect(()=>{try{localStorage.setItem("nev_study_days",JSON.stringify(studyDays));}catch(e){}},[studyDays]);
   useEffect(()=>{try{if(eduStatus)localStorage.setItem("nev_edu_status",eduStatus);}catch(e){}},[eduStatus]);
   useEffect(()=>{try{if(targetHours)localStorage.setItem("nev_target_hours",String(targetHours));}catch(e){}},[targetHours]);
-  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
-  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("nev_session_log")||localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
+  // Days the user actually opened/used the app — this is what the streak is based on now,
+  // not whether they logged a study session that day. Showing up counts.
+  const [activityDates,setActivityDates]=useState(()=>{
+    try{const c=localStorage.getItem("nev_activity_dates");return c?JSON.parse(c):[];}catch(e){return [];}
+  });
+  const [mocks,setMocks]=useState(()=>{try{const c=localStorage.getItem("nev_mock_exams")||localStorage.getItem("slothr_mocks");return c?JSON.parse(c):[];}catch(e){return [];}});
 
   // ── Receive completed practice test result ──────────────────────────────────
   function handleTestComplete({mockEntry, pyqEntries}){
@@ -1490,7 +1498,7 @@ function App(){
   }
 
   // Goals
-  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [goals,setGoals]=useState(()=>{try{const c=localStorage.getItem("nev_goal_log")||localStorage.getItem("slothr_goals");return c?JSON.parse(c):[];}catch(e){return [];}});
   const [goalInput,setGoalInput]=useState("");
   const [goalSub,setGoalSub]=useState("Ethics");
   const [goalTopic,setGoalTopic]=useState("");
@@ -1499,13 +1507,13 @@ function App(){
   const [goalLoading,setGoalLoading]=useState(false);
 
   // PYQ
-  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
+  const [pyqHistory,setPyqHistory]=useState(()=>{try{const c=localStorage.getItem("nev_pyq_log")||localStorage.getItem("slothr_pyq");return c?JSON.parse(c):[];}catch(e){return [];}});
 
   // Coach
-  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
+  const [syllabusStatus,setSyllabusStatus]=useState(()=>{try{const c=localStorage.getItem("nev_syllabus_status")||localStorage.getItem("slothr_syllabus");return c?JSON.parse(c):{};}catch(e){return {};}});
   // Revision scheduler state
-  const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
-  useEffect(()=>{try{localStorage.setItem("slothr_revision",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
+  const [revisionLog,setRevisionLog]=useState(()=>{try{const c=localStorage.getItem("nev_revision_log")||localStorage.getItem("slothr_revision");return c?JSON.parse(c):{};}catch(e){return {};}});
+  useEffect(()=>{try{localStorage.setItem("nev_revision_log",JSON.stringify(revisionLog));}catch(e){}},[revisionLog]);
   // Which "studied but not tracked" card currently has its recency picker open
   const [revisionRecencyPicker,setRevisionRecencyPicker]=useState(null);
   function markStudied(sub,topic){
@@ -1910,8 +1918,8 @@ function App(){
   const subColor=SUBJECT_COLORS[timerSub]||d.a1;
   const css=buildCSS(d,dark,sideOpen,SW,subColor,sideTranslate,sideW600,sbOverlayDisplay,sbOverlayOp,sbOverlayPE,topbarBg,fsOverlayBg,fsDoneBg,sItemPad,sItemJust);
   useEffect(()=>{
-    let el=document.getElementById("slothr-css");
-    if(!el){el=document.createElement("style");el.id="slothr-css";document.head.appendChild(el);}
+    let el=document.getElementById("nevilete-css");
+    if(!el){el=document.createElement("style");el.id="nevilete-css";document.head.appendChild(el);}
     el.textContent=css;
   },[css]);
   const classTopics=sub=>TOPICS[sub]?.[jeClass]||TOPICS[sub]?.L1||[];
@@ -1999,7 +2007,7 @@ function App(){
   // This week = Mon–today
   const weekStart=(()=>{const d=new Date();d.setHours(0,0,0,0);const day=d.getDay();d.setDate(d.getDate()-(day===0?6:day-1));return d.toISOString().split("T")[0];})();
   const weekTime=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
-  const streak=calcStreak(sessions);
+  const streak=calcStreak(activityDates);
   // ── Streak milestone celebration ──────────────────────────────────────────
   const [celebrateMilestone,setCelebrateMilestone]=useState(null);
   const [seenMilestones,setSeenMilestones]=useState(()=>{
@@ -2020,11 +2028,28 @@ function App(){
   const todayGoals=goals.filter(g=>g.date===today());
   const pyqAccuracy=pyqHistory.length?Math.round((pyqHistory.filter(p=>p.correct).length/pyqHistory.length)*100):null;
   // Sync all data to localStorage
-  useEffect(()=>{try{localStorage.setItem("slothr_sessions",JSON.stringify(sessions));}catch(e){}},[sessions]);
-  useEffect(()=>{try{localStorage.setItem("slothr_mocks",JSON.stringify(mocks));}catch(e){}},[mocks]);
-  useEffect(()=>{try{localStorage.setItem("slothr_goals",JSON.stringify(goals));}catch(e){}},[goals]);
-  useEffect(()=>{try{localStorage.setItem("slothr_pyq",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
-  useEffect(()=>{try{localStorage.setItem("slothr_syllabus",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  useEffect(()=>{try{localStorage.setItem("nev_session_log",JSON.stringify(sessions));}catch(e){}},[sessions]);
+  // Buddy stats (This Week / Total Hours / Last Studied) read week_mins/total_mins/session_count/
+  // last_studied off the profiles row, but nothing was ever writing those columns — they were
+  // permanently stuck. Recompute and push them whenever sessions change so buddies can actually
+  // see real numbers instead of "..." forever.
+  useEffect(()=>{
+    if(!authSession?.access_token||!user?.id||sessions.length===0)return;
+    const weekStart=(()=>{const dt=new Date();dt.setHours(0,0,0,0);const day=dt.getDay();dt.setDate(dt.getDate()-(day===0?6:day-1));return dt.toISOString().split("T")[0];})();
+    const weekMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+s.duration,0);
+    const totalMins=sessions.reduce((a,s)=>a+s.duration,0);
+    const lastStudied=[...sessions].sort((a,b)=>b.date.localeCompare(a.date))[0]?.date||null;
+    fetch(`${SB_URL}/rest/v1/profiles`,{
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+      body:JSON.stringify({id:user.id,week_mins:weekMins,total_mins:totalMins,session_count:sessions.length,last_studied:lastStudied})
+    }).catch(()=>{});
+  },[sessions.length]);
+  useEffect(()=>{try{localStorage.setItem("nev_mock_exams",JSON.stringify(mocks));}catch(e){}},[mocks]);
+  useEffect(()=>{try{localStorage.setItem("nev_goal_log",JSON.stringify(goals));}catch(e){}},[goals]);
+  useEffect(()=>{try{localStorage.setItem("nev_pyq_log",JSON.stringify(pyqHistory));}catch(e){}},[pyqHistory]);
+  useEffect(()=>{try{localStorage.setItem("nev_syllabus_status",JSON.stringify(syllabusStatus));}catch(e){}},[syllabusStatus]);
+  useEffect(()=>{try{localStorage.setItem("nev_activity_dates",JSON.stringify(activityDates));}catch(e){}},[activityDates]);
   // Load from Supabase on login — Supabase is always the source of truth,
   // never gated on localStorage (that was the cause of data bleeding between accounts)
   useEffect(()=>{
@@ -2048,12 +2073,27 @@ function App(){
     SB_AUTH.loadData("user_goals",uid,token).then(d=>mergeIn(setGoals,d));
     SB_AUTH.loadData("user_mocks",uid,token).then(d=>mergeIn(setMocks,d));
     SB_AUTH.loadData("user_pyq",uid,token).then(d=>mergeIn(setPyqHistory,d));
+    // Activity/streak tracking — merge in server-known active days, then mark today active
+    // both locally and server-side. If the "user_activity" table isn't set up yet, this fails
+    // silently and the app just falls back to local-only tracking on this device.
+    SB_AUTH.loadData("user_activity",uid,token).then(d=>{
+      if(d===null)return;
+      const serverDates=d.map(r=>r.data?.date||r.date).filter(Boolean);
+      setActivityDates(prev=>[...new Set([...prev,...serverDates])]);
+    });
+    const todayStr=today();
+    setActivityDates(prev=>prev.includes(todayStr)?prev:[...prev,todayStr]);
+    fetch(`${SB_URL}/rest/v1/user_activity`,{
+      method:"POST",
+      headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+      body:JSON.stringify({user_id:uid,data:{date:todayStr}})
+    }).catch(()=>{});
     fetch(`${SB_URL}/rest/v1/user_prefs?user_id=eq.${uid}&select=*`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
       .then(r=>r.json())
       .then(d=>{
         const row=d?.[0];
         if(!row)return;
-        if(row.je_class){setJeClass(row.je_class);try{localStorage.setItem("slothr_class",row.je_class);}catch(e){}}
+        if(row.je_class){setJeClass(row.je_class);try{localStorage.setItem("nev_class",row.je_class);}catch(e){}}
         if(row.exam_window){setExamWindow(row.exam_window);try{localStorage.setItem("nev_exam_window",row.exam_window);}catch(e){}}
         if(row.study_days){setStudyDays(row.study_days);try{localStorage.setItem("nev_study_days",JSON.stringify(row.study_days));}catch(e){}}
         if(row.target_hours){setTargetHours(row.target_hours);try{localStorage.setItem("nev_target_hours",String(row.target_hours));}catch(e){}}
@@ -2083,14 +2123,13 @@ function App(){
   const [myPartner,setMyPartner]=useState(null);
   const [userSearch,setUserSearch]=useState("");
   // Refs — must be declared before any early return
-  // Profile/leaderboard loader — must be before early returns
+  // Profile loader — must be before early returns
   useEffect(()=>{
     if(tab==="profile"&&user?.id){
       fetchProfile(user.id).then(p=>{
         setProfile(p);
         if(p)setProfileIsPublic(p.is_public!==false); // default true if unset
       });
-      fetchLeaderboard();
     }
   },[tab]);
   // Auth gate — after ALL hooks
@@ -2504,21 +2543,6 @@ function App(){
     cameraStream?.getTracks().forEach(t=>t.stop());
     setCameraStream(null);setShowCamera(false);
   }
-  async function fetchLeaderboard(){
-    setLeaderboardLoading(true);setLeaderboardError(false);
-    try{
-      const r=await fetch(`${SB_URL}/rest/v1/weekly_leaderboard`,{
-        headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token}`}
-      });
-      if(!r.ok){setLeaderboardError(true);setLeaderboardLoading(false);return;}
-      const d=await r.json();
-      if(Array.isArray(d))setLeaderboard(d.slice(0,50));
-      else setLeaderboardError(true);
-    }catch(e){
-      setLeaderboardError(true);
-    }
-    setLeaderboardLoading(false);
-  }
 
   function suggestTodayFocus(){
     const uniqueDays=new Set(sessions.map(s=>s.date)).size;
@@ -2605,6 +2629,11 @@ function App(){
     <ExamSetupScreen
       d={d}
       initialLevel={CLASSES.find(c=>c.id===jeClass)?jeClass:null}
+      existingUsername={profile?.username}
+      user={user}
+      authSession={authSession}
+      SB_URL={SB_URL}
+      SB_ANON={SB_ANON}
       onComplete={(setup)=>{
         setJeClass(setup.level);
         setExamWindow(setup.examWindow);
@@ -2614,7 +2643,7 @@ function App(){
         setExamSetupDone(true);
         if(setup.username) setProfile(p=>({...(p||{}),username:setup.username}));
         try{
-          localStorage.setItem("slothr_class",setup.level);
+          localStorage.setItem("nev_class",setup.level);
           localStorage.setItem("nev_exam_window",setup.examWindow);
           localStorage.setItem("nev_study_days",JSON.stringify(setup.studyDays));
           localStorage.setItem("nev_edu_status",setup.eduStatus||"");
@@ -3231,9 +3260,9 @@ function App(){
                           {notDone.length>0&&<div>
                             <div style={{fontSize:11,color:d.t3,marginBottom:8}}>high-weight topics not yet studied:</div>
                             {notDone.map((x,i)=>(
-                              <div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${d.b}44`,fontSize:12,color:d.t2}}>
-                                <span style={{color:SUBJECT_COLORS[x.sub]||d.a1,fontWeight:600,minWidth:80}}>{x.sub}</span>
-                                <span>{x.t}</span>
+                              <div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${d.b}44`,fontSize:12,color:d.t2,flexWrap:"wrap"}}>
+                                <span style={{color:SUBJECT_COLORS[x.sub]||d.a1,fontWeight:600,minWidth:80,flexShrink:0}}>{x.sub}</span>
+                                <span style={{minWidth:0,overflowWrap:"break-word"}}>{x.t}</span>
                               </div>
                             ))}
                           </div>}
@@ -4012,46 +4041,6 @@ function App(){
                       <span style={{fontSize:12,fontWeight:600,color:d.t}}>{targetHours||CFA_RECOMMENDED_HOURS[jeClass]||300} hours</span>
                     </div>
                   </div>
-                </div>
-
-                {/* Weekly leaderboard */}
-                <div className="card cp" style={{marginBottom:20}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                    <div className="cl">Weekly Leaderboard</div>
-                    <div style={{fontSize:10,color:d.t3}}>top 50 · resets Monday</div>
-                  </div>
-                  {leaderboardLoading&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>loading leaderboard...</div>}
-                  {!leaderboardLoading&&leaderboardError&&(
-                    <div style={{textAlign:"center",padding:"20px 0"}}>
-                      <div style={{fontSize:12,color:d.t3,fontStyle:"italic",marginBottom:8}}>couldn't load the leaderboard right now.</div>
-                      <button onClick={fetchLeaderboard} style={{padding:"6px 14px",borderRadius:6,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>retry</button>
-                    </div>
-                  )}
-                  {!leaderboardLoading&&!leaderboardError&&leaderboard.length===0&&<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:d.t3,fontStyle:"italic"}}>nobody's logged hours this week yet — be the first.</div>}
-                  {leaderboard.slice(0,20).map((entry,i)=>{
-                    const isMe=entry.id===user?.id;
-                    const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
-                    return(
-                      <div key={entry.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 4px",borderBottom:`1px solid ${d.b}44`,background:isMe?`${d.a1}06`:"transparent"}}>
-                        <div style={{width:26,textAlign:"center",fontWeight:700,fontSize:i<3?16:12,color:i<3?d.gold:d.t4,flexShrink:0}}>
-                          {medal||`${i+1}`}
-                        </div>
-                        <div style={{width:32,height:32,borderRadius:"50%",background:d.a3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0,overflow:"hidden"}}>
-                          {entry.avatar_url?<img src={entry.avatar_url} style={{width:32,height:32,borderRadius:"50%",objectFit:"cover"}}/>:(entry.display_name||"?")[0].toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:12.5,fontWeight:isMe?700:500,color:isMe?d.a1:d.t,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {entry.display_name||entry.username}{isMe?" (you)":""}
-                          </div>
-                          <div style={{fontSize:10,color:d.t3}}>@{entry.username} · {CLASSES.find(c=>c.id===entry.je_class)?.label?.replace("CFA ","")||entry.je_class}</div>
-                        </div>
-                        <div style={{textAlign:"right",flexShrink:0}}>
-                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>{fmt(entry.week_minutes)}</div>
-                          <div style={{fontSize:9,color:d.t3}}>this week</div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
 
                 {/* Your stats */}
