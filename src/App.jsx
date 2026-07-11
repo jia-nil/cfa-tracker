@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -1868,6 +1867,7 @@ function App(){
     }
   },[planKey,roadmapPerformanceLive]);
   const [showRebalancePicker,setShowRebalancePicker]=useState(false);
+  const [rebalancePickDate,setRebalancePickDate]=useState("");
   const [rebalanceOverride,setRebalanceOverride]=useState(null); // {untilDate, overrideMap:{date:[items]}}
   useEffect(()=>{
     if(rebalanceOverride&&today()>rebalanceOverride.untilDate) setRebalanceOverride(null);
@@ -1876,12 +1876,10 @@ function App(){
   function rebalanceRoadmap(){
     setShowRebalancePicker(true);
   }
-  function performWindowedRebalance(windowDays){
+  function performRebalanceUntil(windowEnd){
     if(!roadmap||!jeClass||!examDate){setShowRebalancePicker(false);return;}
     const today_str=today();
-    const windowEnd=addDays(today_str,windowDays-1);
-    // Gather overdue items + everything originally scheduled within the chosen window that
-    // isn't done yet — this is the pool we're allowed to redistribute.
+    if(!windowEnd||windowEnd<today_str){showToast("pick a date today or later.");return;}
     const pool=[];
     const seen=new Set();
     (roadmap.weeks||[]).forEach(w=>w.days.forEach(dd=>{
@@ -1897,18 +1895,21 @@ function App(){
       }
     }));
     const windowDates=[];
-    for(let i=0;i<windowDays;i++){
-      const dt=addDays(today_str,i);
-      if((studyDays||[]).includes(weekdayIndex(dt))) windowDates.push(dt);
+    let d=today_str;
+    while(d<=windowEnd){
+      if((studyDays||[]).includes(weekdayIndex(d))) windowDates.push(d);
+      d=addDays(d,1);
     }
-    if(windowDates.length===0){showToast("none of your study days fall in that window — try a longer one.");setShowRebalancePicker(false);return;}
+    if(windowDates.length===0){showToast("none of your study days fall before that date — pick a later one.");setShowRebalancePicker(false);return;}
     const assignments=packSessionsIntoDates(pool,windowDates,dailyStudyHours);
     const overrideMap={};
     assignments.forEach(a=>{overrideMap[a.date]=a.items;});
     setRebalanceOverride({untilDate:windowEnd,overrideMap});
     setShowRebalancePicker(false);
-    const label=windowDays===3?"the next 3 days":windowDays===7?"the next week":"the next 2 weeks";
-    showToast(`rebalanced — everything overdue is now spread across ${label}.`);
+    showToast(`backlog will be cleared by ${windowEnd} — spread across your study days until then.`);
+  }
+  function performWindowedRebalance(windowDays){
+    performRebalanceUntil(addDays(today(),windowDays-1));
   }
 
   const roadmapBase=useMemo(()=>{
@@ -1977,23 +1978,36 @@ function App(){
         }
       });
     });
-    if(overdue.length===0) return {...roadmapBase,_overdueCount:0,_backlogRedistributed:false};
+    if(overdue.length===0) return {...roadmapBase,_overdueCount:0,_overdueMins:0,_backlogRedistributed:false};
+    const overdueMins=overdue.reduce((a,it)=>a+(it.durationMins||0),0);
 
-    // Small slippage (a day or two behind) — just bubble into today, cheap and non-disruptive.
+    // Small slippage (a day or two behind) — bubble overdue items forward, but only as many as
+    // actually fit into each day's real time budget. Previously this dumped ALL overdue items
+    // straight onto today regardless of the user's daily-hours setting, which is why a 0.5h/day
+    // plan could show 2+ hours of backlog crammed into a single "today".
     const backlogThreshold=Math.max(4,(roadmapBase.perDaySessions||2)*2);
     if(overdue.length<=backlogThreshold){
-      const weeks=(roadmapBase.weeks||[]).map(w=>({
-        ...w,
-        days:w.days.map(dd=>{
-          if(dd.date===today_str){
-            const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
-            const toAdd=overdue.filter(it=>!existingKeys.has(it.subject+"|"+it.topic+"|"+it.pass));
-            return{...dd,items:[...toAdd,...dd.items]};
-          }
-          return dd;
-        })
-      }));
-      return{...roadmapBase,weeks,_overdueCount:overdue.length,_backlogRedistributed:false};
+      const dailyBudgetMins=Math.max(30,(dailyStudyHours||2)*60);
+      const weeks=(roadmapBase.weeks||[]).map(w=>({...w,days:w.days.map(dd=>({...dd,items:[...dd.items]}))}));
+      const futureDays=weeks.flatMap(w=>w.days).filter(dd=>dd.date>=today_str);
+      const queue=[...overdue];
+      for(const dd of futureDays){
+        if(queue.length===0)break;
+        const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
+        let usedMins=dd.items.reduce((a,it)=>a+(it.durationMins||0),0);
+        const toAdd=[];
+        while(queue.length){
+          const it=queue[0];
+          const k=it.subject+"|"+it.topic+"|"+it.pass;
+          if(existingKeys.has(k)){queue.shift();continue;}
+          if(usedMins+(it.durationMins||30)>dailyBudgetMins)break;
+          toAdd.push(it);
+          usedMins+=(it.durationMins||30);
+          queue.shift();
+        }
+        dd.items=[...toAdd,...dd.items];
+      }
+      return{...roadmapBase,weeks,_overdueCount:overdue.length,_overdueMins:overdueMins,_backlogRedistributed:false};
     }
 
     // Real backlog — spread overdue + remaining future items evenly across the remaining study
@@ -2012,7 +2026,7 @@ function App(){
       remainingTopics:allRemaining,
       dailyHours:dailyStudyHours,
     });
-    return {...redistributed,_overdueCount:overdue.length,_backlogRedistributed:true};
+    return {...redistributed,_overdueCount:overdue.length,_overdueMins:overdueMins,_backlogRedistributed:true};
   },[roadmapBase,roadmapDone,roadmapRemoved,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers,dailyStudyHours,rebalanceOverride]);
 
   const isRevisionPhase=false; // revision no longer carved out of the roadmap — see the Revision tab/Planner instead
@@ -3305,12 +3319,12 @@ function App(){
                     <div style={{padding:"12px 16px",borderRadius:10,background:roadmap._backlogRedistributed?d.a3+"10":d.gold+"10",border:`1px solid ${roadmap._backlogRedistributed?d.a3:d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                       <div style={{flex:1,minWidth:200}}>
                         {roadmap._backlogRedistributed
-                          ? `📦 you had ${roadmap._overdueCount} topics piling up — spread them across your remaining study days instead of dumping them all today.`
-                          : `⏰ ${roadmap._overdueCount} topic${roadmap._overdueCount!==1?"s":""} carried over from missed days.`}
+                          ? `📦 you had ${roadmap._overdueCount} topics piling up (~${Math.round((roadmap._overdueMins||0)/60*10)/10}h) — spread them across your remaining study days instead of dumping them all today.`
+                          : `⏰ ${roadmap._overdueCount} topic${roadmap._overdueCount!==1?"s":""} carried over from missed days (~${Math.round((roadmap._overdueMins||0)/60*10)/10}h of backlog).`}
                       </div>
                       <button onClick={rebalanceRoadmap}
                         style={{padding:"6px 12px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",flexShrink:0}}>
-                        🔄 rebalance now
+                        📆 clear backlog by...
                       </button>
                     </div>
                   )}
@@ -3320,8 +3334,19 @@ function App(){
                       onClick={()=>setShowRebalancePicker(false)}>
                       <div onClick={e=>e.stopPropagation()}
                         style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:16,padding:24,maxWidth:340,width:"100%"}}>
-                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:6}}>Rebalance over how long?</div>
-                        <div style={{fontSize:12,color:d.t3,marginBottom:18,lineHeight:1.5}}>overdue topics + what's already scheduled in that window get spread evenly across it — nothing beyond it is touched.</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:6}}>Clear your backlog by when?</div>
+                        <div style={{fontSize:12,color:d.t3,marginBottom:14,lineHeight:1.5}}>
+                          you're carrying ~{Math.round((roadmap?._overdueMins||0)/60*10)/10}h of backlog. pick a date and it'll be spread evenly across your study days between now and then — nothing beyond it is touched.
+                        </div>
+                        <div style={{marginBottom:16}}>
+                          <label className="fl">pick a date</label>
+                          <input className="inp" type="date" min={today()} max={examDate||undefined} value={rebalancePickDate} onChange={e=>setRebalancePickDate(e.target.value)}/>
+                          <button onClick={()=>performRebalanceUntil(rebalancePickDate)} disabled={!rebalancePickDate}
+                            style={{width:"100%",marginTop:8,padding:"11px",borderRadius:10,background:rebalancePickDate?d.a1:d.hover,border:`1px solid ${d.b}`,color:rebalancePickDate?"#fff":d.t4,cursor:rebalancePickDate?"pointer":"default",fontFamily:"inherit",fontSize:13,fontWeight:700}}>
+                            clear backlog by this date
+                          </button>
+                        </div>
+                        <div style={{fontSize:10.5,color:d.t4,marginBottom:8,textTransform:"uppercase",letterSpacing:".06em",fontWeight:700}}>or pick a quick option</div>
                         {[{d:3,l:"Next 3 days",s:"catch up fast, heavier days"},{d:7,l:"Next week",s:"balanced pace"},{d:14,l:"Next 2 weeks",s:"gentlest, most spread out"}].map(opt=>(
                           <button key={opt.d} onClick={()=>performWindowedRebalance(opt.d)}
                             style={{width:"100%",textAlign:"left",padding:"12px 14px",borderRadius:10,background:d.hover,border:`1px solid ${d.b}`,color:d.t,cursor:"pointer",fontFamily:"inherit",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -3367,14 +3392,13 @@ function App(){
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3,flexWrap:"wrap"}}>
                               <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{item.topic}</div>
-                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({item.pass}/{item.totalPasses})</div>}
                             </div>
                             {item.totalPasses>1&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>{item.topicHours?`~${item.topicHours}h total for this topic`:`session ${item.pass} of ${item.totalPasses}`}</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>{Math.round((item.pass*(item.durationMins||30)/60)*10)/10} hour of {item.topicHours||"?"} hour</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -5287,7 +5311,7 @@ function App(){
                                 return(
                                   <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
                                     style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({item.pass}/{item.totalPasses})</span>}
+                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({Math.round((item.pass*(item.durationMins||30)/60)*10)/10}h/{item.topicHours||"?"}h)</span>}
                                   </div>
                                 );
                               })}
