@@ -4,7 +4,6 @@ const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -366,7 +365,12 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   // blocks. This replaces the old flat "H=3 passes, M=2, L=1" scheme, which had no connection
   // to how long a topic actually takes (e.g. Fin. Reporting alone realistically needs 50-70
   // hours — that can't be represented as "3 sessions").
-  const SESSION_BLOCK_MINS=60;
+  // Block size adapts to the user's actual daily budget — a 0.5h/day plan should chunk work
+  // into 30-min sessions, not force a full 60-min block onto a day that only has 30 min in it
+  // (which used to silently blow the daily budget on the very first item every day, and made
+  // topics rack up passes far faster than the user's real pace).
+  const dailyBudgetForSizing=Math.max(15,(dailyHours||2)*60);
+  const SESSION_BLOCK_MINS=Math.min(60,dailyBudgetForSizing);
   const weightPoints={H:3,M:2,L:1};
   let sessionPool;
   if(remainingTopics){
@@ -2276,6 +2280,7 @@ function App(){
         if(row.exam_window){setExamWindow(row.exam_window);try{localStorage.setItem("nev_exam_window",row.exam_window);}catch(e){}}
         if(row.study_days){setStudyDays(row.study_days);try{localStorage.setItem("nev_study_days",JSON.stringify(row.study_days));}catch(e){}}
         if(row.target_hours){setTargetHours(row.target_hours);try{localStorage.setItem("nev_target_hours",String(row.target_hours));}catch(e){}}
+        if(row.daily_hours){setDailyStudyHours(row.daily_hours);try{localStorage.setItem("nev_daily_hours",String(row.daily_hours));}catch(e){}}
         if(row.je_class&&row.exam_window){
           // Setup is complete — mark done so we don't show the setup screen again
           setExamSetupDone(true);
@@ -2833,7 +2838,7 @@ function App(){
           localStorage.setItem("nev_target_hours",String(setup.targetHours));
           localStorage.setItem("nev_exam_setup_done","1");
         }catch(e){}
-        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:setup.level,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours})}).catch(()=>{});
+        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:setup.level,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours,daily_hours:setup.dailyHours||dailyStudyHours})}).catch(()=>{});
       }}
     />
   );
@@ -5300,9 +5305,14 @@ function App(){
               const lastWeekMins=lastWeekSess.reduce((a,s)=>a+(s.duration||0),0);
               const thisWeekHrs=Math.round(thisWeekMins/60*10)/10;
               const lastWeekHrs=Math.round(lastWeekMins/60*10)/10;
-              const weeklyTarget=studyDays?.length?(studyDays.length*(targetHours||300)/((roadmap?.totalDays||100)/7)):0;
-              const weeklyTargetHrs=Math.round(weeklyTarget/60*10)/10;
-              const behindHrs=Math.max(0,Math.round((weeklyTarget-thisWeekMins)/60*10)/10);
+              // Weekly target is just the user's own chosen pace (daily hours × study days/week) —
+              // not re-derived from total plan length. That derived version mixed hour-units with
+              // minute-units (off by a factor of 60) AND barely varied between users since it
+              // depended mostly on the fixed default target/plan-length ratio, which is why every
+              // student was seeing almost the same "behind" number regardless of their own goals.
+              const weeklyTargetHrs=Math.round((dailyStudyHours||0)*(studyDays?.length||0)*10)/10;
+              const weeklyTargetMins=weeklyTargetHrs*60;
+              const behindHrs=Math.max(0,Math.round((weeklyTargetMins-thisWeekMins)/60*10)/10);
               const trend=thisWeekMins>lastWeekMins?"up":thisWeekMins<lastWeekMins?"down":"flat";
               const totalHrsLogged=Math.round(sessions.reduce((a,s)=>a+(s.duration||0),0)/60*10)/10;
               const pct=Math.min(100,Math.round((totalHrsLogged/(targetHours||300))*100));
