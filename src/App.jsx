@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -309,16 +308,29 @@ function packSessionsIntoDates(sessionPool,dates,dailyHours){
     dayIdx++;
     safety++;
   }
-  while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;} // safety-net leftover
+  while(poolIdx<sessionPool.length){
+    // Genuine shortfall (more content than the available time can fit even once each day is
+    // over budget) — spread what's left evenly across all days round-robin instead of dumping
+    // it all onto the last day, which is what used to produce a single day needing 60+ hours.
+    assignments[dayIdx%assignments.length].items.push(sessionPool[poolIdx]);
+    dayIdx++;
+    poolIdx++;
+  }
   return assignments;
 }
-function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance,dailyHours}){
+function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance,dailyHours,focusMode}){
   // performance: live signal computed from actual mock scores / PYQ accuracy / syllabus status —
   // {weakSubjects:Set<subject>, weakTopics:Set<"sub|topic">, strongTopics:Set<"sub|topic">, doneTopics:Set<"sub|topic">}
   // This is what makes the plan personalised instead of one-size-fits-all: two students on the
   // same level get different pass-counts per topic based on how THEY are actually performing.
   let topics=remainingTopics||allTopicsForLevel(level);
   if(topics.length===0||!examDate) return {weeks:[],totalDays:0};
+  // "important" focus mode: the user told us during onboarding they can't commit the hours
+  // actually required to cover the full syllabus, so scope down to H/M-weight (highest-yield)
+  // topics only instead of silently overflowing or cramming everything in regardless of fit.
+  if(focusMode==="important"){
+    topics=topics.filter(t=>t.weight==="H"||t.weight==="M");
+  }
   // Filter out topics user already completed in questionnaire (only on first generation)
   if(!remainingTopics&&answers&&!answers.skipped&&answers.completedTopics){
     topics=topics.filter(t=>!answers.completedTopics[t.subject+"|"+t.topic]);
@@ -1076,6 +1088,7 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
   const [examWindow,setExamWindow]=useState(null);
   const [studyDays,setStudyDays]=useState([0,1,2,3,4]);
   const [dailyHours,setDailyHours]=useState(2);
+  const [commitStep,setCommitStep]=useState(0); // 0=pick days, 1=calculated commitment, 2=reduced-scope hours picker
   const [username,setUsername]=useState(existingUsername||"");
   const [usernameError,setUsernameError]=useState("");
   const [usernameSaving,setUsernameSaving]=useState(false);
@@ -1198,46 +1211,97 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
           </div>
         )}
 
-        {/* Step 4 — Study days */}
-        {step===4&&(
+        {/* Step 4 — Study days, then a calculated commitment check */}
+        {step===4&&(()=>{
+          const examDateObj=windows.find(w=>w.id===examWindow)?.start;
+          const daysUntilExam=examDateObj?Math.max(1,Math.ceil((new Date(examDateObj)-new Date())/86400000)):null;
+          let studyDatesCount=0;
+          if(examDateObj&&studyDays.length>0){
+            for(let i=0;i<daysUntilExam;i++){
+              const dt=new Date();dt.setDate(dt.getDate()+i);
+              const jsDay=(dt.getDay()+6)%7; // Mon=0..Sun=6
+              if(studyDays.includes(jsDay)) studyDatesCount++;
+            }
+          }
+          const requiredPerDay=studyDatesCount>0?Math.round((recommended/studyDatesCount)*10)/10:null;
+          const requiredPerWeek=daysUntilExam?Math.round((recommended/(daysUntilExam/7))*10)/10:null;
+          const feasible=requiredPerDay!==null&&requiredPerDay<=5; // beyond ~5h/study-day is unrealistic for most people
+
+          return(
           <div>
-            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which days can you study?</div>
-            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap will only schedule sessions on these days — be realistic.</div>
-            <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
-              {DAY_NAMES.map((dn,i)=>(
-                <div key={dn} onClick={()=>toggleDay(i)}
-                  style={{width:52,height:52,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
-                    fontSize:12,fontWeight:700,cursor:"pointer",userSelect:"none",transition:"all .15s",
-                    background:studyDays.includes(i)?d.a1:d.card,
-                    color:studyDays.includes(i)?"#fff":d.t3,
-                    border:"1.5px solid "+(studyDays.includes(i)?d.a1:d.b)}}>
-                  {dn}
+            {commitStep===0&&(<>
+              <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>which days can you study?</div>
+              <div style={{fontSize:13,color:d.t3,marginBottom:22}}>your roadmap will only schedule sessions on these days — be realistic.</div>
+              <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+                {DAY_NAMES.map((dn,i)=>(
+                  <div key={dn} onClick={()=>toggleDay(i)}
+                    style={{width:52,height:52,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:12,fontWeight:700,cursor:"pointer",userSelect:"none",transition:"all .15s",
+                      background:studyDays.includes(i)?d.a1:d.card,
+                      color:studyDays.includes(i)?"#fff":d.t3,
+                      border:"1.5px solid "+(studyDays.includes(i)?d.a1:d.b)}}>
+                    {dn}
+                  </div>
+                ))}
+              </div>
+              <button disabled={studyDays.length===0} onClick={()=>setCommitStep(1)}
+                style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
+                continue →
+              </button>
+              <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            </>)}
+
+            {commitStep===1&&(<>
+              <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>here's what it'll take</div>
+              <div style={{fontSize:13,color:d.t3,marginBottom:18,lineHeight:1.5}}>
+                covering the full {classLabel} syllabus ({recommended}h) by your exam date, on the {studyDays.length} day{studyDays.length!==1?"s":""}/week you picked, needs about:
+              </div>
+              <div style={{display:"flex",gap:10,marginBottom:20}}>
+                <div style={{flex:1,padding:"16px",borderRadius:12,background:d.card,border:`1.5px solid ${d.a1}`,textAlign:"center"}}>
+                  <div style={{fontSize:24,fontWeight:800,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{requiredPerWeek}h</div>
+                  <div style={{fontSize:10,color:d.t3,marginTop:2}}>per week</div>
                 </div>
-              ))}
-            </div>
-            <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:10}}>hours per study day</div>
-            <div style={{display:"flex",gap:8,marginBottom:22}}>
-              {[1,1.5,2,3,4].map(h=>(
-                <div key={h} onClick={()=>setDailyHours(h)}
-                  style={{flex:1,padding:"11px 4px",borderRadius:10,textAlign:"center",cursor:"pointer",transition:"all .15s",
-                    background:dailyHours===h?d.a1+"18":d.card,
-                    border:"1.5px solid "+(dailyHours===h?d.a1:d.b),
-                    color:dailyHours===h?d.a1:d.t3,fontSize:13,fontWeight:700}}>
-                  {h}h
+                <div style={{flex:1,padding:"16px",borderRadius:12,background:d.card,border:`1.5px solid ${d.b}`,textAlign:"center"}}>
+                  <div style={{fontSize:24,fontWeight:800,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{requiredPerDay}h</div>
+                  <div style={{fontSize:10,color:d.t3,marginTop:2}}>per study day</div>
                 </div>
-              ))}
-            </div>
-            {studyDays.length>0&&<div style={{fontSize:12,color:d.t3,marginBottom:18,fontStyle:"italic"}}>
-              {studyDays.length * dailyHours}h/week. CFA Institute candidates average {recommended}h total for {classLabel} — that's your target.
-            </div>}
-            <button disabled={studyDays.length===0}
-              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:dailyHours||2,targetHours:recommended,username})}
-              style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
-              continue → tell us what you've covered
-            </button>
-            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+              </div>
+              {!feasible&&<div style={{fontSize:11.5,color:d.gold,marginBottom:16,lineHeight:1.5,fontStyle:"italic"}}>that's a lot for most people to sustain — totally fine to scope down instead of burning out.</div>}
+              <button onClick={()=>{setDailyHours(requiredPerDay||2);onComplete({level,examWindow,studyDays,dailyHours:requiredPerDay||2,targetHours:recommended,focusMode:"full",username});}}
+                style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginBottom:10}}>
+                I can commit to {requiredPerDay}h/study day →
+              </button>
+              <button onClick={()=>setCommitStep(2)}
+                style={{width:"100%",padding:"13px",borderRadius:12,background:"transparent",border:`1.5px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",marginBottom:10}}>
+                I can't put in that much time
+              </button>
+              <button onClick={()=>setCommitStep(0)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            </>)}
+
+            {commitStep===2&&(<>
+              <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>how much time do you actually have?</div>
+              <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>we'll build a leaner roadmap that only covers high-weight (and some medium-weight) topics — the highest-yield material — instead of the full syllabus, so it actually fits.</div>
+              <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:10}}>hours per study day</div>
+              <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+                {[0.5,1,1.5,2,3].map(h=>(
+                  <div key={h} onClick={()=>setDailyHours(h)}
+                    style={{flex:1,minWidth:56,padding:"11px 4px",borderRadius:10,textAlign:"center",cursor:"pointer",transition:"all .15s",
+                      background:dailyHours===h?d.a1+"18":d.card,
+                      border:"1.5px solid "+(dailyHours===h?d.a1:d.b),
+                      color:dailyHours===h?d.a1:d.t3,fontSize:13,fontWeight:700}}>
+                    {h}h
+                  </div>
+                ))}
+              </div>
+              <button onClick={()=>onComplete({level,examWindow,studyDays,dailyHours,targetHours:recommended,focusMode:"important",username})}
+                style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginBottom:10}}>
+                build my leaner roadmap →
+              </button>
+              <button onClick={()=>setCommitStep(1)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            </>)}
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
@@ -1520,6 +1584,8 @@ function App(){
   const [eduStatus,setEduStatus]=useState(()=>{try{return localStorage.getItem("nev_edu_status")||null;}catch(e){return null;}}); // "student"|"working"|"graduated"
   const [targetHours,setTargetHours]=useState(()=>{try{const v=localStorage.getItem("nev_target_hours");return v?parseInt(v):null;}catch(e){return null;}});
   const [dailyStudyHours,setDailyStudyHours]=useState(()=>{try{const v=localStorage.getItem("nev_daily_hours");return v?parseFloat(v):2;}catch(e){return 2;}});
+  const [roadmapFocusMode,setRoadmapFocusMode]=useState(()=>{try{return localStorage.getItem("nev_focus_mode")||"full";}catch(e){return "full";}});
+  useEffect(()=>{try{localStorage.setItem("nev_focus_mode",roadmapFocusMode);}catch(e){}},[roadmapFocusMode]);
   const [examSetupDone,setExamSetupDone]=useState(()=>{try{return localStorage.getItem("nev_exam_setup_done")==="1";}catch(e){return false;}});
   useEffect(()=>{try{if(examWindow)localStorage.setItem("nev_exam_window",examWindow);}catch(e){}},[examWindow]);
   useEffect(()=>{try{localStorage.setItem("nev_study_days",JSON.stringify(studyDays));}catch(e){}},[studyDays]);
@@ -1852,8 +1918,8 @@ function App(){
 
   const roadmapBase=useMemo(()=>{
     if(!jeClass||!examDate||!roadmapStartDate||!frozenPerformance) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:frozenPerformance,dailyHours:dailyStudyHours});
-  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,frozenPerformance,dailyStudyHours]);
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:frozenPerformance,dailyHours:dailyStudyHours,focusMode:roadmapFocusMode});
+  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,frozenPerformance,dailyStudyHours,roadmapFocusMode]);
 
   // ── Manual overrides ──────────────────────────────────────────────────────
   // User-added or user-removed items for specific days — lets people directly edit "what to
@@ -2773,6 +2839,7 @@ function App(){
         setEduStatus(setup.eduStatus);
         setTargetHours(setup.targetHours);
         if(setup.dailyHours) setDailyStudyHours(setup.dailyHours);
+        if(setup.focusMode) setRoadmapFocusMode(setup.focusMode);
         setExamSetupDone(true);
         if(setup.username) setProfile(p=>({...(p||{}),username:setup.username}));
         try{
@@ -3215,12 +3282,22 @@ function App(){
                             {done&&"✓"}
                           </div>
                           <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none",marginBottom:3}}>{item.topic}</div>
+                            <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3,flexWrap:"wrap"}}>
+                              <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{item.topic}</div>
+                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({item.pass}/{item.totalPasses})</div>}
+                            </div>
+                            {item.totalPasses>1&&(
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+                                <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
+                                  <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
+                                </div>
+                                <span style={{fontSize:9.5,color:d.t4}}>session {item.pass} of {item.totalPasses}{item.topicHours?` toward ~${item.topicHours}h total`:""}</span>
+                              </div>
+                            )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                               <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{item.subject}</span>
                               <span style={{fontSize:10,color:d.t4}}>{item.weight==="H"?"● high weight":item.weight==="M"?"● medium weight":"● lower weight"}</span>
                               {item.durationMins&&<span style={{fontSize:10,color:d.a2,fontWeight:600}}>~{item.durationMins}min</span>}
-                              {item.totalPasses>1&&<span style={{fontSize:10,color:d.t4}} title={item.topicHours?`~${item.topicHours}h total for this topic`:undefined}>session {item.pass}/{item.totalPasses}{item.topicHours?` · ${item.topicHours}h total`:""}</span>}
                               {item._manual&&<span style={{fontSize:10,color:d.a1}}>+ added by you</span>}
                               {item._overdue&&!item._manual&&<span style={{fontSize:10,color:d.gold}}>carried over</span>}
                             </div>
