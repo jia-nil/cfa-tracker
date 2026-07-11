@@ -248,6 +248,13 @@ function renderMath(text) {
 // ── Utility functions ────────────────────────────────────────────────────────
 const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m":Math.floor(m/60)+"h"+(m%60>0?" "+m%60+"m":"");};
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
+// Single source of truth for "how much time is actually committed per day". Rounds UP to the
+// nearest 30 min (1.4h -> 1.5h) so a fractional target is never silently under-delivered — used
+// by the scheduler (generateRoadmap/packSessionsIntoDates) AND every place that displays the
+// daily commitment (onboarding, today's target), so the number shown always matches what
+// actually gets scheduled instead of the two drifting apart.
+const roundedDailyMins=h=>Math.max(30,Math.ceil(((h||2)*60)/30)*30);
+const roundedDailyHours=h=>roundedDailyMins(h)/60;
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 const dayName=dateStr=>new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'short'});;
 function addDays(dateStr,n){const d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
@@ -294,10 +301,11 @@ function allTopicsForLevel(level){
 // to its real time budget (hours/day) instead of a flat item-count cap. This is what makes a
 // heavy topic correctly spread across multiple days instead of being crammed into one.
 function packSessionsIntoDates(sessionPool,dates,dailyHours){
-  // Same rounding as the session-sizing step: commit to the daily target rounded UP to the
-  // nearest half hour, so this budget always lines up exactly with SESSION_BLOCK_MINS (30 or 60)
-  // and every day fills to the same, predictable total with nothing left over.
-  const dailyBudgetMins=Math.max(30,Math.ceil((dailyHours||2)*60/30)*30);
+  // Same rounding as the session-sizing step (shared roundedDailyMins helper): commit to the
+  // daily target rounded UP to the nearest half hour, so this budget always lines up exactly
+  // with SESSION_BLOCK_MINS (30 or 60) and every day fills to the same, predictable total with
+  // nothing left over.
+  const dailyBudgetMins=roundedDailyMins(dailyHours);
   const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
   if(assignments.length===0) return assignments;
   let poolIdx=0,dayIdx=0,safety=0;
@@ -386,20 +394,19 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   // into 30-min sessions, not force a full 60-min block onto a day that only has 30 min in it
   // (which used to silently blow the daily budget on the very first item every day, and made
   // topics rack up passes far faster than the user's real pace).
-  const dailyBudgetForSizing=Math.max(15,(dailyHours||2)*60);
   // Round the daily commitment UP to the nearest half hour (1.4h/day -> a real 90min/day, not a
   // silently-capped 60min/day) so the plan never quietly under-schedules a fractional target.
   // Any resulting slight overshoot in pace just means the syllabus finishes a little early,
   // leaving genuine rest days before the exam — the safe direction to round, vs. permanently
   // losing the same chunk of time every day forever (which is what put a real user 60h behind).
-  const roundedDailyMins=Math.max(30,Math.ceil(dailyBudgetForSizing/30)*30);
+  const dailyCommitMins=roundedDailyMins(dailyHours);
   // Block size must divide evenly into the rounded daily commitment so every day hits that exact
   // total with a consistent, predictable shape — no "1h some days, 2h other days" variability,
   // no leftover minutes to lose. Use clean 60-min sessions when the day is a whole number of
   // hours (2h/day -> two 60-min sessions); otherwise drop to clean 30-min sessions so the day's
   // total still lands exactly on target (1.5h/day -> three 30-min sessions, not one lossy 60-min
   // one with 30min quietly dropped).
-  const SESSION_BLOCK_MINS=(roundedDailyMins%60===0)?60:30;
+  const SESSION_BLOCK_MINS=(dailyCommitMins%60===0)?60:30;
   const weightPoints={H:3,M:2,L:1};
   let sessionPool;
   if(remainingTopics){
@@ -476,7 +483,24 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   const totalPlannedHours=Math.round(scheduledMins/6)/10;
   const droppedSessions=assignments.unscheduledCount||0;
   const droppedHours=droppedSessions>0?Math.round(sessionPool.slice(scheduledCount).reduce((a,s)=>a+(s.durationMins||0),0)/6)/10:0;
-  return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:scheduledCount,perDaySessions,totalPlannedHours,droppedSessions,droppedHours};
+  // Trailing empty study days = genuine revision time. Rounding the daily commitment UP (see
+  // roundedDailyMins) means the fixed pool of topic-hours now gets consumed a bit faster than
+  // the raw pace, so it's normal and expected for the syllabus to run out before the exam date —
+  // those leftover days are real, earned revision/rest time, not a scheduling gap, so tag them
+  // rather than leaving them as blank, unlabeled cells.
+  let revisionDays=0;
+  for(let i=assignments.length-1;i>=0;i--){
+    if(assignments[i].items.length===0) revisionDays++;
+    else break;
+  }
+  const revisionStart=revisionDays>0?assignments[assignments.length-revisionDays].date:null;
+  // Mark every assignment so the calendar grid can label empty cells without recomputing this
+  // itself: "revision" for the trailing block (syllabus finished, time to review), "rest" for
+  // any rarer empty day earlier in the plan (e.g. a day every topic conflict skipped).
+  assignments.forEach(a=>{
+    if(a.items.length===0) a.dayType=(revisionStart&&a.date>=revisionStart)?"revision":"rest";
+  });
+  return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:scheduledCount,perDaySessions,totalPlannedHours,droppedSessions,droppedHours,revisionDays,revisionStart};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
 
@@ -1282,8 +1306,14 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
               if(studyDays.includes(jsDay)) studyDatesCount++;
             }
           }
-          const requiredPerDay=studyDatesCount>0?Math.round((recommended/studyDatesCount)*10)/10:null;
-          const requiredPerWeek=daysUntilExam?Math.round((recommended/(daysUntilExam/7))*10)/10:null;
+          const requiredPerDayRaw=studyDatesCount>0?Math.round((recommended/studyDatesCount)*10)/10:null;
+          // Round UP to the nearest half hour — this must match roundedDailyHours() exactly, since
+          // this is the number the roadmap actually gets built at. Showing "1.4h" here and then
+          // quietly scheduling 1.5h behind the scenes was confusing (and the raw 1.4h figure was
+          // never actually achievable in whole session blocks anyway).
+          const requiredPerDay=requiredPerDayRaw!==null?roundedDailyHours(requiredPerDayRaw):null;
+          const requiredPerWeekRaw=daysUntilExam?Math.round((recommended/(daysUntilExam/7))*10)/10:null;
+          const requiredPerWeek=requiredPerDay!==null&&studyDatesCount>0?Math.round(requiredPerDay*(studyDatesCount/(daysUntilExam/7))*10)/10:requiredPerWeekRaw;
           const feasible=requiredPerDay!==null&&requiredPerDay<=5; // beyond ~5h/study-day is unrealistic for most people
 
           return(
@@ -2117,7 +2147,6 @@ function App(){
   // Help & Feedback form — email pre-filled from the logged-in account but editable, since some
   // people prefer to be contacted somewhere else than their sign-in email.
   const [feedbackCategory,setFeedbackCategory]=useState("bug");
-  const [feedbackEmail,setFeedbackEmail]=useState("");
   const [feedbackMessage,setFeedbackMessage]=useState("");
   const [feedbackSubmitting,setFeedbackSubmitting]=useState(false);
   const [feedbackSubmitted,setFeedbackSubmitted]=useState(false);
@@ -3289,7 +3318,7 @@ function App(){
               const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
               const todayMins=sessions.filter(s=>s.date===today()).reduce((a,s)=>a+(s.duration||0),0);
               const isStudyDayToday=(studyDays||[]).includes(weekdayIndex(today()));
-              const todayTargetMins=isStudyDayToday?Math.round((dailyStudyHours||0)*60):0;
+              const todayTargetMins=isStudyDayToday?roundedDailyMins(dailyStudyHours):0;
               const todayRemainingMins=Math.max(0,todayTargetMins-todayMins);
 
               // Today's items from roadmap
@@ -3395,7 +3424,7 @@ function App(){
                   {roadmap?.droppedSessions>0&&(
                     <div style={{padding:"12px 16px",borderRadius:10,background:d.gold+"10",border:`1px solid ${d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                       <div style={{flex:1,minWidth:200}}>
-                        {`⚠️ even the leaner roadmap doesn't fit your exam date at ${dailyStudyHours}h/day — ~${roadmap.droppedHours}h of lower-priority material (${roadmap.droppedSessions} session${roadmap.droppedSessions!==1?"s":""}) had to be left off the calendar rather than overload any single day. push out your exam date or raise your daily hours to cover it.`}
+                        {`⚠️ even the leaner roadmap doesn't fit your exam date at ${roundedDailyHours(dailyStudyHours)}h/day — ~${roadmap.droppedHours}h of lower-priority material (${roadmap.droppedSessions} session${roadmap.droppedSessions!==1?"s":""}) had to be left off the calendar rather than overload any single day. push out your exam date or raise your daily hours to cover it.`}
                       </div>
                     </div>
                   )}
@@ -4743,7 +4772,6 @@ function App(){
                 setFeedbackError("");
                 const msg=feedbackMessage.trim();
                 if(msg.length<5){setFeedbackError("say a little more so we know what happened");return;}
-                const email=(feedbackEmail||user?.email||"").trim();
                 setFeedbackSubmitting(true);
                 try{
                   const res=await fetch(`${SB_URL}/rest/v1/user_feedback`,{
@@ -4751,7 +4779,9 @@ function App(){
                     headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||SB_ANON}`,"Content-Type":"application/json","Prefer":"return=minimal"},
                     body:JSON.stringify({
                       user_id:user?.id||null,
-                      email,
+                      // Quietly captured from the account if logged in — there's no support inbox
+                      // to reply from yet, so we don't ask for or promise to use an email here.
+                      email:user?.email||null,
                       category:feedbackCategory,
                       message:msg,
                       // Context that's genuinely useful for triaging a bug report, sent quietly —
@@ -4779,7 +4809,7 @@ function App(){
                     <div style={{padding:"20px 16px",borderRadius:10,background:d.a2+"12",border:`1px solid ${d.a2}30`,textAlign:"center"}}>
                       <div style={{fontSize:24,marginBottom:8}}>✅</div>
                       <div style={{fontSize:13.5,fontWeight:700,color:d.t,marginBottom:4}}>thanks — got it.</div>
-                      <div style={{fontSize:12,color:d.t3,marginBottom:14}}>we'll follow up at {feedbackEmail||user?.email||"your email"} if we need more details.</div>
+                      <div style={{fontSize:12,color:d.t3,marginBottom:14}}>logged and reviewed — we can't reply individually right now, but this genuinely shapes what gets fixed and built next.</div>
                       <button onClick={()=>setFeedbackSubmitted(false)}
                         style={{padding:"7px 16px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
                         send another
@@ -4800,12 +4830,6 @@ function App(){
                             </div>
                           ))}
                         </div>
-                      </div>
-
-                      <div className="field">
-                        <label className="fl">Your email {user?.email?"(so we can follow up)":"(so we can follow up — optional)"}</label>
-                        <input className="inp" type="email" placeholder={user?.email||"you@email.com"}
-                          value={feedbackEmail} onChange={e=>setFeedbackEmail(e.target.value)}/>
                       </div>
 
                       <div className="field">
@@ -5441,7 +5465,7 @@ function App(){
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
                     <div>
                       <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>your roadmap</div>
-                      <div style={{fontSize:12,color:d.t3}}>{roadmap.totalDays} days · {roadmap.weeks?.length||0} study weeks · last {roadmap.revisionDays} days = revision</div>
+                      <div style={{fontSize:12,color:d.t3}}>{roadmap.totalDays} days · {roadmap.weeks?.length||0} study weeks{roadmap.revisionDays>0?` · last ${roadmap.revisionDays} day${roadmap.revisionDays!==1?"s":""} = revision`:""}</div>
                     </div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       {[
@@ -5477,7 +5501,11 @@ function App(){
                             return(
                             <div key={dd.date} style={{background:d.card,padding:"10px 10px",minHeight:80}}>
                               <div style={{fontSize:10,fontWeight:700,color:d.t3,marginBottom:6}}>{dayName(dd.date)} <span style={{color:d.t4}}>{dd.date.slice(5)}</span>{dayMins>0&&<span style={{color:d.a2,fontWeight:600}}> · {fmt(dayMins)}</span>}</div>
-                              {dd.items.map((item,i)=>{
+                              {dd.items.length===0?(
+                                <div style={{fontSize:10,color:dd.dayType==="revision"?d.gold:d.t4,fontStyle:"italic",padding:"3px 6px"}}>
+                                  {dd.dayType==="revision"?"revision — syllabus done, review time":"rest day"}
+                                </div>
+                              ):dd.items.map((item,i)=>{
                                 const key=itemKey(dd.date,item);
                                 const done=roadmapDone[key];
                                 return(
