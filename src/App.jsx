@@ -438,17 +438,6 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:sessionPool.length,perDaySessions,totalPlannedHours};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
-// The scheduler internally splits a topic into many small time-blocks so it can fit correctly
-// into each day's real hour budget (a big topic like FSA can legitimately need 20-30 short
-// blocks spread across many weeks) — but showing a student "session 9 of 27" is confusing and
-// reads like something is broken. This maps that internal block count down to a simple,
-// human-facing progress fraction capped at 3 parts (e.g. "(2/3)"), regardless of how many real
-// blocks it took to get there.
-function displayPass(pass,totalPasses){
-  const displayTotal=Math.min(3,totalPasses);
-  const displayPassNum=Math.min(displayTotal,Math.max(1,Math.ceil((pass/totalPasses)*displayTotal)));
-  return {p:displayPassNum,t:displayTotal};
-}
 
 // Adaptive roadmap: figure out what's overdue and redistribute forward
 function computeAdaptiveRoadmap({roadmap,roadmapDone,level,examDate,studyDays,answers}){
@@ -3362,14 +3351,13 @@ function App(){
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3,flexWrap:"wrap"}}>
                               <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{item.topic}</div>
-                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({displayPass(item.pass,item.totalPasses).p}/{displayPass(item.pass,item.totalPasses).t})</div>}
                             </div>
                             {item.totalPasses>1&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>part {displayPass(item.pass,item.totalPasses).p} of {displayPass(item.pass,item.totalPasses).t}{item.topicHours?` · ~${item.topicHours}h total for this topic`:""}</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>{item.topicHours?`~${Math.round((item.pass*(item.durationMins||60)/60)*10)/10}h of ~${item.topicHours}h logged for this topic`:`session ${item.pass} of ${item.totalPasses} for this topic`}</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -5282,7 +5270,7 @@ function App(){
                                 return(
                                   <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
                                     style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({displayPass(item.pass,item.totalPasses).p}/{displayPass(item.pass,item.totalPasses).t})</span>}
+                                    {item.topic}{item.durationMins&&<span style={{color:done?d.t4:d.t3}}> · {item.durationMins}m</span>}
                                   </div>
                                 );
                               })}
