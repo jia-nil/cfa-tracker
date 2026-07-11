@@ -438,6 +438,17 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:sessionPool.length,perDaySessions,totalPlannedHours};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
+// The scheduler internally splits a topic into many small time-blocks so it can fit correctly
+// into each day's real hour budget (a big topic like FSA can legitimately need 20-30 short
+// blocks spread across many weeks) — but showing a student "session 9 of 27" is confusing and
+// reads like something is broken. This maps that internal block count down to a simple,
+// human-facing progress fraction capped at 3 parts (e.g. "(2/3)"), regardless of how many real
+// blocks it took to get there.
+function displayPass(pass,totalPasses){
+  const displayTotal=Math.min(3,totalPasses);
+  const displayPassNum=Math.min(displayTotal,Math.max(1,Math.ceil((pass/totalPasses)*displayTotal)));
+  return {p:displayPassNum,t:displayTotal};
+}
 
 // Adaptive roadmap: figure out what's overdue and redistribute forward
 function computeAdaptiveRoadmap({roadmap,roadmapDone,level,examDate,studyDays,answers}){
@@ -608,7 +619,7 @@ const CFA_EXAM_WINDOWS = {
     {id:"2027-08",label:"August 2027",start:"2027-08-12",end:"2027-08-16"},
   ],
 };
-const CFA_RECOMMENDED_HOURS = {L1:360, L2:328, L3:344}; // L1 = sum of subject-level candidate-survey hour budgets below; L2/L3 = CFA Institute candidate survey averages
+const CFA_RECOMMENDED_HOURS = {L1:300, L2:300, L3:300}; // per CFA Institute's own guidance: "successful candidates report spending over 300 hours on average preparing for each level" (cfainstitute.org)
 
 const TOPICS = {
   Ethics:{
@@ -699,11 +710,13 @@ const TOPIC_WEIGHT_RANGES = {
 // but eats 50-70 hours because of its sheer volume/complexity). This is what the roadmap's pass
 // counts were missing entirely — a topic's session count now reflects real hours needed, not
 // just a flat H/M/L multiplier. Midpoints of each range are used as the working budget.
+// Subject-level hour budgets for L1, scaled so they sum to the 300h target (CFA Institute's
+// published guidance) while preserving the same relative split between subjects.
 const SUBJECT_HOURS = {
   L1: {
-    "Fin. Reporting":60, "Fixed Income":52.5, Equity:47.5, Quantitative:45,
-    Ethics:40, "Corp. Issuers":30, "Portfolio Mgmt":25, Economics:25,
-    "Alt. Investments":17.5, Derivatives:17.5,
+    "Fin. Reporting":50, "Fixed Income":43.75, Equity:39.6, Quantitative:37.5,
+    Ethics:33.3, "Corp. Issuers":25, "Portfolio Mgmt":20.85, Economics:20.85,
+    "Alt. Investments":14.6, Derivatives:14.6,
   },
 };
 // L2/L3 don't have the same precise candidate-survey hour breakdowns available, so approximate
@@ -1574,6 +1587,11 @@ function App(){
   const [roadmapFocusMode,setRoadmapFocusMode]=useState(()=>{try{return localStorage.getItem("nev_focus_mode")||"full";}catch(e){return "full";}});
   useEffect(()=>{try{localStorage.setItem("nev_focus_mode",roadmapFocusMode);}catch(e){}},[roadmapFocusMode]);
   const [examSetupDone,setExamSetupDone]=useState(()=>{try{return localStorage.getItem("nev_exam_setup_done")==="1";}catch(e){return false;}});
+  // True while we're still waiting to hear back from the server about this account's saved
+  // setup — without this, a brand-new session (no localStorage yet, e.g. incognito) renders
+  // the onboarding/roadmap screens immediately on the first frame, before the fetch below has
+  // any chance to say "actually, this account already has a saved setup."
+  const [prefsLoading,setPrefsLoading]=useState(()=>!!(authSession?.access_token&&user?.id));
   useEffect(()=>{try{if(examWindow)localStorage.setItem("nev_exam_window",examWindow);}catch(e){}},[examWindow]);
   useEffect(()=>{try{localStorage.setItem("nev_study_days",JSON.stringify(studyDays));}catch(e){}},[studyDays]);
   useEffect(()=>{try{if(eduStatus)localStorage.setItem("nev_edu_status",eduStatus);}catch(e){}},[eduStatus]);
@@ -1716,6 +1734,7 @@ function App(){
   function saveRoadmapAnswers(ans){
     setRoadmapAnswers(ans);
     try{localStorage.setItem("nev_roadmap_answers",JSON.stringify(ans));}catch(e){}
+    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,roadmap_answers:ans})}).catch(()=>{});
   }
   // ── Planner / Roadmap completion state ───────────────────────────────────
   const [roadmapDone,setRoadmapDone]=useState(()=>{try{const c=localStorage.getItem("nev_roadmap_done");return c?JSON.parse(c):{};}catch(e){return {};}});
@@ -2078,6 +2097,12 @@ function App(){
   const [timerSub,setTimerSub]=useState("Ethics");
   const [timerTopic,setTimerTopic]=useState("");
   const [timerNotes,setTimerNotes]=useState("");
+  const [manualSub,setManualSub]=useState("Ethics");
+  const [manualTopic,setManualTopic]=useState("");
+  const [manualMins,setManualMins]=useState("");
+  const [manualDate,setManualDate]=useState(()=>today());
+  const [manualNotes,setManualNotes]=useState("");
+  const [manualSaved,setManualSaved]=useState(false);
   const [fullscreen,setFullscreen]=useState(false);
   const [timerDone,setTimerDone]=useState(false);
   const timerRef=useRef(null);
@@ -2236,7 +2261,8 @@ function App(){
   // Load from Supabase on login — Supabase is always the source of truth,
   // never gated on localStorage (that was the cause of data bleeding between accounts)
   useEffect(()=>{
-    if(!authSession?.access_token||!user?.id)return;
+    if(!authSession?.access_token||!user?.id){setPrefsLoading(false);return;}
+    setPrefsLoading(true);
     const token=authSession.access_token, uid=user.id;
     // Merge server data in rather than blindly overwriting — a failed fetch (null) or a
     // suspicious empty response while we already have local data (e.g. an RLS policy silently
@@ -2281,12 +2307,13 @@ function App(){
         if(row.study_days){setStudyDays(row.study_days);try{localStorage.setItem("nev_study_days",JSON.stringify(row.study_days));}catch(e){}}
         if(row.target_hours){setTargetHours(row.target_hours);try{localStorage.setItem("nev_target_hours",String(row.target_hours));}catch(e){}}
         if(row.daily_hours){setDailyStudyHours(row.daily_hours);try{localStorage.setItem("nev_daily_hours",String(row.daily_hours));}catch(e){}}
+        if(row.roadmap_answers){setRoadmapAnswers(row.roadmap_answers);try{localStorage.setItem("nev_roadmap_answers",JSON.stringify(row.roadmap_answers));}catch(e){}}
         if(row.je_class&&row.exam_window){
           // Setup is complete — mark done so we don't show the setup screen again
           setExamSetupDone(true);
           try{localStorage.setItem("nev_exam_setup_done","1");}catch(e){}
         }
-      }).catch(()=>{});
+      }).catch(()=>{}).finally(()=>setPrefsLoading(false));
   },[authSession?.access_token,user?.id]);
   useEffect(()=>{
     setGoals(prev=>prev.map(g=>{
@@ -2382,6 +2409,19 @@ function App(){
   }
   function resetTimer(){setTimerOn(false);setTimerSec(0);timerSecRef.current=0;setCountdownSec(countdownSet*60);setTimerDone(false);}
   function applyCustom(){const m=parseInt(customMins);if(m>0&&m<=600){setCountdownSet(m);setCountdownSec(m*60);setCustomMins("");};}
+  function logManualSession(){
+    const mins=Math.round(parseFloat(manualMins));
+    if(!mins||mins<=0||mins>600)return;
+    const entry={id:Date.now(),subject:manualSub,topic:manualTopic||"General",duration:mins,date:manualDate||today(),notes:manualNotes||"Manually logged"};
+    setSessions(p=>[...p,entry]);
+    if(manualTopic)markStudied(manualSub,manualTopic);
+    if(authSession?.access_token&&user?.id){
+      fetch(`${SB_URL}/rest/v1/user_sessions`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json"},body:JSON.stringify({user_id:user.id,data:entry})}).catch(()=>{});
+    }
+    setManualMins("");setManualNotes("");
+    setManualSaved(true);
+    setTimeout(()=>setManualSaved(false),2500);
+  }
 
   async function togglePrivacy(){
     if(!user?.id)return;
@@ -2811,6 +2851,11 @@ function App(){
   // ── Exam Setup flow — runs once after level is picked ────────────────────
   // ExamSetupDone is false if: brand new user, OR returning user with stale JEE class (dropper/11th/12th)
   const needsSetup = !examSetupDone || !jeClass || !CLASSES.find(c=>c.id===jeClass);
+  if(prefsLoading) return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:d.bg,color:d.t3,fontSize:13,fontFamily:"inherit"}}>
+      loading your account…
+    </div>
+  );
   if(needsSetup) return(
     <ExamSetupScreen
       d={d}
@@ -2906,6 +2951,7 @@ function App(){
   const renderTimer=()=>{
     const isCD=timerMode==="countdown";
     return(
+      <>
       <div className="card cp">
         <div className="mode-tab">
           <button className={"mode-opt"+(timerMode==="stopwatch"?" active":"")} onClick={()=>{if(!timerOn){setTimerMode("stopwatch");resetTimer();}}}>⏱ Stopwatch</button>
@@ -2982,14 +3028,37 @@ function App(){
           )}
         </div>
         <button className="btn btn-full" style={{background:d.tag,border:`1px solid ${d.b}`,color:d.t3,fontSize:12,marginTop:7}} onClick={()=>setFullscreen(true)}>⛶ go fullscreen</button>
-        <div style={{marginTop:7,display:"flex",gap:7,alignItems:"center"}}>
-          <button onClick={openCamera} style={{flex:1,padding:"8px",borderRadius:3,background:d.hover,border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontFamily:"inherit",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            📷 {postCapture?"photo ready ✓":"attach photo"}
-          </button>
-          {postCapture&&<button onClick={()=>setPostCapture(null)} style={{padding:"8px 10px",borderRadius:3,background:"transparent",border:`1px solid ${d.b}`,color:d.t3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>×</button>}
-        </div>
       </div>
-    );
+      {/* ── Manual session logging — for sessions you did without the timer open ── */}
+      <div className="card cp" style={{marginTop:10}}>
+        <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:10}}>log a session manually</div>
+        <div className="field">
+          <label className="fl">subject</label>
+          <Select value={manualSub} onChange={v=>{setManualSub(v);setManualTopic("");}} options={Object.keys(SUBJECT_COLORS)} d={d}/>
+        </div>
+        <div className="field">
+          <label className="fl">topic</label>
+          <Select value={manualTopic} onChange={setManualTopic} options={[{value:"",label:"General Study"},...classTopics(manualSub).map(t=>({value:t,label:t}))]} d={d}/>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <div className="field" style={{flex:1}}>
+            <label className="fl">minutes</label>
+            <input className="inp" type="number" min="1" max="600" placeholder="e.g. 45" value={manualMins} onChange={e=>setManualMins(e.target.value)}/>
+          </div>
+          <div className="field" style={{flex:1}}>
+            <label className="fl">date</label>
+            <input className="inp" type="date" value={manualDate} max={today()} onChange={e=>setManualDate(e.target.value)}/>
+          </div>
+        </div>
+        <div className="field">
+          <label className="fl">notes (optional)</label>
+          <input className="inp" placeholder="what did you cover." value={manualNotes} onChange={e=>setManualNotes(e.target.value)}/>
+        </div>
+        <button className="btn btn-full" style={{background:d.a1,color:"#fff"}} disabled={!manualMins||parseFloat(manualMins)<=0} onClick={logManualSession}>+ log session</button>
+        {manualSaved&&<div style={{textAlign:"center",fontSize:12,color:d.a2,marginTop:8,fontWeight:500}}>logged. nice work.</div>}
+      </div>
+      </>
+  );
   };
 
   // ── Main render ───────────────────────────────────────────────────────────
@@ -3138,6 +3207,9 @@ function App(){
               const pct=Math.min(100,Math.round((totalHrs/targetHrs)*100));
               const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
               const todayMins=sessions.filter(s=>s.date===today()).reduce((a,s)=>a+(s.duration||0),0);
+              const isStudyDayToday=(studyDays||[]).includes(weekdayIndex(today()));
+              const todayTargetMins=isStudyDayToday?Math.round((dailyStudyHours||0)*60):0;
+              const todayRemainingMins=Math.max(0,todayTargetMins-todayMins);
 
               // Today's items from roadmap
               const todayRoadmap=roadmapTodayItems;
@@ -3193,6 +3265,24 @@ function App(){
                       </div>
                     </div>
                   </div>
+
+                  {/* ── Today's target ── */}
+                  {isStudyDayToday&&todayTargetMins>0&&(
+                    <div style={{padding:"14px 16px",borderRadius:12,background:d.card,border:`1px solid ${d.b}`,marginBottom:16,display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:160}}>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:d.t4,marginBottom:4}}>today's target</div>
+                        <div style={{fontSize:18,fontWeight:700,color:d.t}}>{fmt(todayMins)} <span style={{color:d.t3,fontWeight:400}}>of {fmt(todayTargetMins)}</span></div>
+                      </div>
+                      <div style={{flex:1,minWidth:120}}>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${Math.min(100,Math.round((todayMins/todayTargetMins)*100))}%`,background:todayRemainingMins===0?d.a2:d.a1,borderRadius:3,transition:"width .3s"}}/>
+                        </div>
+                        <div style={{fontSize:11.5,color:todayRemainingMins===0?d.a2:d.t3,marginTop:6,fontStyle:"italic"}}>
+                          {todayRemainingMins===0?"target hit for today. good.":`${fmt(todayRemainingMins)} left to hit today's target.`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* ── Today's study plan ── */}
                   <div style={{marginBottom:20}}>
@@ -3272,14 +3362,14 @@ function App(){
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3,flexWrap:"wrap"}}>
                               <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{item.topic}</div>
-                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({item.pass}/{item.totalPasses})</div>}
+                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({displayPass(item.pass,item.totalPasses).p}/{displayPass(item.pass,item.totalPasses).t})</div>}
                             </div>
                             {item.totalPasses>1&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>session {item.pass} of {item.totalPasses}{item.topicHours?` toward ~${item.topicHours}h total`:""}</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>part {displayPass(item.pass,item.totalPasses).p} of {displayPass(item.pass,item.totalPasses).t}{item.topicHours?` · ~${item.topicHours}h total for this topic`:""}</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -5192,7 +5282,7 @@ function App(){
                                 return(
                                   <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
                                     style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({item.pass}/{item.totalPasses})</span>}
+                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({displayPass(item.pass,item.totalPasses).p}/{displayPass(item.pass,item.totalPasses).t})</span>}
                                   </div>
                                 );
                               })}
