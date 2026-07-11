@@ -399,7 +399,7 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
         else if(doneTopicSet.has(key)) topicHours*=0.6;
         const blocks=Math.max(1,Math.round((topicHours*60)/SESSION_BLOCK_MINS));
         for(let p=0;p<blocks;p++){
-          subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours*10)/10});
+          subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours)});
         }
       });
     });
@@ -2396,6 +2396,22 @@ function App(){
     setTimerSec(0);
     timerSecRef.current=0;
   }
+  // Called from the "start" button on a roadmap item in Overview — jumps to Sessions,
+  // prefills subject/topic, and immediately starts a countdown for this item's scheduled
+  // duration. This was previously called but never defined, so the button silently did nothing.
+  function startTimer(item){
+    if(timerOn)return;
+    setTab("sessions");
+    setTimerSub(item.subject);
+    setTimerTopic(item.topic);
+    setTimerNotes("");
+    setTimerMode("countdown");
+    const mins=Math.max(1,Math.round(item.durationMins||countdownSet));
+    setCountdownSet(mins);
+    setCountdownSec(mins*60);
+    setTimerDone(false);
+    setTimerOn(true);
+  }
   function resetTimer(){setTimerOn(false);setTimerSec(0);timerSecRef.current=0;setCountdownSec(countdownSet*60);setTimerDone(false);}
   function applyCustom(){const m=parseInt(customMins);if(m>0&&m<=600){setCountdownSet(m);setCountdownSec(m*60);setCustomMins("");};}
   function logManualSession(){
@@ -3351,13 +3367,14 @@ function App(){
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3,flexWrap:"wrap"}}>
                               <div style={{fontSize:13.5,fontWeight:600,color:done?d.t3:d.t,textDecoration:done?"line-through":"none"}}>{item.topic}</div>
+                              {item.totalPasses>1&&<div style={{fontSize:11.5,fontWeight:800,color:d.a1,flexShrink:0}}>({item.pass}/{item.totalPasses})</div>}
                             </div>
                             {item.totalPasses>1&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>{item.topicHours?`~${Math.round((item.pass*(item.durationMins||60)/60)*10)/10}h of ~${item.topicHours}h logged for this topic`:`session ${item.pass} of ${item.totalPasses} for this topic`}</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>{item.topicHours?`~${item.topicHours}h total for this topic`:`session ${item.pass} of ${item.totalPasses}`}</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -5270,7 +5287,7 @@ function App(){
                                 return(
                                   <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
                                     style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {item.topic}{item.durationMins&&<span style={{color:done?d.t4:d.t3}}> · {item.durationMins}m</span>}
+                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({item.pass}/{item.totalPasses})</span>}
                                   </div>
                                 );
                               })}
