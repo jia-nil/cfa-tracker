@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -311,8 +312,15 @@ function packSessionsIntoDates(sessionPool,dates,dailyHours){
       slot.usedMins+=item.durationMins;
       slot.topicKeys.add(topicKey);
       poolIdx++;
+      // Stay on THIS day and keep packing — only move to the next day once it's actually full.
+      // Advancing dayIdx unconditionally here (the old bug) meant every day got only its first
+      // item on the initial pass through the calendar; a day's 2nd/3rd item only got filled in
+      // after the pointer had already wrapped all the way around every study date once, by which
+      // point poolIdx had raced far ahead — so "today" (day 1) could end up showing pass 6 of a
+      // topic as its second session, as if 5 earlier passes had already happened.
+    }else{
+      dayIdx++;
     }
-    dayIdx++;
     safety++;
   }
   // Genuine shortfall: more content than the study window can hold even at full capacity every
