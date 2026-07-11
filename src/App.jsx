@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -366,42 +368,51 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   // hours — that can't be represented as "3 sessions").
   const SESSION_BLOCK_MINS=60;
   const weightPoints={H:3,M:2,L:1};
-  const bySubject={};
-  topics.forEach(t=>{
-    if(!bySubject[t.subject]) bySubject[t.subject]=[];
-    bySubject[t.subject].push(t);
-  });
-  const subjectPools={};
-  Object.entries(bySubject).forEach(([subject,subTopics])=>{
-    let subjectHours=subjectHoursFor(level,subject);
-    if(weakSet.has(subject)) subjectHours*=1.2; // weak subject — budget more time
-    const totalPoints=subTopics.reduce((a,t)=>a+(weightPoints[t.weight]||1),0)||1;
-    subjectPools[subject]=[];
-    subTopics.forEach(t=>{
-      const key=t.subject+"|"+t.topic;
-      let topicHours=subjectHours*((weightPoints[t.weight]||1)/totalPoints);
-      if(weakTopicSet.has(key)) topicHours*=1.3;
-      if(strongTopicSet.has(key)) topicHours*=0.5;
-      else if(doneTopicSet.has(key)) topicHours*=0.6;
-      const blocks=Math.max(1,Math.round((topicHours*60)/SESSION_BLOCK_MINS));
-      for(let p=0;p<blocks;p++){
-        subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours*10)/10});
-      }
+  let sessionPool;
+  if(remainingTopics){
+    // Redistribution (backlog catch-up / windowed rebalance): these are already fully-formed
+    // session instances from the original generation — just repack them into new dates,
+    // don't recompute pass numbers or they'll no longer correctly reflect "is this the last
+    // pass of this topic", which is what marks a topic done in the syllabus.
+    sessionPool=topics;
+  }else{
+    const bySubject={};
+    topics.forEach(t=>{
+      if(!bySubject[t.subject]) bySubject[t.subject]=[];
+      bySubject[t.subject].push(t);
     });
-  });
-  // Interleave across subjects (one block per subject per round) instead of one giant block per
-  // subject — spaced/interleaved practice beats grinding one subject for weeks straight.
-  const sessionPool=[];
-  const subjectNames=Object.keys(subjectPools);
-  let anyLeft=true;
-  while(anyLeft){
-    anyLeft=false;
-    subjectNames.forEach(subject=>{
-      if(subjectPools[subject].length>0){
-        sessionPool.push(subjectPools[subject].shift());
-        anyLeft=true;
-      }
+    const subjectPools={};
+    Object.entries(bySubject).forEach(([subject,subTopics])=>{
+      let subjectHours=subjectHoursFor(level,subject);
+      if(weakSet.has(subject)) subjectHours*=1.2; // weak subject — budget more time
+      const totalPoints=subTopics.reduce((a,t)=>a+(weightPoints[t.weight]||1),0)||1;
+      subjectPools[subject]=[];
+      subTopics.forEach(t=>{
+        const key=t.subject+"|"+t.topic;
+        let topicHours=subjectHours*((weightPoints[t.weight]||1)/totalPoints);
+        if(weakTopicSet.has(key)) topicHours*=1.3;
+        if(strongTopicSet.has(key)) topicHours*=0.5;
+        else if(doneTopicSet.has(key)) topicHours*=0.6;
+        const blocks=Math.max(1,Math.round((topicHours*60)/SESSION_BLOCK_MINS));
+        for(let p=0;p<blocks;p++){
+          subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours*10)/10});
+        }
+      });
     });
+    // Interleave across subjects (one block per subject per round) instead of one giant block per
+    // subject — spaced/interleaved practice beats grinding one subject for weeks straight.
+    sessionPool=[];
+    const subjectNames=Object.keys(subjectPools);
+    let anyLeft=true;
+    while(anyLeft){
+      anyLeft=false;
+      subjectNames.forEach(subject=>{
+        if(subjectPools[subject].length>0){
+          sessionPool.push(subjectPools[subject].shift());
+          anyLeft=true;
+        }
+      });
+    }
   }
 
   // ── Time-based day packing ────────────────────────────────────────────
@@ -1280,7 +1291,11 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
 
             {commitStep===2&&(<>
               <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>how much time do you actually have?</div>
-              <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.5}}>we'll build a leaner roadmap that only covers high-weight (and some medium-weight) topics — the highest-yield material — instead of the full syllabus, so it actually fits.</div>
+              <div style={{fontSize:13,color:d.t3,marginBottom:14,lineHeight:1.5}}>we'll build a leaner roadmap around this instead of the full syllabus.</div>
+              <div style={{padding:"12px 14px",borderRadius:10,background:d.gold+"12",border:`1px solid ${d.gold}40`,marginBottom:20,display:"flex",gap:10,alignItems:"flex-start"}}>
+                <span style={{fontSize:16,flexShrink:0}}>⚠️</span>
+                <div style={{fontSize:12,color:d.t2,lineHeight:1.5}}><b>low-weight chapters will be skipped entirely</b> — the roadmap will only schedule high (and some medium) weight topics, the highest-yield material for your score. you can still study the rest manually, it just won't be on your plan.</div>
+              </div>
               <div style={{fontSize:13,fontWeight:600,color:d.t,marginBottom:10}}>hours per study day</div>
               <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
                 {[0.5,1,1.5,2,3].map(h=>(
@@ -1310,9 +1325,8 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
 // ── Roadmap Questionnaire ─────────────────────────────────────────────────────
 function RoadmapQuestionnaire({d,jeClass,onSave}){
   const SUBS=Object.keys(TOPICS).filter(s=>(TOPICS[s][jeClass]||[]).length>0);
-  const [step,setStep]=useState(0); // 0=completed topics, 1=weekly hours, 2=weak areas
+  const [step,setStep]=useState(0); // 0=completed topics, 1=weak areas
   const [completedTopics,setCompletedTopics]=useState({});
-  const [weeklyHrs,setWeeklyHrs]=useState(null);
   const [weakAreas,setWeakAreas]=useState([]);
   const [expandedSub,setExpandedSub]=useState(SUBS[0]||null);
 
@@ -1332,7 +1346,7 @@ function RoadmapQuestionnaire({d,jeClass,onSave}){
       <div style={{width:"100%",maxWidth:520,margin:"auto",paddingBottom:40}}>
         <div style={{fontSize:12,color:d.t3,marginBottom:10,textAlign:"center"}}>a few quick questions before we build your roadmap — this is what makes it yours instead of a generic checklist.</div>
         <div style={{display:"flex",gap:4,marginBottom:24}}>
-          {[0,1,2].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
+          {[0,1].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
         </div>
 
         {step===0&&(
@@ -1385,39 +1399,8 @@ function RoadmapQuestionnaire({d,jeClass,onSave}){
           </div>
         )}
 
-        {step===1&&(
-          <div>
-            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>how many hours can you study this week?</div>
-            <div style={{fontSize:13,color:d.t3,marginBottom:24}}>be honest. we'll plan around your actual availability, not your ideal self.</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:24}}>
-              {[
-                {h:5,label:"5h/week",sub:"~1h/day, 5 days"},
-                {h:10,label:"10h/week",sub:"~2h/day, 5 days"},
-                {h:15,label:"15h/week",sub:"~3h/day, 5 days"},
-                {h:20,label:"20h/week",sub:"~4h/day, 5 days"},
-                {h:25,label:"25h/week",sub:"serious mode"},
-                {h:30,label:"30h+/week",sub:"full-time prep"},
-              ].map(opt=>(
-                <div key={opt.h} onClick={()=>setWeeklyHrs(opt.h)}
-                  style={{padding:"16px",borderRadius:10,cursor:"pointer",textAlign:"center",transition:"all .15s",
-                    background:weeklyHrs===opt.h?d.a1+"18":d.card,
-                    border:`1.5px solid ${weeklyHrs===opt.h?d.a1:d.b}`}}>
-                  <div style={{fontSize:16,fontWeight:700,color:weeklyHrs===opt.h?d.a1:d.t,marginBottom:3}}>{opt.label}</div>
-                  <div style={{fontSize:11,color:d.t3}}>{opt.sub}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setStep(0)} style={{padding:"12px 18px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
-              <button disabled={!weeklyHrs} onClick={()=>setStep(2)}
-                style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:weeklyHrs?1:.4}}>
-                continue →
-              </button>
-            </div>
-          </div>
-        )}
 
-        {step===2&&(
+        {step===1&&(
           <div>
             <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:4,letterSpacing:"-.03em"}}>which areas feel weakest?</div>
             <div style={{fontSize:13,color:d.t3,marginBottom:20}}>we'll give these more repetition in your roadmap. pick any that apply.</div>
@@ -1439,8 +1422,8 @@ function RoadmapQuestionnaire({d,jeClass,onSave}){
               })}
             </div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setStep(1)} style={{padding:"12px 18px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
-              <button onClick={()=>onSave({completedTopics,weeklyHrs,weakAreas})}
+              <button onClick={()=>setStep(0)} style={{padding:"12px 18px",borderRadius:10,background:"transparent",color:d.t3,border:`1px solid ${d.b}`,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+              <button onClick={()=>onSave({completedTopics,weakAreas})}
                 style={{flex:1,padding:"13px",borderRadius:10,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>
                 build my roadmap →
               </button>
@@ -3898,8 +3881,11 @@ function App(){
                     return(
                       <div key={sub} style={{marginBottom:14}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:d.card,border:`1px solid ${d.b}`,borderLeft:`3px solid ${subColor}`,borderRadius:4,marginBottom:2,flexWrap:"wrap"}}>
-                          <div style={{fontSize:12,fontWeight:700,color:subColor,flex:1,minWidth:80}}>{sub}</div>
-                          <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length}</div>
+                          <div style={{display:"flex",alignItems:"baseline",gap:6,flex:1,minWidth:100}}>
+                            <div style={{fontSize:12,fontWeight:700,color:subColor}}>{sub}</div>
+                            <div style={{fontSize:9.5,color:d.t4,fontWeight:600}}>{TOPIC_WEIGHT_RANGES[sub]?.[jeClass]||"—"} of exam</div>
+                          </div>
+                          <div style={{fontSize:10,color:d.t3}}>{subDone}/{chapters.length} chapters</div>
                           <div style={{width:60,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                             <div style={{height:"100%",width:`${subPct}%`,background:subColor,borderRadius:2}}/>
                           </div>
@@ -5199,9 +5185,9 @@ function App(){
                                 const key=itemKey(dd.date,item);
                                 const done=roadmapDone[key];
                                 return(
-                                  <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)}
-                                    style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none"}}>
-                                    {item.topic}
+                                  <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
+                                    style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({item.pass}/{item.totalPasses})</span>}
                                   </div>
                                 );
                               })}
