@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -300,12 +299,23 @@ function allTopicsForLevel(level){
 // Packs a pool of {durationMins,...} session blocks into a list of dates, filling each date up
 // to its real time budget (hours/day) instead of a flat item-count cap. This is what makes a
 // heavy topic correctly spread across multiple days instead of being crammed into one.
+// Caps how many DIFFERENT topics can land on one day when the daily budget is small — splitting
+// a short day (e.g. 1.5h) across 4-5 unrelated topics in 30-min slivers hurts focus far more than
+// it helps; better to go deeper on fewer topics, even if that means a second block of the same
+// topic filling out the rest of the day.
+function maxTopicsPerDayFor(dailyHours){
+  const h=dailyHours||0;
+  if(h<3) return 2;
+  if(h<5) return 4;
+  return Infinity;
+}
 function packSessionsIntoDates(sessionPool,dates,dailyHours){
   // Same rounding as the session-sizing step (shared roundedDailyMins helper): commit to the
   // daily target rounded UP to the nearest half hour, so this budget always lines up exactly
   // with SESSION_BLOCK_MINS (30 or 60) and every day fills to the same, predictable total with
   // nothing left over.
   const dailyBudgetMins=roundedDailyMins(dailyHours);
+  const maxTopicsPerDay=maxTopicsPerDayFor(dailyHours);
   const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
   if(assignments.length===0) return assignments;
   let poolIdx=0,dayIdx=0,safety=0;
@@ -314,11 +324,16 @@ function packSessionsIntoDates(sessionPool,dates,dailyHours){
     const item=sessionPool[poolIdx];
     const topicKey=item.subject+"|"+item.topic;
     const fitsBudget=slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0;
-    // One pass of a given topic per day, max — otherwise two different passes of the same topic
-    // (e.g. pass 1 at "0.5h of 11h" and pass 8 at "4h of 11h") can both land on today's list with
-    // no indication they're different sessions, which just reads as the numbers not adding up.
-    const topicFree=!slot.topicKeys.has(topicKey);
-    if(fitsBudget&&topicFree){
+    const alreadyToday=slot.topicKeys.has(topicKey);
+    // Prefer one pass of a given topic per day (keeps different passes visually distinct in the
+    // "X of Yh" fraction) — UNLESS today has already hit its topic-variety cap, in which case a
+    // second block of a topic ALREADY scheduled today is exactly what should fill the remaining
+    // budget, rather than reaching for yet another new topic.
+    const underTopicCap=slot.topicKeys.size<maxTopicsPerDay;
+    // A topic already scheduled today is always allowed back in (fills remaining budget without
+    // adding variety); a brand-new topic only gets in while today is still under its cap.
+    const canTake=alreadyToday||underTopicCap;
+    if(fitsBudget&&canTake){
       slot.items.push(item);
       slot.usedMins+=item.durationMins;
       slot.topicKeys.add(topicKey);
@@ -1026,9 +1041,9 @@ c.push("*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}");
 c.push("body{background:"+d.bg+";font-family:'DM Sans',sans-serif;color:"+d.t+";-webkit-font-smoothing:antialiased;}");
 c.push("*{transition:background-color .18s,border-color .18s,color .12s;}");
 c.push("::-webkit-scrollbar{width:2px;} ::-webkit-scrollbar-thumb{background:"+d.b+";border-radius:1px;}");
-c.push(".layout{display:block;min-height:100vh;width:100%;background:"+d.bg+";}");
-c.push(".sidebar{width:"+SW+"px;min-height:100vh;background:"+d.sb+";border-right:1px solid "+d.b+";position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}");
-c.push(".content{margin-left:"+SW+"px;min-height:100vh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - "+SW+"px);}");
+c.push(".layout{display:block;min-height:100vh;min-height:100dvh;width:100%;background:"+d.bg+";}");
+c.push(".sidebar{width:"+SW+"px;min-height:100vh;min-height:100dvh;background:"+d.sb+";border-right:1px solid "+d.b+";position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:50;overflow:hidden;transition:transform .28s cubic-bezier(.16,1,.3,1),width .28s cubic-bezier(.16,1,.3,1);}");
+c.push(".content{margin-left:"+SW+"px;min-height:100vh;min-height:100dvh;overflow-x:hidden;box-sizing:border-box;width:calc(100vw - "+SW+"px);}");
 c.push(".inner{max-width:1060px;padding:32px 40px;width:100%;margin:0 auto;box-sizing:border-box;overflow-x:hidden;}");
 c.push("@media(min-width:1400px){.inner{padding:36px 60px;}.topbar{padding:0 60px;}}");
 c.push("@media(max-width:1100px){.inner{padding:28px 32px;}.topbar{padding:0 32px;}}");
@@ -1638,6 +1653,14 @@ function App(){
   const [dark,setDark]=useState(true);
   const [sideOpen,setSideOpen]=useState(()=>typeof window!=="undefined"&&window.innerWidth>900);
   const [tab,setTab]=useState("overview");
+  // Mobile Chrome occasionally miscalculates the layout viewport width right after an in-app
+  // (SPA) navigation onto a page short enough that it never needs to scroll — the page renders
+  // narrower than the actual screen until something forces a reflow. Nudging a resize event on
+  // every tab switch costs nothing and reliably forces that recalculation.
+  useEffect(()=>{
+    const id=setTimeout(()=>{try{window.dispatchEvent(new Event("resize"));}catch(e){}},50);
+    return ()=>clearTimeout(id);
+  },[tab]);
   const [jeClass,setJeClass]=useState(()=>{try{return localStorage.getItem("nev_class")||localStorage.getItem("slothr_class")||null;}catch(e){return null;}});
   // ── Exam setup state ─────────────────────────────────────────────────────
   const [examWindow,setExamWindow]=useState(()=>{try{return localStorage.getItem("nev_exam_window")||null;}catch(e){return null;}});
@@ -3981,7 +4004,7 @@ function App(){
 
             {/* ── SESSIONS ── */}
             {tab==="sessions"&&(
-              <div className="pin">
+              <div className="pin" style={{width:"100%",boxSizing:"border-box"}}>
                 <div style={{marginBottom:28}}>
                   <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-.02em",color:d.t,marginBottom:4,lineHeight:1.2}}>sessions.</div>
                   <div style={{fontSize:12,color:d.t3,fontStyle:"italic"}}>{sessions.length===0?"nothing yet.":`${sessions.length} session${sessions.length!==1?"s":""} · ${fmt(totalTime)} total. not bad.`}</div>
@@ -4853,11 +4876,6 @@ function App(){
                     </>
                   )}
                 </div>
-
-                <div className="card cp" style={{fontSize:12.5,color:d.t3,lineHeight:1.6}}>
-                  <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:8}}>Prefer email?</div>
-                  you can also just email us directly — same inbox, same team reading it.
-                </div>
               </div>
               );
             })()}
@@ -5650,7 +5668,7 @@ function App(){
               const finishBeforeExam=completionDate&&examDate?daysBetween(completionDate,examDate):null;
 
               return(
-                <div className="pin">
+                <div className="pin" style={{width:"100%",boxSizing:"border-box"}}>
                   <div style={{marginBottom:20}}>
                     <div style={{fontFamily:"'DM Serif Display',serif",fontSize:24,color:d.t,letterSpacing:"-.02em",marginBottom:4}}>weekly report</div>
                     <div style={{fontSize:12,color:d.t3}}>week of {thisWeekStart} — generated for you, every Sunday.</div>
