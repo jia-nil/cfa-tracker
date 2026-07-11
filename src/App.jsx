@@ -290,7 +290,29 @@ function allTopicsForLevel(level){
   const order={H:0,M:1,L:2};
   return out.sort((a,b)=>order[a.weight]-order[b.weight]);
 }
-function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance}){
+// Packs a pool of {durationMins,...} session blocks into a list of dates, filling each date up
+// to its real time budget (hours/day) instead of a flat item-count cap. This is what makes a
+// heavy topic correctly spread across multiple days instead of being crammed into one.
+function packSessionsIntoDates(sessionPool,dates,dailyHours){
+  const dailyBudgetMins=Math.max(30,(dailyHours||2)*60);
+  const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0}));
+  if(assignments.length===0) return assignments;
+  let poolIdx=0,dayIdx=0,safety=0;
+  while(poolIdx<sessionPool.length&&safety<sessionPool.length*4+2000){
+    const slot=assignments[dayIdx%assignments.length];
+    const item=sessionPool[poolIdx];
+    if(slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0){
+      slot.items.push(item);
+      slot.usedMins+=item.durationMins;
+      poolIdx++;
+    }
+    dayIdx++;
+    safety++;
+  }
+  while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;} // safety-net leftover
+  return assignments;
+}
+function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance,dailyHours}){
   // performance: live signal computed from actual mock scores / PYQ accuracy / syllabus status —
   // {weakSubjects:Set<subject>, weakTopics:Set<"sub|topic">, strongTopics:Set<"sub|topic">, doneTopics:Set<"sub|topic">}
   // This is what makes the plan personalised instead of one-size-fits-all: two students on the
@@ -316,36 +338,65 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   const doneTopicSet=performance?.doneTopics||new Set();
   const from=startDate||today();
   const totalDaysToExam=Math.max(1,daysBetween(from,examDate));
-  const revisionDays=Math.min(14,Math.max(5,Math.round(totalDaysToExam*0.12)));
-  const studyPhaseDays=Math.max(1,totalDaysToExam-revisionDays);
   const studyDates=[];
-  for(let i=0;i<studyPhaseDays;i++){
+  for(let i=0;i<totalDaysToExam;i++){
     const dt=addDays(from,i);
     if((studyDays||[]).includes(weekdayIndex(dt))) studyDates.push(dt);
   }
-  if(studyDates.length===0) return {weeks:[],totalDays:totalDaysToExam,revisionDays,noStudyDays:true};
-  const passesFor={H:3,M:2,L:1};
-  const sessionPool=[];
+  if(studyDates.length===0) return {weeks:[],totalDays:totalDaysToExam,noStudyDays:true};
+
+  // ── Time-based session sizing ──────────────────────────────────────────
+  // Each topic's session count is now derived from real study-hour budgets — a topic's fair
+  // share of its SUBJECT's candidate-survey hour range (not just exam weight %), split
+  // proportionally by weight among that subject's topics, then chunked into 60-min focus
+  // blocks. This replaces the old flat "H=3 passes, M=2, L=1" scheme, which had no connection
+  // to how long a topic actually takes (e.g. Fin. Reporting alone realistically needs 50-70
+  // hours — that can't be represented as "3 sessions").
+  const SESSION_BLOCK_MINS=60;
+  const weightPoints={H:3,M:2,L:1};
+  const bySubject={};
   topics.forEach(t=>{
-    const key=t.subject+"|"+t.topic;
-    let passes=passesFor[t.weight]||1;
-    if(weakSet.has(t.subject)) passes+=1;            // weak subject (questionnaire OR live mock average <65%)
-    if(weakTopicSet.has(key)) passes+=1;              // weak topic (live PYQ accuracy <60%, min 2 attempts)
-    if(strongTopicSet.has(key)) passes=Math.max(1,passes-1);      // proven strong on PYQs — trim to a light touch-up
-    else if(doneTopicSet.has(key)) passes=Math.max(1,passes-1);   // marked done but untested — one consolidation pass
-    for(let p=0;p<passes;p++) sessionPool.push({...t,pass:p+1,totalPasses:passes});
+    if(!bySubject[t.subject]) bySubject[t.subject]=[];
+    bySubject[t.subject].push(t);
   });
-  sessionPool.sort((a,b)=>a.pass-b.pass);
-  const perDaySessions=Math.max(1,Math.round(sessionPool.length/studyDates.length));
-  const assignments=studyDates.map(dt=>({date:dt,items:[]}));
-  let poolIdx=0,dayIdx=0;
-  while(poolIdx<sessionPool.length){
-    const slot=assignments[dayIdx%assignments.length];
-    if(slot.items.length<perDaySessions||dayIdx>=assignments.length){slot.items.push(sessionPool[poolIdx]);poolIdx++;}
-    dayIdx++;
-    if(dayIdx>assignments.length*6) break;
+  const subjectPools={};
+  Object.entries(bySubject).forEach(([subject,subTopics])=>{
+    let subjectHours=subjectHoursFor(level,subject);
+    if(weakSet.has(subject)) subjectHours*=1.2; // weak subject — budget more time
+    const totalPoints=subTopics.reduce((a,t)=>a+(weightPoints[t.weight]||1),0)||1;
+    subjectPools[subject]=[];
+    subTopics.forEach(t=>{
+      const key=t.subject+"|"+t.topic;
+      let topicHours=subjectHours*((weightPoints[t.weight]||1)/totalPoints);
+      if(weakTopicSet.has(key)) topicHours*=1.3;
+      if(strongTopicSet.has(key)) topicHours*=0.5;
+      else if(doneTopicSet.has(key)) topicHours*=0.6;
+      const blocks=Math.max(1,Math.round((topicHours*60)/SESSION_BLOCK_MINS));
+      for(let p=0;p<blocks;p++){
+        subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours*10)/10});
+      }
+    });
+  });
+  // Interleave across subjects (one block per subject per round) instead of one giant block per
+  // subject — spaced/interleaved practice beats grinding one subject for weeks straight.
+  const sessionPool=[];
+  const subjectNames=Object.keys(subjectPools);
+  let anyLeft=true;
+  while(anyLeft){
+    anyLeft=false;
+    subjectNames.forEach(subject=>{
+      if(subjectPools[subject].length>0){
+        sessionPool.push(subjectPools[subject].shift());
+        anyLeft=true;
+      }
+    });
   }
-  while(poolIdx<sessionPool.length){assignments[assignments.length-1].items.push(sessionPool[poolIdx]);poolIdx++;}
+
+  // ── Time-based day packing ────────────────────────────────────────────
+  // Pack blocks into each study day up to that day's actual time budget (hours/day from
+  // onboarding), instead of a flat item-count cap — this is what makes heavy topics correctly
+  // spread across MULTIPLE days rather than being impossibly crammed into one.
+  const assignments=packSessionsIntoDates(sessionPool,studyDates,dailyHours);
   const weeksMap={};
   const calendarWeekStart=weekStartOf(from); // the Monday of the week the plan starts in
   assignments.forEach(a=>{
@@ -354,9 +405,10 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
     weeksMap[wIdx].push(a);
   });
   const weeks=Object.keys(weeksMap).sort((a,b)=>a-b).map(k=>({weekNum:parseInt(k)+1,days:weeksMap[k]}));
-  const revisionStart=addDays(examDate,-revisionDays);
   const revisionTopics=topics.filter(t=>t.weight==="H"||t.weight==="M");
-  return {weeks,totalDays:totalDaysToExam,studyDates,revisionDays,revisionStart,revisionTopics,totalSessions:sessionPool.length,perDaySessions};
+  const perDaySessions=Math.max(1,Math.round(sessionPool.length/studyDates.length));
+  const totalPlannedHours=Math.round(sessionPool.reduce((a,s)=>a+s.durationMins,0)/6)/10;
+  return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:sessionPool.length,perDaySessions,totalPlannedHours};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
 
@@ -529,7 +581,7 @@ const CFA_EXAM_WINDOWS = {
     {id:"2027-08",label:"August 2027",start:"2027-08-12",end:"2027-08-16"},
   ],
 };
-const CFA_RECOMMENDED_HOURS = {L1:300, L2:328, L3:344}; // CFA Institute candidate survey averages
+const CFA_RECOMMENDED_HOURS = {L1:360, L2:328, L3:344}; // L1 = sum of subject-level candidate-survey hour budgets below; L2/L3 = CFA Institute candidate survey averages
 
 const TOPICS = {
   Ethics:{
@@ -614,6 +666,30 @@ const TOPIC_WEIGHT_RANGES = {
   "Alt. Investments":{L1:"5-8%", L2:"5-10%", L3:"5-10%"},
   "Portfolio Mgmt": {L1:"5-8%",  L2:"10-15%",L3:"35-40%"},
 };
+
+// Real candidate-reported study-hour ranges per subject — exam WEIGHT (% of questions) and
+// STUDY TIME needed are not the same thing (e.g. Fin. Reporting is only 13-17% of the L1 exam
+// but eats 50-70 hours because of its sheer volume/complexity). This is what the roadmap's pass
+// counts were missing entirely — a topic's session count now reflects real hours needed, not
+// just a flat H/M/L multiplier. Midpoints of each range are used as the working budget.
+const SUBJECT_HOURS = {
+  L1: {
+    "Fin. Reporting":60, "Fixed Income":52.5, Equity:47.5, Quantitative:45,
+    Ethics:40, "Corp. Issuers":30, "Portfolio Mgmt":25, Economics:25,
+    "Alt. Investments":17.5, Derivatives:17.5,
+  },
+};
+// L2/L3 don't have the same precise candidate-survey hour breakdowns available, so approximate
+// using that level's official exam-weight midpoint applied to its total recommended hours.
+function subjectHoursFor(level,subject){
+  if(SUBJECT_HOURS[level]?.[subject]!=null) return SUBJECT_HOURS[level][subject];
+  const range=TOPIC_WEIGHT_RANGES[subject]?.[level];
+  const total=CFA_RECOMMENDED_HOURS[level]||300;
+  if(!range||range==="0%") return total*0.03; // negligible/retired-at-this-level subject
+  const nums=range.replace(/%/g,"").split("-").map(Number);
+  const mid=((nums[0]||0)+(nums[1]??nums[0]??0))/2/100;
+  return Math.round(total*mid);
+}
 
 // Per-topic exam probability scores (modeled like Mathongo's weightage sheets)
 // Scale: 5=very high, 4=high, 3=medium, 2=low, 1=rarely tested
@@ -706,7 +782,6 @@ const STREAK_MILESTONES = [
 
 const TABS=[
   {id:"overview",label:"Overview",icon:"⌂"},
-  {id:"rank",label:"Readiness",icon:"🎯"},
   {id:"planner",label:"Planner",icon:"📅"},
   {id:"syllabus",label:"Syllabus",icon:"📋"},
   {id:"revision",label:"Revision",icon:"↺"},
@@ -1010,7 +1085,7 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
   const classLabel=(level&&CLASSES.find(c=>c.id===level)?.label)||"";
   function toggleDay(i){setStudyDays(prev=>prev.includes(i)?prev.filter(x=>x!==i):[...prev,i].sort());}
   const card={display:"flex",alignItems:"center",gap:12,padding:"14px 16px",border:"1.5px solid "+d.b,borderRadius:12,cursor:"pointer",marginBottom:8,background:d.card,transition:"all .15s"};
-  const totalSteps=5;
+  const totalSteps=4;
   async function continueFromUsername(){
     const clean=username.trim().toLowerCase().replace(/[^a-z0-9_]/g,"");
     if(clean.length<3){setUsernameError("at least 3 characters");return;}
@@ -1043,7 +1118,7 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
         <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,letterSpacing:"-.04em",marginBottom:4}}>nevile<span style={{color:d.a1}}>te</span></div>
         <div style={{fontSize:12,color:d.t3,marginBottom:20}}>step {step} of {totalSteps}</div>
         <div style={{display:"flex",gap:4,marginBottom:28}}>
-          {[1,2,3,4,5].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
+          {[1,2,3,4].map(s=><div key={s} style={{height:3,flex:1,borderRadius:2,background:s<=step?d.a1:d.b,transition:"background .2s"}}/>)}
         </div>
 
         {/* Step 1 — Username */}
@@ -1153,48 +1228,14 @@ function ExamSetupScreen({d,initialLevel,onComplete,existingUsername,user,authSe
               ))}
             </div>
             {studyDays.length>0&&<div style={{fontSize:12,color:d.t3,marginBottom:18,fontStyle:"italic"}}>
-              {studyDays.length * dailyHours}h/week. CFA Institute candidates average {recommended}h total for {classLabel}.
+              {studyDays.length * dailyHours}h/week. CFA Institute candidates average {recommended}h total for {classLabel} — that's your target.
             </div>}
-            <button disabled={studyDays.length===0} onClick={()=>setStep(5)}
+            <button disabled={studyDays.length===0}
+              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:dailyHours||2,targetHours:recommended,username})}
               style={{width:"100%",padding:"13px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",opacity:studyDays.length===0?0.4:1,marginBottom:10}}>
-              continue →
-            </button>
-            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
-          </div>
-        )}
-
-        {/* Step 5 — Hours target */}
-        {step===5&&(
-          <div>
-            <div style={{fontSize:20,fontWeight:700,color:d.t,marginBottom:4,letterSpacing:"-.02em"}}>your study hour target</div>
-            <div style={{fontSize:13,color:d.t3,marginBottom:22}}>CFA Institute candidates report averaging {recommended}h for {classLabel}. pick a target or set your own.</div>
-            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-              {[
-                {h:recommended,label:"Recommended — CFA Institute average"},
-                {h:Math.round(recommended*1.15),label:"Extra buffer — first-time candidate"},
-                {h:Math.round(recommended*0.85),label:"Lean — strong background or retake"},
-              ].map(({h,label},i)=>(
-                <div key={h} onClick={()=>setDailyHours(-h)}
-                  style={{...card,border:dailyHours===-h?"1.5px solid "+d.a1:card.border,background:dailyHours===-h?d.a1+"10":d.card}}
-                  onClick={()=>setDailyHours(-h)}>
-                  <div style={{width:36,height:36,borderRadius:9,background:d.hover,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:d.a1,flexShrink:0}}>{h}h</div>
-                  <div style={{fontSize:12.5,color:d.t2}}>{label}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:24}}>
-              <span style={{fontSize:12,color:d.t3,whiteSpace:"nowrap"}}>or enter custom:</span>
-              <input type="number" placeholder={String(recommended)} min="100" max="600"
-                onChange={e=>setDailyHours(-(parseInt(e.target.value)||recommended))}
-                style={{flex:1,padding:"10px 12px",borderRadius:8,background:d.hover,border:"1px solid "+d.b,color:d.t,fontSize:14,fontFamily:"inherit",outline:"none"}}/>
-              <span style={{fontSize:12,color:d.t3}}>hours</span>
-            </div>
-            <button
-              onClick={()=>onComplete({level,examWindow,studyDays,dailyHours:Math.abs(dailyHours)||2,targetHours:dailyHours<0?Math.abs(dailyHours):recommended,username})}
-              style={{width:"100%",padding:"14px",borderRadius:12,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit",marginBottom:10}}>
               continue → tell us what you've covered
             </button>
-            <button onClick={()=>setStep(4)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
+            <button onClick={()=>setStep(3)} style={{background:"none",border:"none",color:d.t3,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>← back</button>
           </div>
         )}
       </div>
@@ -1478,11 +1519,13 @@ function App(){
   const [studyDays,setStudyDays]=useState(()=>{try{const v=localStorage.getItem("nev_study_days");return v?JSON.parse(v):[0,1,2,3,4];}catch(e){return [0,1,2,3,4];}});
   const [eduStatus,setEduStatus]=useState(()=>{try{return localStorage.getItem("nev_edu_status")||null;}catch(e){return null;}}); // "student"|"working"|"graduated"
   const [targetHours,setTargetHours]=useState(()=>{try{const v=localStorage.getItem("nev_target_hours");return v?parseInt(v):null;}catch(e){return null;}});
+  const [dailyStudyHours,setDailyStudyHours]=useState(()=>{try{const v=localStorage.getItem("nev_daily_hours");return v?parseFloat(v):2;}catch(e){return 2;}});
   const [examSetupDone,setExamSetupDone]=useState(()=>{try{return localStorage.getItem("nev_exam_setup_done")==="1";}catch(e){return false;}});
   useEffect(()=>{try{if(examWindow)localStorage.setItem("nev_exam_window",examWindow);}catch(e){}},[examWindow]);
   useEffect(()=>{try{localStorage.setItem("nev_study_days",JSON.stringify(studyDays));}catch(e){}},[studyDays]);
   useEffect(()=>{try{if(eduStatus)localStorage.setItem("nev_edu_status",eduStatus);}catch(e){}},[eduStatus]);
   useEffect(()=>{try{if(targetHours)localStorage.setItem("nev_target_hours",String(targetHours));}catch(e){}},[targetHours]);
+  useEffect(()=>{try{localStorage.setItem("nev_daily_hours",String(dailyStudyHours));}catch(e){}},[dailyStudyHours]);
   const [sessions,setSessions]=useState(()=>{try{const c=localStorage.getItem("nev_session_log")||localStorage.getItem("slothr_sessions");return c?JSON.parse(c):[];}catch(e){return [];}});
   // Days the user actually opened/used the app — this is what the streak is based on now,
   // not whether they logged a study session that day. Showing up counts.
@@ -1763,15 +1806,54 @@ function App(){
       setFrozenPerformance(roadmapPerformanceLive);
     }
   },[planKey,roadmapPerformanceLive]);
+  const [showRebalancePicker,setShowRebalancePicker]=useState(false);
+  const [rebalanceOverride,setRebalanceOverride]=useState(null); // {untilDate, overrideMap:{date:[items]}}
+  useEffect(()=>{
+    if(rebalanceOverride&&today()>rebalanceOverride.untilDate) setRebalanceOverride(null);
+  },[rebalanceOverride]);
+  useEffect(()=>{setRebalanceOverride(null);},[jeClass,examDate,studyDays,roadmapAnswers]);
   function rebalanceRoadmap(){
-    setRebalanceNonce(n=>n+1);
-    showToast("rebalanced — passes adjusted to your latest mock/PYQ performance.");
+    setShowRebalancePicker(true);
+  }
+  function performWindowedRebalance(windowDays){
+    if(!roadmap||!jeClass||!examDate){setShowRebalancePicker(false);return;}
+    const today_str=today();
+    const windowEnd=addDays(today_str,windowDays-1);
+    // Gather overdue items + everything originally scheduled within the chosen window that
+    // isn't done yet — this is the pool we're allowed to redistribute.
+    const pool=[];
+    const seen=new Set();
+    (roadmap.weeks||[]).forEach(w=>w.days.forEach(dd=>{
+      if(dd.date<=windowEnd){
+        dd.items.forEach(item=>{
+          const k=itemKey(dd.date,item);
+          const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
+          if(!roadmapDone[k]&&!roadmapRemoved[k]&&!seen.has(topicKey)&&syllabusStatus[item.subject+"|"+item.topic]!=="done"){
+            seen.add(topicKey);
+            pool.push(item);
+          }
+        });
+      }
+    }));
+    const windowDates=[];
+    for(let i=0;i<windowDays;i++){
+      const dt=addDays(today_str,i);
+      if((studyDays||[]).includes(weekdayIndex(dt))) windowDates.push(dt);
+    }
+    if(windowDates.length===0){showToast("none of your study days fall in that window — try a longer one.");setShowRebalancePicker(false);return;}
+    const assignments=packSessionsIntoDates(pool,windowDates,dailyStudyHours);
+    const overrideMap={};
+    assignments.forEach(a=>{overrideMap[a.date]=a.items;});
+    setRebalanceOverride({untilDate:windowEnd,overrideMap});
+    setShowRebalancePicker(false);
+    const label=windowDays===3?"the next 3 days":windowDays===7?"the next week":"the next 2 weeks";
+    showToast(`rebalanced — everything overdue is now spread across ${label}.`);
   }
 
   const roadmapBase=useMemo(()=>{
     if(!jeClass||!examDate||!roadmapStartDate||!frozenPerformance) return null;
-    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:frozenPerformance});
-  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,frozenPerformance]);
+    return generateRoadmap({level:jeClass,examDate,studyDays,answers:roadmapAnswers,startDate:roadmapStartDate,performance:frozenPerformance,dailyHours:dailyStudyHours});
+  },[jeClass,examDate,studyDays,roadmapAnswers,roadmapStartDate,frozenPerformance,dailyStudyHours]);
 
   // ── Manual overrides ──────────────────────────────────────────────────────
   // User-added or user-removed items for specific days — lets people directly edit "what to
@@ -1801,6 +1883,22 @@ function App(){
   const roadmap=useMemo(()=>{
     if(!roadmapBase||!examDate) return roadmapBase;
     const today_str=today();
+
+    // If the user picked an explicit rebalance window, apply it directly: replace each date's
+    // items with the override up through untilDate, leave everything after that untouched.
+    if(rebalanceOverride){
+      const weeks=(roadmapBase.weeks||[]).map(w=>({
+        ...w,
+        days:w.days.map(dd=>{
+          if(dd.date>=today_str&&dd.date<=rebalanceOverride.untilDate){
+            return{...dd,items:rebalanceOverride.overrideMap[dd.date]||[]};
+          }
+          return dd;
+        })
+      }));
+      return{...roadmapBase,weeks,_overdueCount:0,_backlogRedistributed:false,_windowRebalanced:true};
+    }
+
     const overdue=[];
     const seenKeys=new Set();
     (roadmapBase.weeks||[]).forEach(w=>{
@@ -1851,11 +1949,12 @@ function App(){
       level:jeClass,examDate,studyDays,answers:roadmapAnswers,
       startDate:today_str,
       remainingTopics:allRemaining,
+      dailyHours:dailyStudyHours,
     });
     return {...redistributed,_overdueCount:overdue.length,_backlogRedistributed:true};
-  },[roadmapBase,roadmapDone,roadmapRemoved,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers]);
+  },[roadmapBase,roadmapDone,roadmapRemoved,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers,dailyStudyHours,rebalanceOverride]);
 
-  const isRevisionPhase=roadmap?.revisionStart&&today()>=roadmap.revisionStart;
+  const isRevisionPhase=false; // revision no longer carved out of the roadmap — see the Revision tab/Planner instead
   // Today's items — overdue first, then scheduled, filtered to show undone at top.
   // Also drop anything already marked "done" via the Syllabus tab, anything manually removed,
   // and fold in anything manually added — so this is a genuinely editable "what to study today".
@@ -2673,6 +2772,7 @@ function App(){
         setStudyDays(setup.studyDays);
         setEduStatus(setup.eduStatus);
         setTargetHours(setup.targetHours);
+        if(setup.dailyHours) setDailyStudyHours(setup.dailyHours);
         setExamSetupDone(true);
         if(setup.username) setProfile(p=>({...(p||{}),username:setup.username}));
         try{
@@ -2872,7 +2972,7 @@ function App(){
           <nav className="s-nav">
             {/* Study tools */}
             {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"8px 12px 4px"}}>Study</div>}
-            {["overview","rank","planner","syllabus","revision","mocks","sessions","coach","streaks"].map(id=>{
+            {["overview","planner","syllabus","revision","mocks","sessions","coach","streaks"].map(id=>{
               const t=TABS.find(x=>x.id===id);
               if(!t)return null;
               return(
@@ -2951,12 +3051,11 @@ function App(){
                 <div className="ptitle">{TABS.find(t=>t.id===tab)?.label}</div>
                 <div className="psub">
                   {tab==="overview"&&`${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short"})}${examDate?" · "+Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000))+"d left":""}. tick tock.`}
-                  {tab==="coach"&&"your CFA exam co-pilot. i know things about you."}
+                  {tab==="coach"&&"your study data, decoded — and are you ready to pass."}
                   {tab==="sessions"&&`${sessions.length} sessions · ${fmt(totalTime)} total. not bad.`}
                   {tab==="streaks"&&`${streak} day streak${currentMilestone?" · "+currentMilestone.icon+" "+currentMilestone.label:""}`}
                   {tab==="syllabus"&&"track every chapter. i know which ones you're avoiding."}
                   {tab==="revision"&&"spaced repetition. i'll remind you before you forget."}
-                  {tab==="rank"&&"are you ready to pass. be honest."}
                   {tab==="planner"&&"your full roadmap, auto-built around your exam date."}
                   {tab==="mocks"&&"log every mock. track every score. see the trend."}
                   {tab==="buddy"&&"find someone studying the same level. suffer together."}
@@ -3066,6 +3165,31 @@ function App(){
                     </div>
                   )}
 
+                  {showRebalancePicker&&(
+                    <div style={{position:"fixed",inset:0,zIndex:9997,background:"rgba(10,10,15,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+                      onClick={()=>setShowRebalancePicker(false)}>
+                      <div onClick={e=>e.stopPropagation()}
+                        style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:16,padding:24,maxWidth:340,width:"100%"}}>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:6}}>Rebalance over how long?</div>
+                        <div style={{fontSize:12,color:d.t3,marginBottom:18,lineHeight:1.5}}>overdue topics + what's already scheduled in that window get spread evenly across it — nothing beyond it is touched.</div>
+                        {[{d:3,l:"Next 3 days",s:"catch up fast, heavier days"},{d:7,l:"Next week",s:"balanced pace"},{d:14,l:"Next 2 weeks",s:"gentlest, most spread out"}].map(opt=>(
+                          <button key={opt.d} onClick={()=>performWindowedRebalance(opt.d)}
+                            style={{width:"100%",textAlign:"left",padding:"12px 14px",borderRadius:10,background:d.hover,border:`1px solid ${d.b}`,color:d.t,cursor:"pointer",fontFamily:"inherit",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div>
+                              <div style={{fontSize:13,fontWeight:700}}>{opt.l}</div>
+                              <div style={{fontSize:10.5,color:d.t3,marginTop:2}}>{opt.s}</div>
+                            </div>
+                            <span style={{fontSize:16,color:d.t4}}>→</span>
+                          </button>
+                        ))}
+                        <button onClick={()=>setShowRebalancePicker(false)}
+                          style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",border:"none",color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit",marginTop:4}}>
+                          cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {!isStudyDay&&!isRevisionPhase&&(
                       <div style={{padding:"12px 16px",borderRadius:10,background:d.gold+"10",border:`1px solid ${d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12}}>
                         📅 today isn't one of your scheduled study days — but any session still counts.
@@ -3095,7 +3219,8 @@ function App(){
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                               <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{item.subject}</span>
                               <span style={{fontSize:10,color:d.t4}}>{item.weight==="H"?"● high weight":item.weight==="M"?"● medium weight":"● lower weight"}</span>
-                              {item.totalPasses>1&&<span style={{fontSize:10,color:d.t4}}>pass {item.pass}/{item.totalPasses}</span>}
+                              {item.durationMins&&<span style={{fontSize:10,color:d.a2,fontWeight:600}}>~{item.durationMins}min</span>}
+                              {item.totalPasses>1&&<span style={{fontSize:10,color:d.t4}} title={item.topicHours?`~${item.topicHours}h total for this topic`:undefined}>session {item.pass}/{item.totalPasses}{item.topicHours?` · ${item.topicHours}h total`:""}</span>}
                               {item._manual&&<span style={{fontSize:10,color:d.a1}}>+ added by you</span>}
                               {item._overdue&&!item._manual&&<span style={{fontSize:10,color:d.gold}}>carried over</span>}
                             </div>
@@ -3118,10 +3243,6 @@ function App(){
                     <div style={{display:"flex",gap:8,marginTop:8}}>
                       <div style={{flex:1}}><ManualTopicAdder d={d} jeClass={jeClass} onAdd={addManualTopicToday}/></div>
                     </div>
-                    <button onClick={suggestTodayFocus} disabled={goalLoading}
-                      style={{width:"100%",padding:"11px",borderRadius:10,background:"transparent",border:`1.5px solid ${d.a1}40`,color:d.a1,cursor:"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit",marginTop:8,opacity:goalLoading?.6:1}}>
-                      {goalLoading?"looking at your weak spots...":"✨ suggest today's focus (from your weak spots)"}
-                    </button>
 
                     {isRevisionPhase&&(
                       <div>
@@ -3230,13 +3351,13 @@ function App(){
                   const maxMins=subjectData[0]?.mins||1;
                   const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
                   const avgSession=sessions.length?Math.round(totalMins/sessions.length):0;
-                  // Weekly trend
+                  // Weekly trend — last 4 calendar weeks (Monday-start), oldest to newest, left to right
                   const weeks=[];
                   for(let i=3;i>=0;i--){
                     const ws=addDays(weekStartOf(today()),-i*7);
                     const we=addDays(ws,6);
                     const wMins=sessions.filter(s=>s.date>=ws&&s.date<=we).reduce((a,s)=>a+(s.duration||0),0);
-                    weeks.push({label:`W${4-i}`,mins:wMins});
+                    weeks.push({label:i===0?"This wk":new Date(ws+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short"}),mins:wMins,isCurrent:i===0});
                   }
                   const maxWkMins=Math.max(...weeks.map(w=>w.mins),1);
                   // Predicted completion
@@ -3283,7 +3404,7 @@ function App(){
                       <div style={{display:"flex",gap:8,alignItems:"flex-end",height:80}}>
                         {weeks.map((w,i)=>(
                           <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                            <div style={{width:"100%",background:i===3?d.a1:d.a1+"50",borderRadius:"4px 4px 0 0",height:Math.max(4,(w.mins/maxWkMins)*70)+"px",transition:"height .5s"}}/>
+                            <div style={{width:"100%",background:w.isCurrent?d.a1:d.a1+"50",borderRadius:"4px 4px 0 0",height:Math.max(4,(w.mins/maxWkMins)*70)+"px",transition:"height .5s"}}/>
                             <div style={{fontSize:9,color:d.t3}}>{w.label}</div>
                             <div style={{fontSize:9,color:d.t4}}>{Math.round(w.mins/60*10)/10}h</div>
                           </div>
@@ -3347,6 +3468,228 @@ function App(){
                         log study sessions to see your analytics.
                       </div>
                     )}
+
+              {(()=>{
+              const SUBS=Object.keys(TOPICS);
+              const totalChapters=SUBS.reduce((a,sub)=>a+classTopics(sub).length,0);
+              const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
+              const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
+              const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
+              const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
+              const highWtDone=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length,0);
+              const highWtTotal=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").length,0);
+              const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
+
+              // ── Real exam window + pacing ──────────────────────────────────────
+              const windowData=(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow);
+              const examDate=windowData?windowData.start:null;
+              const daysLeft=examDate?Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000)):null;
+              const recommendedHrs=targetHours||CFA_RECOMMENDED_HOURS[jeClass]||300;
+              const hoursLoggedSoFar=totalTime/60;
+              const hoursRemaining=Math.max(0,recommendedHrs-hoursLoggedSoFar);
+              const weeksLeft=daysLeft?Math.max(0.5,daysLeft/7):null;
+              const neededWeeklyHrs=weeksLeft?Math.round((hoursRemaining/weeksLeft)*10)/10:null;
+              const currentWeeklyHrs=Math.round((weekTime/60)*10)/10;
+              const onPace=neededWeeklyHrs!==null?currentWeeklyHrs>=neededWeeklyHrs*0.85:null;
+              const hoursPct=Math.min(100,Math.round((hoursLoggedSoFar/recommendedHrs)*100));
+
+              // ── Performance signal — the piece that was missing ────────────────
+              // Everything above measures EFFORT (hours, coverage, pacing). None of it asks
+              // "are you actually good at this material?" A student who skims every chapter
+              // once could score well here without being exam-ready. Mock scores + PYQ accuracy
+              // are the closest proxy we have to "would you actually pass right now."
+              const mockScoresFlat=mocks.flatMap(m=>[m.physics,m.chemistry,m.math].filter(v=>v!=null));
+              const mockAvg=mockScoresFlat.length?Math.round(mockScoresFlat.reduce((a,b)=>a+b,0)/mockScoresFlat.length):null;
+              const performanceScore=
+                mockAvg!==null&&pyqAcc!==null ? Math.round(mockAvg*0.65+pyqAcc*0.35) :
+                mockAvg!==null ? mockAvg :
+                pyqAcc!==null ? pyqAcc :
+                null; // no accuracy data at all yet — handled separately below, not defaulted to a fake neutral score
+
+              // Score each factor 0-100
+              const factors={
+                hoursProgress:{score:hoursPct,weight:20,label:"Hours Logged",hint:Math.round(hoursLoggedSoFar)+" / "+recommendedHrs+"h target"},
+                coverage:{score:coveragePct,weight:15,label:"Syllabus Coverage",hint:studiedChapters+"/"+totalChapters+" topics"},
+                consistency:{score:Math.min(100,Math.round((streak/60)*100)),weight:15,label:"Consistency (Streak)",hint:streak+" day streak"},
+                pacing:{score:onPace===null?50:(onPace?100:Math.max(20,Math.round((currentWeeklyHrs/Math.max(neededWeeklyHrs,1))*100))),weight:15,label:"On Pace for Exam",hint:neededWeeklyHrs!==null?currentWeeklyHrs+"h/wk vs "+neededWeeklyHrs+"h/wk needed":"set exam date for pacing"},
+                highWeight:{score:highWtPct,weight:10,label:"High-Weight Topics",hint:highWtDone+"/"+highWtTotal+" done"},
+                performance:{score:performanceScore===null?50:performanceScore,weight:performanceScore===null?5:25,label:"Actual Performance",hint:mockAvg!==null&&pyqAcc!==null?`${mockAvg}/100 mock avg · ${pyqAcc}% PYQ accuracy`:mockAvg!==null?`${mockAvg}/100 mock avg`:pyqAcc!==null?`${pyqAcc}% PYQ accuracy`:"take a mock or log PYQs — this is worth the most once you have data"},
+              };
+              // If there's no performance data yet, redistribute most (not all) of its weight back
+              // to hours/coverage — it keeps a small standing weight so "take a mock" still shows
+              // up as a suggestion, rather than quietly scoring it 50 as if "average" would.
+              if(performanceScore===null){
+                factors.hoursProgress.weight+=10;
+                factors.coverage.weight+=10;
+              }
+              const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
+              const overallPct=Math.round(totalScore);
+
+              const getRankRange=pct=>{
+                if(pct>=85)return{range:"Ready to Pass",color:d.a2,label:"above the minimum passing score"};
+                if(pct>=70)return{range:"On Track",color:d.a2,label:"tracking well for exam day"};
+                if(pct>=55)return{range:"Getting There",color:d.gold,label:"needs focused effort"};
+                if(pct>=40)return{range:"Needs Work",color:d.gold,label:"significant gaps remain"};
+                if(pct>=25)return{range:"At Risk",color:d.a1,label:"major revision required"};
+                return{range:"Not Ready",color:d.danger,label:"more preparation needed"};
+              };
+              const rankData=getRankRange(overallPct);
+
+              // What moves the needle most
+              const improvements=Object.entries(factors)
+                .filter(([,f])=>f.score<80&&f.weight>0)
+                .sort((a,b)=>b[1].weight-a[1].weight)
+                .slice(0,3)
+                .map(([k,f])=>({
+                  key:k, label:f.label,
+                  gap:80-f.score,
+                  impact:"+"+Math.round((80-f.score)*f.weight/100)+" pts",
+                  action:{
+                    hoursProgress:"you need roughly "+Math.round(hoursRemaining)+" more hours before "+(windowData?windowData.label:"your exam"),
+                    coverage:"study at least 1 new topic every 2-3 days",
+                    consistency:"don't break your streak. even 30 min counts",
+                    pacing:neededWeeklyHrs?("aim for "+neededWeeklyHrs+"h/week — you're at "+currentWeeklyHrs+"h"):"set your exam window in profile to get a real pacing target",
+                    highWeight:"prioritise Ethics, FRA, Equity and Fixed Income — heaviest weighted",
+                    performance:mockAvg===null&&pyqAcc===null?"take a mock exam or log some PYQs — right now nothing here measures if you're actually learning it":mockAvg!==null&&mockAvg<65?"your mock average is below a safe passing margin — go back and consolidate, not just cover new ground":"your PYQ accuracy needs work — drill the topics you're getting wrong, not the ones you already know",
+                  }[k]
+                }));
+
+              const uniqueDays=new Set(sessions.map(s=>s.date)).size;
+              const hasEnoughData=uniqueDays>=7;
+
+              return(
+                <div style={{marginTop:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}><div style={{fontSize:15,fontWeight:700,color:d.t}}>Readiness</div><div style={{flex:1,height:1,background:d.b}}/></div>
+                  {!hasEnoughData&&(
+                    <div className="card cp" style={{textAlign:"center",padding:"40px 24px",marginBottom:20}}>
+                      <div style={{fontSize:40,marginBottom:16}}>🦥</div>
+                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:8}}>readiness score unlocks in {7-uniqueDays} day{7-uniqueDays!==1?"s":""}</div>
+                      <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand. showing you 50,000+ on day one helps no one.</div>
+                      <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                        {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:streak+"d",t:"",c:d.a3}].map(s=>(
+                          <div key={s.l} style={{padding:"14px 18px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,textAlign:"center",minWidth:90}}>
+                            <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}<span style={{fontSize:12,color:d.t3}}>{s.t}</span></div>
+                            <div style={{fontSize:10,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {hasEnoughData&&<>
+
+                  {/* Main rank card */}
+                  <div className="card cp" style={{textAlign:"center",marginBottom:20,padding:"32px 24px",position:"relative",overflow:"hidden"}}>
+                    <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at 50% 0%,${rankData.color}08,transparent 70%)`,pointerEvents:"none"}}/>
+                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:12}}>CFA Exam Readiness</div>
+                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:400,color:rankData.color,lineHeight:1,letterSpacing:"-.02em",marginBottom:8}}>
+                      {rankData.range}
+                    </div>
+                    <div style={{fontSize:13,color:d.t3,marginBottom:20,fontStyle:"italic"}}>{rankData.label} · based on your current trajectory</div>
+                    {/* Score ring */}
+                    <div style={{display:"inline-flex",alignItems:"center",gap:16,padding:"12px 24px",borderRadius:40,background:d.hover,border:`1px solid ${d.b}`}}>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:rankData.color,fontFamily:"'DM Serif Display',serif"}}>{overallPct}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Prep Score</div>
+                      </div>
+                      <div style={{width:1,height:36,background:d.b}}/>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft!==null?daysLeft:"—"}</div>
+                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pacing card — shows real exam window data */}
+                  {windowData?(
+                    <div className="card cp" style={{marginBottom:20}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                        <div className="cl">Your Pace</div>
+                        <span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:onPace?d.a2+"15":d.danger+"15",color:onPace?d.a2:d.danger,fontWeight:700}}>
+                          {onPace?"on pace":"behind pace"}
+                        </span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:12,marginBottom:14}}>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{windowData.label}</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Target Window</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{currentWeeklyHrs}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>This Week</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:onPace?d.a2:d.gold,fontFamily:"'DM Serif Display',serif"}}>{neededWeeklyHrs}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Needed/Week</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
+                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{Math.round(hoursRemaining)}h</div>
+                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Hours Left</div>
+                        </div>
+                      </div>
+                      <div style={{fontSize:12,color:d.t3,lineHeight:1.6,fontStyle:"italic"}}>
+                        {onPace
+                          ?"you're putting in enough hours weekly to hit your "+recommendedHrs+"h target before "+windowData.label+". keep this pace."
+                          :"at your current pace you'll fall short of "+recommendedHrs+"h before "+windowData.label+". you need "+neededWeeklyHrs+"h/week, you're averaging "+currentWeeklyHrs+"h."}
+                      </div>
+                    </div>
+                  ):(
+                    <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"20px"}}>
+                      <div style={{fontSize:13,color:d.t2,marginBottom:10}}>you haven't set a target exam window yet</div>
+                      <button onClick={()=>switchTab("profile")}
+                        style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                        set exam window in profile
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Factor breakdown */}
+                  <div className="card cp" style={{marginBottom:20}}>
+                    <div className="cl" style={{marginBottom:16}}>Score Breakdown</div>
+                    {Object.entries(factors).map(([key,f])=>(
+                      <div key={key} style={{marginBottom:14}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                          <div>
+                            <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{f.label}</span>
+                            <span style={{fontSize:10,color:d.t3,marginLeft:8,fontStyle:"italic"}}>{f.hint}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:11,color:d.t3}}>{f.weight}% weight</span>
+                            <span style={{fontSize:13,fontWeight:700,color:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,minWidth:32,textAlign:"right"}}>{f.score}</span>
+                          </div>
+                        </div>
+                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${f.score}%`,background:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,borderRadius:3,transition:"width .6s ease"}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* What moves the needle */}
+                  {improvements.length>0&&(
+                    <div className="card cp" style={{marginBottom:20}}>
+                      <div className="cl" style={{marginBottom:12}}>What Moves Your Rank Most</div>
+                      {improvements.map((imp,i)=>(
+                        <div key={imp.key} style={{display:"flex",gap:12,padding:"12px 14px",marginBottom:6,borderRadius:4,background:d.hover,border:`1px solid ${d.b}`}}>
+                          <div style={{width:24,height:24,borderRadius:"50%",background:`${d.a1}20`,border:`1px solid ${d.a1}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>{i+1}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                              <span style={{fontSize:12,fontWeight:600,color:d.t}}>{imp.label}</span>
+                              <span style={{fontSize:11,fontWeight:700,color:d.a2,background:`${d.a2}15`,padding:"1px 7px",borderRadius:3}}>{imp.impact}</span>
+                            </div>
+                            <div style={{fontSize:11,color:d.t3,lineHeight:1.5}}>{imp.action}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{fontSize:11,color:d.t4,textAlign:"center",fontStyle:"italic",lineHeight:1.6}}>
+                    Rank estimate is based on your study patterns, consistency, and coverage relative to CFA passers (top 50%). It updates as you log more sessions.
+                  </div>
+                  </>}
+                </div>
+              );
+            })()}
                   </div>);
                 })()}
               </div>
@@ -4391,226 +4734,6 @@ function App(){
 
 
             {/* ── RANK PREDICTOR ── */}
-            {tab==="rank"&&(()=>{
-              const SUBS=Object.keys(TOPICS);
-              const totalChapters=SUBS.reduce((a,sub)=>a+classTopics(sub).length,0);
-              const studiedChapters=new Set(sessions.map(s=>s.subject+"|"+s.topic)).size;
-              const coveragePct=totalChapters>0?Math.round((studiedChapters/totalChapters)*100):0;
-              const avgDailyHrs=sessions.length>0?(totalTime/Math.max(1,new Set(sessions.map(s=>s.date)).size)/60):0;
-              const pyqAcc=pyqHistory.length?Math.round(pyqHistory.filter(p=>p.correct).length/pyqHistory.length*100):null;
-              const highWtDone=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H"&&sessions.some(s=>s.subject===sub&&s.topic===t)).length,0);
-              const highWtTotal=SUBS.reduce((a,sub)=>a+classTopics(sub).filter(t=>getWeight(sub,t,jeClass)==="H").length,0);
-              const highWtPct=highWtTotal>0?Math.round((highWtDone/highWtTotal)*100):0;
-
-              // ── Real exam window + pacing ──────────────────────────────────────
-              const windowData=(CFA_EXAM_WINDOWS[jeClass]||[]).find(w=>w.id===examWindow);
-              const examDate=windowData?windowData.start:null;
-              const daysLeft=examDate?Math.max(0,Math.ceil((new Date(examDate)-new Date())/86400000)):null;
-              const recommendedHrs=targetHours||CFA_RECOMMENDED_HOURS[jeClass]||300;
-              const hoursLoggedSoFar=totalTime/60;
-              const hoursRemaining=Math.max(0,recommendedHrs-hoursLoggedSoFar);
-              const weeksLeft=daysLeft?Math.max(0.5,daysLeft/7):null;
-              const neededWeeklyHrs=weeksLeft?Math.round((hoursRemaining/weeksLeft)*10)/10:null;
-              const currentWeeklyHrs=Math.round((weekTime/60)*10)/10;
-              const onPace=neededWeeklyHrs!==null?currentWeeklyHrs>=neededWeeklyHrs*0.85:null;
-              const hoursPct=Math.min(100,Math.round((hoursLoggedSoFar/recommendedHrs)*100));
-
-              // ── Performance signal — the piece that was missing ────────────────
-              // Everything above measures EFFORT (hours, coverage, pacing). None of it asks
-              // "are you actually good at this material?" A student who skims every chapter
-              // once could score well here without being exam-ready. Mock scores + PYQ accuracy
-              // are the closest proxy we have to "would you actually pass right now."
-              const mockScoresFlat=mocks.flatMap(m=>[m.physics,m.chemistry,m.math].filter(v=>v!=null));
-              const mockAvg=mockScoresFlat.length?Math.round(mockScoresFlat.reduce((a,b)=>a+b,0)/mockScoresFlat.length):null;
-              const performanceScore=
-                mockAvg!==null&&pyqAcc!==null ? Math.round(mockAvg*0.65+pyqAcc*0.35) :
-                mockAvg!==null ? mockAvg :
-                pyqAcc!==null ? pyqAcc :
-                null; // no accuracy data at all yet — handled separately below, not defaulted to a fake neutral score
-
-              // Score each factor 0-100
-              const factors={
-                hoursProgress:{score:hoursPct,weight:20,label:"Hours Logged",hint:Math.round(hoursLoggedSoFar)+" / "+recommendedHrs+"h target"},
-                coverage:{score:coveragePct,weight:15,label:"Syllabus Coverage",hint:studiedChapters+"/"+totalChapters+" topics"},
-                consistency:{score:Math.min(100,Math.round((streak/60)*100)),weight:15,label:"Consistency (Streak)",hint:streak+" day streak"},
-                pacing:{score:onPace===null?50:(onPace?100:Math.max(20,Math.round((currentWeeklyHrs/Math.max(neededWeeklyHrs,1))*100))),weight:15,label:"On Pace for Exam",hint:neededWeeklyHrs!==null?currentWeeklyHrs+"h/wk vs "+neededWeeklyHrs+"h/wk needed":"set exam date for pacing"},
-                highWeight:{score:highWtPct,weight:10,label:"High-Weight Topics",hint:highWtDone+"/"+highWtTotal+" done"},
-                performance:{score:performanceScore===null?50:performanceScore,weight:performanceScore===null?5:25,label:"Actual Performance",hint:mockAvg!==null&&pyqAcc!==null?`${mockAvg}/100 mock avg · ${pyqAcc}% PYQ accuracy`:mockAvg!==null?`${mockAvg}/100 mock avg`:pyqAcc!==null?`${pyqAcc}% PYQ accuracy`:"take a mock or log PYQs — this is worth the most once you have data"},
-              };
-              // If there's no performance data yet, redistribute most (not all) of its weight back
-              // to hours/coverage — it keeps a small standing weight so "take a mock" still shows
-              // up as a suggestion, rather than quietly scoring it 50 as if "average" would.
-              if(performanceScore===null){
-                factors.hoursProgress.weight+=10;
-                factors.coverage.weight+=10;
-              }
-              const totalScore=Object.values(factors).reduce((a,f)=>a+(f.score*f.weight/100),0);
-              const overallPct=Math.round(totalScore);
-
-              const getRankRange=pct=>{
-                if(pct>=85)return{range:"Ready to Pass",color:d.a2,label:"above the minimum passing score"};
-                if(pct>=70)return{range:"On Track",color:d.a2,label:"tracking well for exam day"};
-                if(pct>=55)return{range:"Getting There",color:d.gold,label:"needs focused effort"};
-                if(pct>=40)return{range:"Needs Work",color:d.gold,label:"significant gaps remain"};
-                if(pct>=25)return{range:"At Risk",color:d.a1,label:"major revision required"};
-                return{range:"Not Ready",color:d.danger,label:"more preparation needed"};
-              };
-              const rankData=getRankRange(overallPct);
-
-              // What moves the needle most
-              const improvements=Object.entries(factors)
-                .filter(([,f])=>f.score<80&&f.weight>0)
-                .sort((a,b)=>b[1].weight-a[1].weight)
-                .slice(0,3)
-                .map(([k,f])=>({
-                  key:k, label:f.label,
-                  gap:80-f.score,
-                  impact:"+"+Math.round((80-f.score)*f.weight/100)+" pts",
-                  action:{
-                    hoursProgress:"you need roughly "+Math.round(hoursRemaining)+" more hours before "+(windowData?windowData.label:"your exam"),
-                    coverage:"study at least 1 new topic every 2-3 days",
-                    consistency:"don't break your streak. even 30 min counts",
-                    pacing:neededWeeklyHrs?("aim for "+neededWeeklyHrs+"h/week — you're at "+currentWeeklyHrs+"h"):"set your exam window in profile to get a real pacing target",
-                    highWeight:"prioritise Ethics, FRA, Equity and Fixed Income — heaviest weighted",
-                    performance:mockAvg===null&&pyqAcc===null?"take a mock exam or log some PYQs — right now nothing here measures if you're actually learning it":mockAvg!==null&&mockAvg<65?"your mock average is below a safe passing margin — go back and consolidate, not just cover new ground":"your PYQ accuracy needs work — drill the topics you're getting wrong, not the ones you already know",
-                  }[k]
-                }));
-
-              const uniqueDays=new Set(sessions.map(s=>s.date)).size;
-              const hasEnoughData=uniqueDays>=7;
-
-              return(
-                <div className="pin">
-                  {!hasEnoughData&&(
-                    <div className="card cp" style={{textAlign:"center",padding:"40px 24px",marginBottom:20}}>
-                      <div style={{fontSize:40,marginBottom:16}}>🦥</div>
-                      <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:8}}>readiness score unlocks in {7-uniqueDays} day{7-uniqueDays!==1?"s":""}</div>
-                      <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand. showing you 50,000+ on day one helps no one.</div>
-                      <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                        {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:streak+"d",t:"",c:d.a3}].map(s=>(
-                          <div key={s.l} style={{padding:"14px 18px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,textAlign:"center",minWidth:90}}>
-                            <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}<span style={{fontSize:12,color:d.t3}}>{s.t}</span></div>
-                            <div style={{fontSize:10,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {hasEnoughData&&<>
-
-                  {/* Main rank card */}
-                  <div className="card cp" style={{textAlign:"center",marginBottom:20,padding:"32px 24px",position:"relative",overflow:"hidden"}}>
-                    <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse at 50% 0%,${rankData.color}08,transparent 70%)`,pointerEvents:"none"}}/>
-                    <div style={{fontSize:11,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:d.t3,marginBottom:12}}>CFA Exam Readiness</div>
-                    <div style={{fontFamily:"'DM Serif Display',serif",fontSize:52,fontWeight:400,color:rankData.color,lineHeight:1,letterSpacing:"-.02em",marginBottom:8}}>
-                      {rankData.range}
-                    </div>
-                    <div style={{fontSize:13,color:d.t3,marginBottom:20,fontStyle:"italic"}}>{rankData.label} · based on your current trajectory</div>
-                    {/* Score ring */}
-                    <div style={{display:"inline-flex",alignItems:"center",gap:16,padding:"12px 24px",borderRadius:40,background:d.hover,border:`1px solid ${d.b}`}}>
-                      <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:700,color:rankData.color,fontFamily:"'DM Serif Display',serif"}}>{overallPct}</div>
-                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Prep Score</div>
-                      </div>
-                      <div style={{width:1,height:36,background:d.b}}/>
-                      <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:28,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{daysLeft!==null?daysLeft:"—"}</div>
-                        <div style={{fontSize:9,color:d.t3,letterSpacing:".06em",textTransform:"uppercase"}}>Days Left</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Pacing card — shows real exam window data */}
-                  {windowData?(
-                    <div className="card cp" style={{marginBottom:20}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                        <div className="cl">Your Pace</div>
-                        <span style={{fontSize:11,padding:"3px 10px",borderRadius:4,background:onPace?d.a2+"15":d.danger+"15",color:onPace?d.a2:d.danger,fontWeight:700}}>
-                          {onPace?"on pace":"behind pace"}
-                        </span>
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:12,marginBottom:14}}>
-                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
-                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{windowData.label}</div>
-                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Target Window</div>
-                        </div>
-                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
-                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{currentWeeklyHrs}h</div>
-                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>This Week</div>
-                        </div>
-                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
-                          <div style={{fontSize:18,fontWeight:700,color:onPace?d.a2:d.gold,fontFamily:"'DM Serif Display',serif"}}>{neededWeeklyHrs}h</div>
-                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Needed/Week</div>
-                        </div>
-                        <div style={{textAlign:"center",padding:"12px 8px",background:d.hover,borderRadius:8}}>
-                          <div style={{fontSize:18,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{Math.round(hoursRemaining)}h</div>
-                          <div style={{fontSize:9,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".05em"}}>Hours Left</div>
-                        </div>
-                      </div>
-                      <div style={{fontSize:12,color:d.t3,lineHeight:1.6,fontStyle:"italic"}}>
-                        {onPace
-                          ?"you're putting in enough hours weekly to hit your "+recommendedHrs+"h target before "+windowData.label+". keep this pace."
-                          :"at your current pace you'll fall short of "+recommendedHrs+"h before "+windowData.label+". you need "+neededWeeklyHrs+"h/week, you're averaging "+currentWeeklyHrs+"h."}
-                      </div>
-                    </div>
-                  ):(
-                    <div className="card cp" style={{marginBottom:20,textAlign:"center",padding:"20px"}}>
-                      <div style={{fontSize:13,color:d.t2,marginBottom:10}}>you haven't set a target exam window yet</div>
-                      <button onClick={()=>switchTab("profile")}
-                        style={{padding:"8px 18px",borderRadius:6,background:d.a1,color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                        set exam window in profile
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Factor breakdown */}
-                  <div className="card cp" style={{marginBottom:20}}>
-                    <div className="cl" style={{marginBottom:16}}>Score Breakdown</div>
-                    {Object.entries(factors).map(([key,f])=>(
-                      <div key={key} style={{marginBottom:14}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                          <div>
-                            <span style={{fontSize:12.5,fontWeight:500,color:d.t}}>{f.label}</span>
-                            <span style={{fontSize:10,color:d.t3,marginLeft:8,fontStyle:"italic"}}>{f.hint}</span>
-                          </div>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:11,color:d.t3}}>{f.weight}% weight</span>
-                            <span style={{fontSize:13,fontWeight:700,color:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,minWidth:32,textAlign:"right"}}>{f.score}</span>
-                          </div>
-                        </div>
-                        <div style={{height:6,background:d.b,borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${f.score}%`,background:f.score>=70?d.a2:f.score>=50?d.gold:d.danger,borderRadius:3,transition:"width .6s ease"}}/>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* What moves the needle */}
-                  {improvements.length>0&&(
-                    <div className="card cp" style={{marginBottom:20}}>
-                      <div className="cl" style={{marginBottom:12}}>What Moves Your Rank Most</div>
-                      {improvements.map((imp,i)=>(
-                        <div key={imp.key} style={{display:"flex",gap:12,padding:"12px 14px",marginBottom:6,borderRadius:4,background:d.hover,border:`1px solid ${d.b}`}}>
-                          <div style={{width:24,height:24,borderRadius:"50%",background:`${d.a1}20`,border:`1px solid ${d.a1}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:d.a1,flexShrink:0}}>{i+1}</div>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                              <span style={{fontSize:12,fontWeight:600,color:d.t}}>{imp.label}</span>
-                              <span style={{fontSize:11,fontWeight:700,color:d.a2,background:`${d.a2}15`,padding:"1px 7px",borderRadius:3}}>{imp.impact}</span>
-                            </div>
-                            <div style={{fontSize:11,color:d.t3,lineHeight:1.5}}>{imp.action}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{fontSize:11,color:d.t4,textAlign:"center",fontStyle:"italic",lineHeight:1.6}}>
-                    Rank estimate is based on your study patterns, consistency, and coverage relative to CFA passers (top 50%). It updates as you log more sessions.
-                  </div>
-                  </>}
-                </div>
-              );
-            })()}
 
             {tab==="streaks"&&(
               <div className="pin">
@@ -4977,19 +5100,24 @@ function App(){
 
                   {(roadmap.weeks||[]).map(week=>{
                     const weekTopics=[...new Set(week.days.flatMap(dd=>dd.items.map(it=>it.subject)))];
-                    const weekDone=week.days.flatMap(dd=>dd.items).filter(it=>roadmapDone[itemKey(week.days[0]?.date||today(),it)]);
+                    const weekMins=week.days.flatMap(dd=>dd.items).reduce((a,it)=>a+(it.durationMins||60),0);
                     return(
                       <div key={week.weekNum} style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:12,marginBottom:14,overflow:"hidden"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:d.hover,borderBottom:`1px solid ${d.b}`,flexWrap:"wrap",gap:8}}>
-                          <div style={{fontSize:13,fontWeight:700,color:d.t}}>Week {week.weekNum}</div>
+                          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                            <div style={{fontSize:13,fontWeight:700,color:d.t}}>Week {week.weekNum}</div>
+                            <div style={{fontSize:10,color:d.t3}}>~{fmt(weekMins)}</div>
+                          </div>
                           <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                             {weekTopics.map(s=><span key={s} style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:(SUBJECT_COLORS[s]||d.a1)+"18",color:SUBJECT_COLORS[s]||d.a1,fontWeight:700}}>{s}</span>)}
                           </div>
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:1,background:d.b}}>
-                          {week.days.map(dd=>(
+                          {week.days.map(dd=>{
+                            const dayMins=dd.items.reduce((a,it)=>a+(it.durationMins||60),0);
+                            return(
                             <div key={dd.date} style={{background:d.card,padding:"10px 10px",minHeight:80}}>
-                              <div style={{fontSize:10,fontWeight:700,color:d.t3,marginBottom:6}}>{dayName(dd.date)} <span style={{color:d.t4}}>{dd.date.slice(5)}</span></div>
+                              <div style={{fontSize:10,fontWeight:700,color:d.t3,marginBottom:6}}>{dayName(dd.date)} <span style={{color:d.t4}}>{dd.date.slice(5)}</span>{dayMins>0&&<span style={{color:d.a2,fontWeight:600}}> · {fmt(dayMins)}</span>}</div>
                               {dd.items.map((item,i)=>{
                                 const key=itemKey(dd.date,item);
                                 const done=roadmapDone[key];
@@ -5001,7 +5129,7 @@ function App(){
                                 );
                               })}
                             </div>
-                          ))}
+                          );})}
                         </div>
                       </div>
                     );
