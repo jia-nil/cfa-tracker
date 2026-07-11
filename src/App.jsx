@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -250,7 +249,7 @@ const fmt  = m=>{if(m==null||m<0)return"0m";if(m===0)return"0m";return m<60?m+"m
 const fmtT = s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?`${h}:${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`:`${String(m).padStart(2,"0")}:${String(sc).padStart(2,"0")}`;};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 const dayName=dateStr=>new Date(dateStr+'T00:00:00').toLocaleDateString('en-US',{weekday:'short'});;
-function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
+function addDays(dateStr,n){const d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000);}
 function isOverdue(dateStr){return dateStr<today();}
 function isDueToday(dateStr){return dateStr===today();}
@@ -847,6 +846,7 @@ const TABS=[
   {id:"buddy",label:"Study Buddy",icon:"🤝"},
   {id:"report",label:"Weekly Report",icon:"📨"},
   {id:"profile",label:"Profile",icon:"◯"},
+  {id:"help",label:"Help & Feedback",icon:"💬"},
 ];
 
 
@@ -2098,6 +2098,14 @@ function App(){
   const [joinedEvents,setJoinedEvents]=useState(new Set());
   const [showCreateEvent,setShowCreateEvent]=useState(false);
   const [eventForm,setEventForm]=useState({title:"",description:"",subject:"Physics",type:"marathon",starts_at:"",ends_at:""});
+  // Help & Feedback form — email pre-filled from the logged-in account but editable, since some
+  // people prefer to be contacted somewhere else than their sign-in email.
+  const [feedbackCategory,setFeedbackCategory]=useState("bug");
+  const [feedbackEmail,setFeedbackEmail]=useState("");
+  const [feedbackMessage,setFeedbackMessage]=useState("");
+  const [feedbackSubmitting,setFeedbackSubmitting]=useState(false);
+  const [feedbackSubmitted,setFeedbackSubmitted]=useState(false);
+  const [feedbackError,setFeedbackError]=useState("");
   const [postCapture,setPostCapture]=useState(null); // base64 image from camera
   const [postText,setPostText]=useState("");
   const [postLoading,setPostLoading]=useState(false);
@@ -2939,7 +2947,7 @@ function App(){
           localStorage.setItem("nev_target_hours",String(setup.targetHours));
           localStorage.setItem("nev_exam_setup_done","1");
         }catch(e){}
-        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,cfa_level:setup.level,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours,daily_hours:setup.dailyHours||dailyStudyHours})}).catch(()=>{});
+        if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,je_class:setup.level,exam_window:setup.examWindow,study_days:setup.studyDays,edu_status:setup.eduStatus,target_hours:setup.targetHours,daily_hours:setup.dailyHours||dailyStudyHours})}).catch(()=>{});
       }}
     />
   );
@@ -3171,7 +3179,7 @@ function App(){
 
             {/* Social */}
             {sideOpen&&<div style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:d.t4,padding:"4px 12px 4px"}}>Community</div>}
-            {["buddy","report","profile"].map(id=>{
+            {["buddy","report","profile","help"].map(id=>{
               const t=TABS.find(x=>x.id===id);
               if(!t)return null;
               return(
@@ -3242,6 +3250,7 @@ function App(){
                   {tab==="partner"&&"two candidates, one deadline. accountability works."}
                   {tab==="report"&&"every sunday, the truth about your week."}
                   {tab==="profile"&&`@${profile?.username||"..."}`}
+                  {tab==="help"&&"found a bug? got an idea? tell us — we actually read these."}
                 </div>
               </div>
             </div>
@@ -4707,6 +4716,107 @@ function App(){
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+              );
+            })()}
+
+            {/* ── HELP & FEEDBACK ── */}
+            {tab==="help"&&(()=>{
+              const submitFeedback=async()=>{
+                setFeedbackError("");
+                const msg=feedbackMessage.trim();
+                if(msg.length<5){setFeedbackError("say a little more so we know what happened");return;}
+                const email=(feedbackEmail||user?.email||"").trim();
+                setFeedbackSubmitting(true);
+                try{
+                  const res=await fetch(`${SB_URL}/rest/v1/user_feedback`,{
+                    method:"POST",
+                    headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession?.access_token||SB_ANON}`,"Content-Type":"application/json","Prefer":"return=minimal"},
+                    body:JSON.stringify({
+                      user_id:user?.id||null,
+                      email,
+                      category:feedbackCategory,
+                      message:msg,
+                      // Context that's genuinely useful for triaging a bug report, sent quietly —
+                      // not shown as a form field so the person isn't asked to fill it in themselves.
+                      meta:{je_class:jeClass,exam_window:examWindow,daily_hours:dailyStudyHours,page:tab,ts:new Date().toISOString()}
+                    })
+                  });
+                  if(!res.ok)throw new Error("save failed");
+                  setFeedbackSubmitted(true);
+                  setFeedbackMessage("");
+                }catch(e){
+                  setFeedbackError("couldn't send that — check your connection and try again");
+                }
+                setFeedbackSubmitting(false);
+              };
+              return(
+              <div className="pin">
+                <div className="card cp" style={{marginBottom:20}}>
+                  <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:4}}>Help & Feedback</div>
+                  <div style={{fontSize:12.5,color:d.t3,marginBottom:18,lineHeight:1.5}}>
+                    hit a bug, confused by something, or have an idea that would make this better? tell us here — a real person reads every one of these.
+                  </div>
+
+                  {feedbackSubmitted?(
+                    <div style={{padding:"20px 16px",borderRadius:10,background:d.a2+"12",border:`1px solid ${d.a2}30`,textAlign:"center"}}>
+                      <div style={{fontSize:24,marginBottom:8}}>✅</div>
+                      <div style={{fontSize:13.5,fontWeight:700,color:d.t,marginBottom:4}}>thanks — got it.</div>
+                      <div style={{fontSize:12,color:d.t3,marginBottom:14}}>we'll follow up at {feedbackEmail||user?.email||"your email"} if we need more details.</div>
+                      <button onClick={()=>setFeedbackSubmitted(false)}
+                        style={{padding:"7px 16px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
+                        send another
+                      </button>
+                    </div>
+                  ):(
+                    <>
+                      <div className="field">
+                        <label className="fl">What's this about?</label>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          {[{id:"bug",label:"🐞 Something's broken"},{id:"idea",label:"💡 Feature idea"},{id:"general",label:"💬 General feedback"}].map(c=>(
+                            <div key={c.id} onClick={()=>setFeedbackCategory(c.id)}
+                              style={{padding:"8px 14px",borderRadius:8,cursor:"pointer",fontSize:12.5,fontWeight:600,
+                                background:feedbackCategory===c.id?d.a1+"18":d.hover,
+                                border:`1.5px solid ${feedbackCategory===c.id?d.a1:d.b}`,
+                                color:feedbackCategory===c.id?d.a1:d.t2}}>
+                              {c.label}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="field">
+                        <label className="fl">Your email {user?.email?"(so we can follow up)":"(so we can follow up — optional)"}</label>
+                        <input className="inp" type="email" placeholder={user?.email||"you@email.com"}
+                          value={feedbackEmail} onChange={e=>setFeedbackEmail(e.target.value)}/>
+                      </div>
+
+                      <div className="field">
+                        <label className="fl">Tell us what happened</label>
+                        <textarea className="inp" rows={5}
+                          placeholder="the more detail the better — what were you doing, what did you expect, what actually happened?"
+                          style={{resize:"vertical",minHeight:100,fontFamily:"inherit"}}
+                          value={feedbackMessage} onChange={e=>setFeedbackMessage(e.target.value)}/>
+                      </div>
+
+                      {feedbackError&&(
+                        <div style={{fontSize:12,color:d.danger,marginBottom:10}}>{feedbackError}</div>
+                      )}
+
+                      <button onClick={submitFeedback} disabled={feedbackSubmitting||feedbackMessage.trim().length<5}
+                        style={{width:"100%",padding:"11px",borderRadius:8,background:d.a1,color:"#fff",border:"none",
+                          cursor:feedbackSubmitting?"default":"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",
+                          opacity:feedbackSubmitting||feedbackMessage.trim().length<5?0.6:1}}>
+                        {feedbackSubmitting?"sending...":"send feedback"}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div className="card cp" style={{fontSize:12.5,color:d.t3,lineHeight:1.6}}>
+                  <div style={{fontSize:13,fontWeight:700,color:d.t,marginBottom:8}}>Prefer email?</div>
+                  you can also just email us directly — same inbox, same team reading it.
                 </div>
               </div>
               );
