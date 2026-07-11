@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -295,28 +294,35 @@ function allTopicsForLevel(level){
 // heavy topic correctly spread across multiple days instead of being crammed into one.
 function packSessionsIntoDates(sessionPool,dates,dailyHours){
   const dailyBudgetMins=Math.max(30,(dailyHours||2)*60);
-  const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0}));
+  const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
   if(assignments.length===0) return assignments;
   let poolIdx=0,dayIdx=0,safety=0;
   while(poolIdx<sessionPool.length&&safety<sessionPool.length*4+2000){
     const slot=assignments[dayIdx%assignments.length];
     const item=sessionPool[poolIdx];
-    if(slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0){
+    const topicKey=item.subject+"|"+item.topic;
+    const fitsBudget=slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0;
+    // One pass of a given topic per day, max — otherwise two different passes of the same topic
+    // (e.g. pass 1 at "0.5h of 11h" and pass 8 at "4h of 11h") can both land on today's list with
+    // no indication they're different sessions, which just reads as the numbers not adding up.
+    const topicFree=!slot.topicKeys.has(topicKey);
+    if(fitsBudget&&topicFree){
       slot.items.push(item);
       slot.usedMins+=item.durationMins;
+      slot.topicKeys.add(topicKey);
       poolIdx++;
     }
     dayIdx++;
     safety++;
   }
-  while(poolIdx<sessionPool.length){
-    // Genuine shortfall (more content than the available time can fit even once each day is
-    // over budget) — spread what's left evenly across all days round-robin instead of dumping
-    // it all onto the last day, which is what used to produce a single day needing 60+ hours.
-    assignments[dayIdx%assignments.length].items.push(sessionPool[poolIdx]);
-    dayIdx++;
-    poolIdx++;
-  }
+  // Genuine shortfall: more content than the study window can hold even at full capacity every
+  // single day. The daily-hours budget is a hard ceiling the user explicitly set — we do NOT dump
+  // the remainder onto days regardless of budget (that used to produce a "0.5h/day" plan showing
+  // 7h on a single day). Instead the overflow is simply left unscheduled; sessionPool is ordered
+  // highest-priority-first (H-weight topics, earlier passes), so what gets dropped is the lowest-
+  // priority tail. The caller surfaces this as `droppedSessions` so the UI can warn the user their
+  // timeline doesn't fit even the leaner plan, rather than silently overloading random days.
+  assignments.unscheduledCount=sessionPool.length-poolIdx;
   return assignments;
 }
 function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance,dailyHours,focusMode}){
@@ -398,8 +404,14 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
         if(strongTopicSet.has(key)) topicHours*=0.5;
         else if(doneTopicSet.has(key)) topicHours*=0.6;
         const blocks=Math.max(1,Math.round((topicHours*60)/SESSION_BLOCK_MINS));
+        // Denominator shown to the user MUST equal what's actually scheduled (blocks*durationMins),
+        // not a separately-rounded estimate of the raw topicHours — otherwise the two numbers answer
+        // different questions and the "X of Y" fraction can never reach its own total (e.g. raw
+        // topicHours=8.7 rounds to a "9h" label but only 8.5h of 30-min blocks actually get
+        // scheduled, so the last session reads "8.5 of 9" and never catches up).
+        const scheduledTopicHours=Math.round((blocks*SESSION_BLOCK_MINS/60)*10)/10;
         for(let p=0;p<blocks;p++){
-          subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:Math.round(topicHours)});
+          subjectPools[subject].push({...t,pass:p+1,totalPasses:blocks,durationMins:SESSION_BLOCK_MINS,topicHours:scheduledTopicHours});
         }
       });
     });
@@ -433,9 +445,15 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   });
   const weeks=Object.keys(weeksMap).sort((a,b)=>a-b).map(k=>({weekNum:parseInt(k)+1,days:weeksMap[k]}));
   const revisionTopics=topics.filter(t=>t.weight==="H"||t.weight==="M");
-  const perDaySessions=Math.max(1,Math.round(sessionPool.length/studyDates.length));
-  const totalPlannedHours=Math.round(sessionPool.reduce((a,s)=>a+s.durationMins,0)/6)/10;
-  return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:sessionPool.length,perDaySessions,totalPlannedHours};
+  const scheduledCount=sessionPool.length-(assignments.unscheduledCount||0);
+  const perDaySessions=Math.max(1,Math.round(scheduledCount/studyDates.length));
+  // Only count what actually made it onto the calendar — a session that got dropped for lack of
+  // room shouldn't inflate the "planned hours" total shown to the user.
+  const scheduledMins=assignments.reduce((a,day)=>a+day.items.reduce((b,it)=>b+(it.durationMins||0),0),0);
+  const totalPlannedHours=Math.round(scheduledMins/6)/10;
+  const droppedSessions=assignments.unscheduledCount||0;
+  const droppedHours=droppedSessions>0?Math.round(sessionPool.slice(scheduledCount).reduce((a,s)=>a+(s.durationMins||0),0)/6)/10:0;
+  return {weeks,totalDays:totalDaysToExam,studyDates,revisionTopics,totalSessions:scheduledCount,perDaySessions,totalPlannedHours,droppedSessions,droppedHours};
 }
 function itemKey(date,item){return date+"|"+item.subject+"|"+item.topic+"|"+item.pass;}
 
@@ -1995,15 +2013,23 @@ function App(){
       for(const dd of futureDays){
         if(queue.length===0)break;
         const existingKeys=new Set(dd.items.map(it=>it.subject+"|"+it.topic+"|"+it.pass));
+        const existingTopics=new Set(dd.items.map(it=>it.subject+"|"+it.topic));
         let usedMins=dd.items.reduce((a,it)=>a+(it.durationMins||0),0);
         const toAdd=[];
         while(queue.length){
           const it=queue[0];
           const k=it.subject+"|"+it.topic+"|"+it.pass;
+          const topicKey=it.subject+"|"+it.topic;
           if(existingKeys.has(k)){queue.shift();continue;}
+          // If this day already has a different pass of the same topic scheduled, don't bubble
+          // another pass of it onto the same day too — that's what caused "Code of Ethics: 0.5h
+          // of 11h" and "Code of Ethics: 4h of 11h" to both show up on today's list at once.
+          // Leave it in the queue and try it again on the next future day instead.
+          if(existingTopics.has(topicKey))break;
           if(usedMins+(it.durationMins||30)>dailyBudgetMins)break;
           toAdd.push(it);
           usedMins+=(it.durationMins||30);
+          existingTopics.add(topicKey);
           queue.shift();
         }
         dd.items=[...toAdd,...dd.items];
@@ -3329,6 +3355,15 @@ function App(){
                         style={{padding:"6px 12px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",flexShrink:0}}>
                         📆 clear backlog by...
                       </button>
+                    </div>
+                  )}
+
+                  {/* Doesn't-fit notice — content had to be dropped rather than exceed the daily-hours budget */}
+                  {roadmap?.droppedSessions>0&&(
+                    <div style={{padding:"12px 16px",borderRadius:10,background:d.gold+"10",border:`1px solid ${d.gold}25`,fontSize:12.5,color:d.t2,marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:200}}>
+                        {`⚠️ even the leaner roadmap doesn't fit your exam date at ${dailyStudyHours}h/day — ~${roadmap.droppedHours}h of lower-priority material (${roadmap.droppedSessions} session${roadmap.droppedSessions!==1?"s":""}) had to be left off the calendar rather than overload any single day. push out your exam date or raise your daily hours to cover it.`}
+                      </div>
                     </div>
                   )}
 
