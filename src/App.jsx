@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -293,7 +294,10 @@ function allTopicsForLevel(level){
 // to its real time budget (hours/day) instead of a flat item-count cap. This is what makes a
 // heavy topic correctly spread across multiple days instead of being crammed into one.
 function packSessionsIntoDates(sessionPool,dates,dailyHours){
-  const dailyBudgetMins=Math.max(30,(dailyHours||2)*60);
+  // Same rounding as the session-sizing step: commit to the daily target rounded UP to the
+  // nearest half hour, so this budget always lines up exactly with SESSION_BLOCK_MINS (30 or 60)
+  // and every day fills to the same, predictable total with nothing left over.
+  const dailyBudgetMins=Math.max(30,Math.ceil((dailyHours||2)*60/30)*30);
   const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
   if(assignments.length===0) return assignments;
   let poolIdx=0,dayIdx=0,safety=0;
@@ -383,7 +387,19 @@ function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTo
   // (which used to silently blow the daily budget on the very first item every day, and made
   // topics rack up passes far faster than the user's real pace).
   const dailyBudgetForSizing=Math.max(15,(dailyHours||2)*60);
-  const SESSION_BLOCK_MINS=Math.min(60,dailyBudgetForSizing);
+  // Round the daily commitment UP to the nearest half hour (1.4h/day -> a real 90min/day, not a
+  // silently-capped 60min/day) so the plan never quietly under-schedules a fractional target.
+  // Any resulting slight overshoot in pace just means the syllabus finishes a little early,
+  // leaving genuine rest days before the exam — the safe direction to round, vs. permanently
+  // losing the same chunk of time every day forever (which is what put a real user 60h behind).
+  const roundedDailyMins=Math.max(30,Math.ceil(dailyBudgetForSizing/30)*30);
+  // Block size must divide evenly into the rounded daily commitment so every day hits that exact
+  // total with a consistent, predictable shape — no "1h some days, 2h other days" variability,
+  // no leftover minutes to lose. Use clean 60-min sessions when the day is a whole number of
+  // hours (2h/day -> two 60-min sessions); otherwise drop to clean 30-min sessions so the day's
+  // total still lands exactly on target (1.5h/day -> three 30-min sessions, not one lossy 60-min
+  // one with 30min quietly dropped).
+  const SESSION_BLOCK_MINS=(roundedDailyMins%60===0)?60:30;
   const weightPoints={H:3,M:2,L:1};
   let sessionPool;
   if(remainingTopics){
