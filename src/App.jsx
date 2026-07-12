@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -299,55 +300,41 @@ function allTopicsForLevel(level){
 // Packs a pool of {durationMins,...} session blocks into a list of dates, filling each date up
 // to its real time budget (hours/day) instead of a flat item-count cap. This is what makes a
 // heavy topic correctly spread across multiple days instead of being crammed into one.
-// Caps how many DIFFERENT topics can land on one day when the daily budget is small — splitting
-// a short day (e.g. 1.5h) across 4-5 unrelated topics in 30-min slivers hurts focus far more than
-// it helps; better to go deeper on fewer topics, even if that means a second block of the same
-// topic filling out the rest of the day.
-function maxTopicsPerDayFor(dailyHours){
-  const h=dailyHours||0;
-  if(h<3) return 2;
-  if(h<5) return 4;
-  return Infinity;
-}
+//
+// No hard "max N topics if under X hours" rule — that was too rigid and had a real bug: because
+// sessionPool interleaves subjects (one block per subject per round, for spaced variety across
+// the whole plan), a fixed cap could get "stuck" — e.g. a 1.5h day hits its 2-topic cap after only
+// 1h, and the next pool item is always a 3rd new topic that keeps getting deferred forever, so the
+// day shows 1h scheduled instead of the full 1.5h.
+//
+// Instead: for each day, keep pulling from the pool until the budget is full. Prefer the next
+// block of a topic ALREADY started today over a brand-new topic. This naturally keeps most days
+// on one or two topics (few topics have enough remaining blocks to need more), guarantees the
+// full daily budget always gets used, and needs no hardcoded thresholds.
 function packSessionsIntoDates(sessionPool,dates,dailyHours){
   // Same rounding as the session-sizing step (shared roundedDailyMins helper): commit to the
   // daily target rounded UP to the nearest half hour, so this budget always lines up exactly
   // with SESSION_BLOCK_MINS (30 or 60) and every day fills to the same, predictable total with
   // nothing left over.
   const dailyBudgetMins=roundedDailyMins(dailyHours);
-  const maxTopicsPerDay=maxTopicsPerDayFor(dailyHours);
   const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
   if(assignments.length===0) return assignments;
-  let poolIdx=0,dayIdx=0,safety=0;
-  while(poolIdx<sessionPool.length&&safety<sessionPool.length*4+2000){
-    const slot=assignments[dayIdx%assignments.length];
-    const item=sessionPool[poolIdx];
-    const topicKey=item.subject+"|"+item.topic;
-    const fitsBudget=slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0;
-    const alreadyToday=slot.topicKeys.has(topicKey);
-    // Prefer one pass of a given topic per day (keeps different passes visually distinct in the
-    // "X of Yh" fraction) — UNLESS today has already hit its topic-variety cap, in which case a
-    // second block of a topic ALREADY scheduled today is exactly what should fill the remaining
-    // budget, rather than reaching for yet another new topic.
-    const underTopicCap=slot.topicKeys.size<maxTopicsPerDay;
-    // A topic already scheduled today is always allowed back in (fills remaining budget without
-    // adding variety); a brand-new topic only gets in while today is still under its cap.
-    const canTake=alreadyToday||underTopicCap;
-    if(fitsBudget&&canTake){
+  const pool=sessionPool.slice(); // mutable working copy; we splice items out as they're placed
+  for(const slot of assignments){
+    if(pool.length===0) break;
+    while(pool.length>0){
+      let idx=slot.topicKeys.size>0
+        ? pool.findIndex(it=>slot.topicKeys.has(it.subject+"|"+it.topic))
+        : -1;
+      if(idx===-1) idx=0; // no in-progress topic left to continue — start the next new one
+      const item=pool[idx];
+      const fitsBudget=slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0;
+      if(!fitsBudget) break; // day is full (or already holds one oversized item) — move to next day
       slot.items.push(item);
       slot.usedMins+=item.durationMins;
-      slot.topicKeys.add(topicKey);
-      poolIdx++;
-      // Stay on THIS day and keep packing — only move to the next day once it's actually full.
-      // Advancing dayIdx unconditionally here (the old bug) meant every day got only its first
-      // item on the initial pass through the calendar; a day's 2nd/3rd item only got filled in
-      // after the pointer had already wrapped all the way around every study date once, by which
-      // point poolIdx had raced far ahead — so "today" (day 1) could end up showing pass 6 of a
-      // topic as its second session, as if 5 earlier passes had already happened.
-    }else{
-      dayIdx++;
+      slot.topicKeys.add(item.subject+"|"+item.topic);
+      pool.splice(idx,1);
     }
-    safety++;
   }
   // Genuine shortfall: more content than the study window can hold even at full capacity every
   // single day. The daily-hours budget is a hard ceiling the user explicitly set — we do NOT dump
@@ -356,7 +343,7 @@ function packSessionsIntoDates(sessionPool,dates,dailyHours){
   // highest-priority-first (H-weight topics, earlier passes), so what gets dropped is the lowest-
   // priority tail. The caller surfaces this as `droppedSessions` so the UI can warn the user their
   // timeline doesn't fit even the leaner plan, rather than silently overloading random days.
-  assignments.unscheduledCount=sessionPool.length-poolIdx;
+  assignments.unscheduledCount=pool.length;
   return assignments;
 }
 function generateRoadmap({level,examDate,studyDays,answers,startDate,remainingTopics,performance,dailyHours,focusMode}){
