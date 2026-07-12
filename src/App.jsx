@@ -316,22 +316,40 @@ function packSessionsIntoDates(sessionPool,dates,dailyHours){
   // with SESSION_BLOCK_MINS (30 or 60) and every day fills to the same, predictable total with
   // nothing left over.
   const dailyBudgetMins=roundedDailyMins(dailyHours);
-  const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicKeys:new Set()}));
+  // Cap how long any ONE topic can run continuously within a single day. Without this, a big
+  // daily budget (e.g. 5h/day) collapses into "one topic, all 5 hours" whenever that topic has
+  // enough remaining passes to cover it — which is worse for retention than mixing topics. 120
+  // min is the top of the focused-session sweet spot (roughly 1-2h per topic per day); small
+  // daily budgets (<=120min) never hit this cap anyway, so short-day behaviour is unchanged.
+  const MAX_TOPIC_MINS_PER_DAY=120;
+  const assignments=dates.map(dt=>({date:dt,items:[],usedMins:0,topicMins:new Map()}));
   if(assignments.length===0) return assignments;
   const pool=sessionPool.slice(); // mutable working copy; we splice items out as they're placed
   for(const slot of assignments){
     if(pool.length===0) break;
     while(pool.length>0){
-      let idx=slot.topicKeys.size>0
-        ? pool.findIndex(it=>slot.topicKeys.has(it.subject+"|"+it.topic))
-        : -1;
-      if(idx===-1) idx=0; // no in-progress topic left to continue — start the next new one
+      // Prefer continuing a topic already started today — but only while it's under today's
+      // per-topic cap. Once a topic hits the cap it's excluded from BOTH branches below, so a
+      // maxed-out topic can no longer be re-picked today even as a "new" pick, and the pack
+      // naturally rotates on to a different topic instead.
+      let idx=pool.findIndex(it=>{
+        const used=slot.topicMins.get(it.subject+"|"+it.topic);
+        return used!=null&&used<MAX_TOPIC_MINS_PER_DAY;
+      });
+      if(idx===-1){
+        idx=pool.findIndex(it=>{
+          const used=slot.topicMins.get(it.subject+"|"+it.topic);
+          return used==null||used<MAX_TOPIC_MINS_PER_DAY;
+        });
+      }
+      if(idx===-1) break; // everything left in the pool is capped for today — move to next day
       const item=pool[idx];
       const fitsBudget=slot.usedMins+item.durationMins<=dailyBudgetMins||slot.items.length===0;
       if(!fitsBudget) break; // day is full (or already holds one oversized item) — move to next day
       slot.items.push(item);
       slot.usedMins+=item.durationMins;
-      slot.topicKeys.add(item.subject+"|"+item.topic);
+      const k=item.subject+"|"+item.topic;
+      slot.topicMins.set(k,(slot.topicMins.get(k)||0)+item.durationMins);
       pool.splice(idx,1);
     }
   }
@@ -5538,16 +5556,39 @@ function App(){
                                 <div style={{fontSize:10,color:dd.dayType==="revision"?d.gold:d.t4,fontStyle:"italic",padding:"3px 6px"}}>
                                   {dd.dayType==="revision"?"revision — syllabus done, review time":"rest day"}
                                 </div>
-                              ):dd.items.map((item,i)=>{
-                                const key=itemKey(dd.date,item);
-                                const done=roadmapDone[key];
-                                return(
-                                  <div key={i} onClick={()=>toggleRoadmapItem(dd.date,item)} title={item.topic}
-                                    style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[item.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[item.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                                    {item.topic}{item.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({Math.round((item.pass*(item.durationMins||30)/60)*10)/10}h/{item.topicHours||"?"}h)</span>}
-                                  </div>
-                                );
-                              })}
+                              ):(()=>{
+                                // Same-topic passes scheduled on the same day (e.g. a 1.5h/day
+                                // plan chunked into three 30-min blocks of one topic) used to
+                                // render as separate near-identical rows — "Code of Ethics
+                                // (0.5h/11h)", "(1h/11h)", "(1.5h/11h)" stacked on top of each
+                                // other. Merge them into one row per topic per day: combined
+                                // duration, and the cumulative "X of Yh" read off the highest-pass
+                                // entry so it still reflects real progress.
+                                const groups=new Map();
+                                for(const it of dd.items){
+                                  const gk=it.subject+"|"+it.topic;
+                                  if(!groups.has(gk))groups.set(gk,[]);
+                                  groups.get(gk).push(it);
+                                }
+                                return Array.from(groups.values()).map((g,i)=>{
+                                  const sorted=[...g].sort((a,b)=>(a.pass||0)-(b.pass||0));
+                                  const last=sorted[sorted.length-1];
+                                  const totalDuration=sorted.reduce((s,it)=>s+(it.durationMins||0),0);
+                                  const cumulativeMins=(last.pass||1)*(last.durationMins||30);
+                                  const done=sorted.every(p=>roadmapDone[itemKey(dd.date,p)]);
+                                  return(
+                                    <div key={i} onClick={()=>{
+                                        sorted.forEach(p=>{
+                                          const already=!!roadmapDone[itemKey(dd.date,p)];
+                                          if(done?already:!already) toggleRoadmapItem(dd.date,p);
+                                        });
+                                      }} title={last.topic}
+                                      style={{fontSize:10,color:done?d.t4:d.t2,padding:"3px 6px",marginBottom:2,background:done?d.hover:(SUBJECT_COLORS[last.subject]||d.a1)+"10",borderRadius:4,borderLeft:`2px solid ${SUBJECT_COLORS[last.subject]||d.a1}`,cursor:"pointer",lineHeight:1.3,textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                      {last.topic}{last.totalPasses>1&&<span style={{fontWeight:800,color:done?d.t4:d.a1}}> ({Math.round((cumulativeMins/60)*10)/10}h/{last.topicHours||"?"}h)</span>}
+                                    </div>
+                                  );
+                                });
+                              })()}
                             </div>
                           );})}
                         </div>
@@ -5836,4 +5877,3 @@ function App(){
     </>
   );
 }
-
