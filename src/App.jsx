@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 const SB_URL  = import.meta.env.VITE_SUPABASE_URL;
 const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
@@ -3331,8 +3330,29 @@ function App(){
               const todayTargetMins=isStudyDayToday?roundedDailyMins(dailyStudyHours):0;
               const todayRemainingMins=Math.max(0,todayTargetMins-todayMins);
 
-              // Today's items from roadmap
-              const todayRoadmap=roadmapTodayItems;
+              // Today's items from roadmap — same topic can get multiple passes scheduled on the
+              // same day now that a day fills its full budget by continuing an in-progress topic
+              // (see packSessionsIntoDates). Merge those into one card here: same "start" button,
+              // combined duration, and the cumulative "X of Yh" already reads correctly off the
+              // highest-pass entry — showing 3 near-identical rows for one topic was just noise.
+              const todayRoadmap=(()=>{
+                const groups=new Map();
+                for(const it of roadmapTodayItems){
+                  const k=it.subject+"|"+it.topic;
+                  if(!groups.has(k))groups.set(k,[]);
+                  groups.get(k).push(it);
+                }
+                return Array.from(groups.values()).map(g=>{
+                  const sorted=[...g].sort((a,b)=>(a.pass||0)-(b.pass||0));
+                  const last=sorted[sorted.length-1];
+                  const totalDuration=sorted.reduce((s,it)=>s+(it.durationMins||0),0);
+                  // Cumulative "X of Yh" uses pass-number × the ORIGINAL per-pass block size (all
+                  // passes of a topic share the same block size) — not the merged total, which
+                  // would double-count once several of today's passes get folded into one card.
+                  const cumulativeMins=(last.pass||1)*(last.durationMins||30);
+                  return {...last,durationMins:totalDuration,_cumulativeMins:cumulativeMins,_mergedPasses:sorted};
+                });
+              })();
               const isStudyDay=(studyDays||[]).includes(weekdayIndex(today()));
 
               // Nearest upcoming topics from roadmap (next few days) for context
@@ -3490,12 +3510,20 @@ function App(){
                     )}
 
                     {todayRoadmap.map((item,i)=>{
+                      const passes=item._mergedPasses||[item];
                       const key=itemKey(today(),item);
-                      const done=roadmapDone[key];
+                      const done=passes.every(p=>roadmapDone[itemKey(today(),p)]);
                       const col=SUBJECT_COLORS[item.subject]||d.a1;
                       return(
                         <div key={i} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:done?d.hover:d.card,border:`1px solid ${done?d.b:col+"30"}`,borderLeft:`3px solid ${done?d.b:col}`,borderRadius:10,marginBottom:8,transition:"all .2s",opacity:done?.6:1}}>
-                          <div onClick={()=>toggleRoadmapItem(today(),item)}
+                          <div onClick={()=>{
+                              // Toggle every pass merged into this card together, so the checkbox
+                              // reflects (and controls) the whole card, not just one pass of it.
+                              passes.forEach(p=>{
+                                const already=!!roadmapDone[itemKey(today(),p)];
+                                if(done?already:!already) toggleRoadmapItem(today(),p);
+                              });
+                            }}
                             style={{width:22,height:22,borderRadius:6,border:`2px solid ${done?d.a2:d.b}`,background:done?d.a2:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,color:"#fff",fontSize:12,fontWeight:700,transition:"all .15s"}}>
                             {done&&"✓"}
                           </div>
@@ -3508,7 +3536,7 @@ function App(){
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>{Math.round((item.pass*(item.durationMins||30)/60)*10)/10} hour of {item.topicHours||"?"} hour</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>{Math.round(((item._cumulativeMins!=null?item._cumulativeMins:item.pass*(item.durationMins||30))/60)*10)/10} hour of {item.topicHours||"?"} hour</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -3525,7 +3553,7 @@ function App(){
                               ▶ start
                             </button>
                           )}
-                          <button onClick={()=>removeRoadmapItem(today(),item)} title="remove from today"
+                          <button onClick={()=>passes.forEach(p=>removeRoadmapItem(today(),p))} title="remove from today"
                             style={{width:26,height:26,borderRadius:6,background:"transparent",border:"none",color:d.t4,cursor:"pointer",fontSize:14,flexShrink:0}}>
                             ✕
                           </button>
