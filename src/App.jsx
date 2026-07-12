@@ -3928,9 +3928,9 @@ function App(){
                   <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}><div style={{fontSize:15,fontWeight:700,color:d.t}}>Readiness</div><div style={{flex:1,height:1,background:d.b}}/></div>
                   {!hasEnoughData&&(
                     <div className="card cp" style={{textAlign:"center",padding:"40px 24px",marginBottom:20}}>
-                      <div style={{fontSize:40,marginBottom:16}}>🦥</div>
+                      <div style={{fontSize:40,marginBottom:16}}>😎</div>
                       <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:8}}>readiness score unlocks in {7-uniqueDays} day{7-uniqueDays!==1?"s":""}</div>
-                      <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand. showing you 50,000+ on day one helps no one.</div>
+                      <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand.</div>
                       <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
                         {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:studyStreak+"d",t:"",c:d.a3}].map(s=>(
                           <div key={s.l} style={{padding:"14px 18px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,textAlign:"center",minWidth:90}}>
