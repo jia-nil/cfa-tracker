@@ -1968,48 +1968,46 @@ function App(){
   },[planKey,roadmapPerformanceLive]);
   const [showRebalancePicker,setShowRebalancePicker]=useState(false);
   const [rebalancePickDate,setRebalancePickDate]=useState("");
-  const [rebalanceOverride,setRebalanceOverride]=useState(null); // {untilDate, overrideMap:{date:[items]}}
-  useEffect(()=>{
-    if(rebalanceOverride&&today()>rebalanceOverride.untilDate) setRebalanceOverride(null);
-  },[rebalanceOverride]);
-  useEffect(()=>{setRebalanceOverride(null);},[jeClass,examDate,studyDays,roadmapAnswers]);
   function rebalanceRoadmap(){
     setShowRebalancePicker(true);
   }
-  function performRebalanceUntil(windowEnd){
+  // Adds all current backlog on top of whatever's already scheduled on the chosen date — it never
+  // replaces that day's existing plan. The original overdue slots get marked "removed" (not
+  // "done") so they stop being recounted as backlog once they've been given a new home; the
+  // actual backlog items get appended into roadmapManualAdds for the chosen date, which is the
+  // same persisted mechanism "add topic to today" already uses — so this survives reloads and the
+  // Planner grid picks it up automatically for that date, extra hours and all.
+  function clearBacklogOnDate(targetDate){
     if(!roadmap||!jeClass||!examDate){setShowRebalancePicker(false);return;}
     const today_str=today();
-    if(!windowEnd||windowEnd<today_str){showToast("pick a date today or later.");return;}
-    const pool=[];
+    if(!targetDate||targetDate<today_str){showToast("pick a date today or later.");return;}
+    const overdueItems=[];
     const seen=new Set();
     (roadmap.weeks||[]).forEach(w=>w.days.forEach(dd=>{
-      if(dd.date<=windowEnd){
+      if(dd.date<today_str){
         dd.items.forEach(item=>{
           const k=itemKey(dd.date,item);
           const topicKey=item.subject+"|"+item.topic+"|"+item.pass;
           if(!roadmapDone[k]&&!roadmapRemoved[k]&&!seen.has(topicKey)&&syllabusStatus[item.subject+"|"+item.topic]!=="done"){
             seen.add(topicKey);
-            pool.push(item);
+            overdueItems.push({item:{...item,_overdue:true,_originalDate:dd.date},removeKey:k});
           }
         });
       }
     }));
-    const windowDates=[];
-    let d=today_str;
-    while(d<=windowEnd){
-      if((studyDays||[]).includes(weekdayIndex(d))) windowDates.push(d);
-      d=addDays(d,1);
-    }
-    if(windowDates.length===0){showToast("none of your study days fall before that date — pick a later one.");setShowRebalancePicker(false);return;}
-    const assignments=packSessionsIntoDates(pool,windowDates,dailyStudyHours);
-    const overrideMap={};
-    assignments.forEach(a=>{overrideMap[a.date]=a.items;});
-    setRebalanceOverride({untilDate:windowEnd,overrideMap});
+    if(overdueItems.length===0){showToast("no backlog to clear.");setShowRebalancePicker(false);return;}
+    setRoadmapManualAdds(prev=>({
+      ...prev,
+      [targetDate]:[...(prev[targetDate]||[]),...overdueItems.map(o=>o.item)]
+    }));
+    setRoadmapRemoved(prev=>{
+      const next={...prev};
+      overdueItems.forEach(o=>{next[o.removeKey]=true;});
+      return next;
+    });
     setShowRebalancePicker(false);
-    showToast(`backlog will be cleared by ${windowEnd} — spread across your study days until then.`);
-  }
-  function performWindowedRebalance(windowDays){
-    performRebalanceUntil(addDays(today(),windowDays-1));
+    const hrs=Math.round(overdueItems.reduce((a,o)=>a+(o.item.durationMins||0),0)/60*10)/10;
+    showToast(`~${hrs}h of backlog added on top of ${targetDate}'s plan.`);
   }
 
   const roadmapBase=useMemo(()=>{
@@ -2041,29 +2039,25 @@ function App(){
 
   // roadmap is the adaptive view: past undone items get caught up on, either bubbled into today
   // (light slippage) or redistributed across the remaining days (real backlog) so you're never
-  // just handed an ever-growing pile on a single day.
+  // just handed an ever-growing pile on a single day. Manually-added items (ad-hoc "add topic to
+  // today", or backlog explicitly cleared onto a chosen date) are folded into every day here —
+  // additive on top of whatever the algorithm already scheduled, never replacing it.
   const roadmap=useMemo(()=>{
     if(!roadmapBase||!examDate) return roadmapBase;
     const today_str=today();
 
-    // If the user picked an explicit rebalance window, apply it directly: replace each date's
-    // items with the override up through untilDate, leave everything after that untouched.
-    if(rebalanceOverride){
-      const weeks=(roadmapBase.weeks||[]).map(w=>({
-        ...w,
-        days:w.days.map(dd=>{
-          if(dd.date>=today_str&&dd.date<=rebalanceOverride.untilDate){
-            return{...dd,items:rebalanceOverride.overrideMap[dd.date]||[]};
-          }
-          return dd;
-        })
-      }));
-      return{...roadmapBase,weeks,_overdueCount:0,_backlogRedistributed:false,_windowRebalanced:true};
-    }
+    const weeksWithManual=(roadmapBase.weeks||[]).map(w=>({
+      ...w,
+      days:w.days.map(dd=>{
+        const extra=roadmapManualAdds[dd.date];
+        if(!extra||extra.length===0) return dd;
+        return {...dd,items:[...dd.items,...extra]};
+      })
+    }));
 
     const overdue=[];
     const seenKeys=new Set();
-    (roadmapBase.weeks||[]).forEach(w=>{
+    weeksWithManual.forEach(w=>{
       w.days.forEach(dd=>{
         if(dd.date<today_str){
           dd.items.forEach(item=>{
@@ -2078,7 +2072,7 @@ function App(){
         }
       });
     });
-    if(overdue.length===0) return {...roadmapBase,_overdueCount:0,_overdueMins:0,_backlogRedistributed:false};
+    if(overdue.length===0) return {...roadmapBase,weeks:weeksWithManual,_overdueCount:0,_overdueMins:0,_backlogRedistributed:false};
     const overdueMins=overdue.reduce((a,it)=>a+(it.durationMins||0),0);
 
     // Small slippage (a day or two behind) — bubble overdue items forward, but only as many as
@@ -2087,8 +2081,11 @@ function App(){
     // plan could show 2+ hours of backlog crammed into a single "today".
     const backlogThreshold=Math.max(4,(roadmapBase.perDaySessions||2)*2);
     if(overdue.length<=backlogThreshold){
-      const dailyBudgetMins=Math.max(30,(dailyStudyHours||2)*60);
-      const weeks=(roadmapBase.weeks||[]).map(w=>({...w,days:w.days.map(dd=>({...dd,items:[...dd.items]}))}));
+      // Same rounded figure the scheduler itself budgets to (see roundedDailyMins) — using raw
+      // unrounded dailyStudyHours here made the backlog bubble-forward budget disagree with what
+      // packSessionsIntoDates actually fills each day to.
+      const dailyBudgetMins=roundedDailyMins(dailyStudyHours);
+      const weeks=weeksWithManual.map(w=>({...w,days:w.days.map(dd=>({...dd,items:[...dd.items]}))}));
       const futureDays=weeks.flatMap(w=>w.days).filter(dd=>dd.date>=today_str);
       const queue=[...overdue];
       for(const dd of futureDays){
@@ -2121,7 +2118,7 @@ function App(){
     // Real backlog — spread overdue + remaining future items evenly across the remaining study
     // days instead of dumping the whole pile on today. This is what "makes up for skipped days"
     // without burying you.
-    const futureItems=(roadmapBase.weeks||[]).flatMap(w=>w.days)
+    const futureItems=weeksWithManual.flatMap(w=>w.days)
       .filter(dd=>dd.date>=today_str)
       .flatMap(dd=>dd.items.filter(it=>{
         const k=itemKey(dd.date,it);
@@ -2135,17 +2132,17 @@ function App(){
       dailyHours:dailyStudyHours,
     });
     return {...redistributed,_overdueCount:overdue.length,_overdueMins:overdueMins,_backlogRedistributed:true};
-  },[roadmapBase,roadmapDone,roadmapRemoved,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers,dailyStudyHours,rebalanceOverride]);
+  },[roadmapBase,roadmapDone,roadmapRemoved,roadmapManualAdds,examDate,syllabusStatus,jeClass,studyDays,roadmapAnswers,dailyStudyHours]);
 
   const isRevisionPhase=false; // revision no longer carved out of the roadmap — see the Revision tab/Planner instead
   // Today's items — overdue first, then scheduled, filtered to show undone at top.
-  // Also drop anything already marked "done" via the Syllabus tab, anything manually removed,
-  // and fold in anything manually added — so this is a genuinely editable "what to study today".
+  // Also drop anything already marked "done" via the Syllabus tab, anything manually removed.
+  // Manual adds (including cleared backlog) are already folded into roadmap.weeks above, so they
+  // don't need appending again here.
   const roadmapTodayAllItems=[
     ...((roadmap?.weeks||[]).flatMap(w=>w.days).find(dd=>dd.date===today())?.items||[])
       .filter(it=>syllabusStatus[it.subject+"|"+it.topic]!=="done")
       .filter(it=>!roadmapRemoved[itemKey(today(),it)]),
-    ...(roadmapManualAdds[today()]||[]),
   ];
   // Sort: undone first, then done (so completed ones sink to bottom)
   const roadmapTodayItems=[
@@ -3463,7 +3460,7 @@ function App(){
                       </div>
                       <button onClick={rebalanceRoadmap}
                         style={{padding:"6px 12px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",flexShrink:0}}>
-                        📆 clear backlog by...
+                        📆 add backlog to a day
                       </button>
                     </div>
                   )}
@@ -3482,29 +3479,18 @@ function App(){
                       onClick={()=>setShowRebalancePicker(false)}>
                       <div onClick={e=>e.stopPropagation()}
                         style={{background:d.card,border:`1px solid ${d.b}`,borderRadius:16,padding:24,maxWidth:340,width:"100%"}}>
-                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:6}}>Clear your backlog by when?</div>
+                        <div style={{fontSize:16,fontWeight:700,color:d.t,marginBottom:6}}>Which day should carry the backlog?</div>
                         <div style={{fontSize:12,color:d.t3,marginBottom:14,lineHeight:1.5}}>
-                          you're carrying ~{Math.round((roadmap?._overdueMins||0)/60*10)/10}h of backlog. pick a date and it'll be spread evenly across your study days between now and then — nothing beyond it is touched.
+                          you're carrying ~{Math.round((roadmap?._overdueMins||0)/60*10)/10}h of backlog. pick one day — it gets added ON TOP of whatever's already scheduled there (extra hours, not a swap), and every other day stays exactly as planned.
                         </div>
                         <div style={{marginBottom:16}}>
                           <label className="fl">pick a date</label>
                           <input className="inp" type="date" min={today()} max={examDate||undefined} value={rebalancePickDate} onChange={e=>setRebalancePickDate(e.target.value)}/>
-                          <button onClick={()=>performRebalanceUntil(rebalancePickDate)} disabled={!rebalancePickDate}
+                          <button onClick={()=>clearBacklogOnDate(rebalancePickDate)} disabled={!rebalancePickDate}
                             style={{width:"100%",marginTop:8,padding:"11px",borderRadius:10,background:rebalancePickDate?d.a1:d.hover,border:`1px solid ${d.b}`,color:rebalancePickDate?"#fff":d.t4,cursor:rebalancePickDate?"pointer":"default",fontFamily:"inherit",fontSize:13,fontWeight:700}}>
-                            clear backlog by this date
+                            add backlog to this day
                           </button>
                         </div>
-                        <div style={{fontSize:10.5,color:d.t4,marginBottom:8,textTransform:"uppercase",letterSpacing:".06em",fontWeight:700}}>or pick a quick option</div>
-                        {[{d:3,l:"Next 3 days",s:"catch up fast, heavier days"},{d:7,l:"Next week",s:"balanced pace"},{d:14,l:"Next 2 weeks",s:"gentlest, most spread out"}].map(opt=>(
-                          <button key={opt.d} onClick={()=>performWindowedRebalance(opt.d)}
-                            style={{width:"100%",textAlign:"left",padding:"12px 14px",borderRadius:10,background:d.hover,border:`1px solid ${d.b}`,color:d.t,cursor:"pointer",fontFamily:"inherit",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                            <div>
-                              <div style={{fontSize:13,fontWeight:700}}>{opt.l}</div>
-                              <div style={{fontSize:10.5,color:d.t3,marginTop:2}}>{opt.s}</div>
-                            </div>
-                            <span style={{fontSize:16,color:d.t4}}>→</span>
-                          </button>
-                        ))}
                         <button onClick={()=>setShowRebalancePicker(false)}
                           style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",border:"none",color:d.t3,cursor:"pointer",fontSize:12,fontFamily:"inherit",marginTop:4}}>
                           cancel
@@ -3896,6 +3882,13 @@ function App(){
 
               const uniqueDays=new Set(sessions.map(s=>s.date)).size;
               const hasEnoughData=uniqueDays>=7;
+              // This card's other two numbers (Days Logged, Total Hours) both come from actual
+              // logged study sessions — so the streak shown here needs to be a STUDY streak too,
+              // not the app-open streak used in the separate Streaks tab ("showing up counts").
+              // Mixing the two made it possible to show "3d streak" next to "0 days logged",
+              // which looked like a bug because the two numbers were answering different
+              // questions while sitting in the same card.
+              const studyStreak=calcStreak(sessions);
 
               return(
                 <div style={{marginTop:8}}>
@@ -3906,7 +3899,7 @@ function App(){
                       <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22,color:d.t,marginBottom:8}}>readiness score unlocks in {7-uniqueDays} day{7-uniqueDays!==1?"s":""}</div>
                       <div style={{fontSize:13,color:d.t3,marginBottom:20,lineHeight:1.7,maxWidth:320,margin:"0 auto 20px"}}>log study sessions for 7 days and i'll tell you exactly where you stand. showing you 50,000+ on day one helps no one.</div>
                       <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                        {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:streak+"d",t:"",c:d.a3}].map(s=>(
+                        {[{l:"Days Logged",v:uniqueDays,t:"/ 7",c:d.a1},{l:"Total Hours",v:fmt(totalTime),t:"",c:d.a2},{l:"Streak",v:studyStreak+"d",t:"",c:d.a3}].map(s=>(
                           <div key={s.l} style={{padding:"14px 18px",borderRadius:6,background:d.hover,border:`1px solid ${d.b}`,textAlign:"center",minWidth:90}}>
                             <div style={{fontSize:22,fontWeight:700,color:s.c,fontFamily:"'DM Serif Display',serif"}}>{s.v}<span style={{fontSize:12,color:d.t3}}>{s.t}</span></div>
                             <div style={{fontSize:10,color:d.t3,marginTop:3,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</div>
@@ -5703,7 +5696,11 @@ function App(){
               // minute-units (off by a factor of 60) AND barely varied between users since it
               // depended mostly on the fixed default target/plan-length ratio, which is why every
               // student was seeing almost the same "behind" number regardless of their own goals.
-              const weeklyTargetHrs=Math.round((dailyStudyHours||0)*(studyDays?.length||0)*10)/10;
+              // Use the ROUNDED daily hours here — the same figure the scheduler actually builds
+              // the roadmap around and the same figure shown as "your daily target" elsewhere.
+              // Using the raw unrounded dailyStudyHours (e.g. 1.4h) produced a weekly target that
+              // didn't match anything else in the app (1.4×7=9.8h instead of the real 1.5×7=10.5h).
+              const weeklyTargetHrs=Math.round(roundedDailyHours(dailyStudyHours||0)*(studyDays?.length||0)*10)/10;
               const weeklyTargetMins=weeklyTargetHrs*60;
               const behindHrs=Math.max(0,Math.round((weeklyTargetMins-thisWeekMins)/60*10)/10);
               const trend=thisWeekMins>lastWeekMins?"up":thisWeekMins<lastWeekMins?"down":"flat";
