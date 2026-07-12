@@ -3342,7 +3342,13 @@ function App(){
               const wkMins=sessions.filter(s=>s.date>=weekStart).reduce((a,s)=>a+(s.duration||0),0);
               const todayMins=sessions.filter(s=>s.date===today()).reduce((a,s)=>a+(s.duration||0),0);
               const isStudyDayToday=(studyDays||[]).includes(weekdayIndex(today()));
-              const todayTargetMins=isStudyDayToday?roundedDailyMins(dailyStudyHours):0;
+              // Today's target must reflect what's actually scheduled today, not just the flat
+              // daily-hours budget — once backlog gets added on top of today (extra hours, on
+              // purpose), today's real commitment is bigger than the usual daily target, so the
+              // progress bar and "target hit" message need to grow with it instead of declaring
+              // victory at the old, smaller number.
+              const todayScheduledMins=roadmapTodayItems.reduce((a,it)=>a+(it.durationMins||0),0);
+              const todayTargetMins=isStudyDayToday?Math.max(roundedDailyMins(dailyStudyHours),todayScheduledMins):0;
               const todayRemainingMins=Math.max(0,todayTargetMins-todayMins);
 
               // Today's items from roadmap — same topic can get multiple passes scheduled on the
