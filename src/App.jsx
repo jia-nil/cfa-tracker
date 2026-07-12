@@ -3389,6 +3389,10 @@ function App(){
               const readiness=Math.round(Math.min(100,(pct*0.4)+(covPct*0.4)+(Math.min(streak,30)/30*20)));
               const readColor=readiness>=70?d.a2:readiness>=40?d.gold:d.danger;
               const readLabel=readiness>=70?"On Track":readiness>=40?"Needs Work":"At Risk";
+              // Same "not enough data yet" gate as the Analytics readiness card — a score computed
+              // off 1 day of logging is noise, not signal, so don't show it as if it means anything.
+              const ovUniqueDays=new Set(sessions.map(s=>s.date)).size;
+              const ovReadinessReady=ovUniqueDays>=7;
 
               if(!roadmapAnswers){
                 return(
@@ -3411,9 +3415,14 @@ function App(){
                     </div>
                     <div style={{display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
                       <div style={{textAlign:"center"}}>
-                        <div style={{fontSize:22,fontWeight:700,color:readColor,fontFamily:"'DM Serif Display',serif"}}>{readiness}</div>
-                        <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>readiness</div>
-                        <div style={{fontSize:9,fontWeight:700,color:readColor}}>{readLabel}</div>
+                        {ovReadinessReady?(<>
+                          <div style={{fontSize:22,fontWeight:700,color:readColor,fontFamily:"'DM Serif Display',serif"}}>{readiness}</div>
+                          <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>readiness</div>
+                          <div style={{fontSize:9,fontWeight:700,color:readColor}}>{readLabel}</div>
+                        </>):(<>
+                          <div style={{fontSize:22,fontWeight:700,color:d.t,fontFamily:"'DM Serif Display',serif"}}>{ovUniqueDays}<span style={{fontSize:12,color:d.t3}}>/7</span></div>
+                          <div style={{fontSize:9,color:d.t3,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>days logged</div>
+                        </>)}
                       </div>
                       <div style={{textAlign:"center"}}>
                         <div style={{fontSize:22,fontWeight:700,color:d.a1,fontFamily:"'DM Serif Display',serif"}}>{streak}d</div>
@@ -4863,8 +4872,8 @@ function App(){
                   {feedbackSubmitted?(
                     <div style={{padding:"20px 16px",borderRadius:10,background:d.a2+"12",border:`1px solid ${d.a2}30`,textAlign:"center"}}>
                       <div style={{fontSize:24,marginBottom:8}}>✅</div>
-                      <div style={{fontSize:13.5,fontWeight:700,color:d.t,marginBottom:4}}>thanks — got it.</div>
-                      <div style={{fontSize:12,color:d.t3,marginBottom:14}}>logged and reviewed — we can't reply individually right now, but this genuinely shapes what gets fixed and built next.</div>
+                      <div style={{fontSize:13.5,fontWeight:700,color:d.t,marginBottom:4}}>thank you, really.</div>
+                      <div style={{fontSize:12,color:d.t3,marginBottom:14}}>we read every single one of these, and it directly shapes what we fix and build next. we can't always reply personally, but you're helping make this better for everyone studying with it.</div>
                       <button onClick={()=>setFeedbackSubmitted(false)}
                         style={{padding:"7px 16px",borderRadius:7,background:"transparent",border:`1px solid ${d.b}`,color:d.t2,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
                         send another
