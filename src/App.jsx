@@ -2042,8 +2042,14 @@ function App(){
   const [roadmapRemoved,setRoadmapRemoved]=useState(()=>{
     try{return JSON.parse(localStorage.getItem("nev_roadmap_removed")||"{}");}catch(e){return {};}
   });
-  useEffect(()=>{try{localStorage.setItem("nev_roadmap_manual_adds",JSON.stringify(roadmapManualAdds));}catch(e){}},[roadmapManualAdds]);
-  useEffect(()=>{try{localStorage.setItem("nev_roadmap_removed",JSON.stringify(roadmapRemoved));}catch(e){}},[roadmapRemoved]);
+  useEffect(()=>{
+    try{localStorage.setItem("nev_roadmap_manual_adds",JSON.stringify(roadmapManualAdds));}catch(e){}
+    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,roadmap_manual_adds:roadmapManualAdds})}).catch(()=>{});
+  },[roadmapManualAdds]);
+  useEffect(()=>{
+    try{localStorage.setItem("nev_roadmap_removed",JSON.stringify(roadmapRemoved));}catch(e){}
+    if(authSession?.access_token&&user?.id)fetch(`${SB_URL}/rest/v1/user_prefs`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},body:JSON.stringify({user_id:user.id,roadmap_removed:roadmapRemoved})}).catch(()=>{});
+  },[roadmapRemoved]);
   function addManualTopicToday(sub,topic){
     const wt=getWeight(sub,topic,jeClass)||"M";
     const item={subject:sub,topic,weight:wt,pass:1,totalPasses:1,_manual:true};
@@ -2470,6 +2476,8 @@ function App(){
         if(row.target_hours){setTargetHours(row.target_hours);try{localStorage.setItem("nev_target_hours",String(row.target_hours));}catch(e){}}
         if(row.daily_hours){setDailyStudyHours(row.daily_hours);try{localStorage.setItem("nev_daily_hours",String(row.daily_hours));}catch(e){}}
         if(row.roadmap_answers){setRoadmapAnswers(row.roadmap_answers);try{localStorage.setItem("nev_roadmap_answers",JSON.stringify(row.roadmap_answers));}catch(e){}}
+        if(row.roadmap_manual_adds){setRoadmapManualAdds(row.roadmap_manual_adds);try{localStorage.setItem("nev_roadmap_manual_adds",JSON.stringify(row.roadmap_manual_adds));}catch(e){}}
+        if(row.roadmap_removed){setRoadmapRemoved(row.roadmap_removed);try{localStorage.setItem("nev_roadmap_removed",JSON.stringify(row.roadmap_removed));}catch(e){}}
         if(row.focus_mode){setRoadmapFocusMode(row.focus_mode);try{localStorage.setItem("nev_focus_mode",row.focus_mode);}catch(e){}}
         if(row.je_class&&row.exam_window){
           // Setup is complete — mark done so we don't show the setup screen again
