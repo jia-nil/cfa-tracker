@@ -2209,6 +2209,10 @@ function App(){
   const canvasRef=useRef(null);
   function setSyllabusChapter(sub,topic,status){
     setSyllabusStatus(prev=>({...prev,[sub+"|"+topic]:status}));
+    if(authSession?.access_token&&user?.id){
+      fetch(`${SB_URL}/rest/v1/nev_syllabus`,{method:"POST",headers:{"apikey":SB_ANON,"Authorization":`Bearer ${authSession.access_token}`,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+        body:JSON.stringify({user_id:user.id,subject:sub,topic:topic,status:status,updated_at:new Date().toISOString()})}).catch(()=>{});
+    }
     const key=sub+"|"+topic;
     if(status==="done"&&!revisionLog[key]){
       // First time this chapter is marked done and it isn't tracked for revision yet — start its clock.
@@ -2415,6 +2419,31 @@ function App(){
     SB_AUTH.loadData("user_goals",uid,token).then(d=>mergeIn(setGoals,d));
     SB_AUTH.loadData("user_mocks",uid,token).then(d=>mergeIn(setMocks,d));
     SB_AUTH.loadData("user_pyq",uid,token).then(d=>mergeIn(setPyqHistory,d));
+    // Roadmap tick-marks ("what to study today") and syllabus completion status were being
+    // written to nev_completed / nev_syllabus on every toggle, but never read back — so a topic
+    // ticked off on one device just sat in localStorage and never appeared on another device.
+    // Not using SB_AUTH.loadData here since these tables order by completed_at/updated_at,
+    // not created_at, so a plain select avoids a silent 400 from the wrong order column.
+    fetch(`${SB_URL}/rest/v1/nev_completed?user_id=eq.${uid}&select=item_key`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
+      .then(r=>r.ok?r.json():null)
+      .then(rows=>{
+        if(!rows)return;
+        setRoadmapDone(prev=>{
+          const next={...prev};
+          rows.forEach(r=>{if(r.item_key)next[r.item_key]=true;});
+          return next;
+        });
+      }).catch(()=>{});
+    fetch(`${SB_URL}/rest/v1/nev_syllabus?user_id=eq.${uid}&select=subject,topic,status`,{headers:{"apikey":SB_ANON,"Authorization":`Bearer ${token}`}})
+      .then(r=>r.ok?r.json():null)
+      .then(rows=>{
+        if(!rows)return;
+        setSyllabusStatus(prev=>{
+          const next={...prev};
+          rows.forEach(r=>{if(r.subject&&r.topic)next[r.subject+"|"+r.topic]=r.status;});
+          return next;
+        });
+      }).catch(()=>{});
     // Activity/streak tracking — merge in server-known active days, then mark today active
     // both locally and server-side. If the "user_activity" table isn't set up yet, this fails
     // silently and the app just falls back to local-only tracking on this device.
@@ -3810,7 +3839,7 @@ function App(){
                             <div style={{height:"100%",width:pct+"%",background:pct>=70?d.a2:d.gold,borderRadius:3,transition:"width .6s"}}/>
                           </div>
                           {notDone.length>0&&<div>
-                            <div style={{fontSize:11,color:d.t3,marginBottom:8}}>high-weight topics not yet studied:</div>
+                            <div style={{fontSize:11,color:d.t3,marginBottom:8}}>high-weight topics not yet completed:</div>
                             {notDone.map((x,i)=>(
                               <div key={i} style={{display:"flex",gap:8,padding:"5px 0",borderBottom:`1px solid ${d.b}44`,fontSize:12,color:d.t2,flexWrap:"wrap"}}>
                                 <span style={{color:SUBJECT_COLORS[x.sub]||d.a1,fontWeight:600,minWidth:80,flexShrink:0}}>{x.sub}</span>
