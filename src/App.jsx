@@ -3371,7 +3371,17 @@ function App(){
                   // passes of a topic share the same block size) — not the merged total, which
                   // would double-count once several of today's passes get folded into one card.
                   const cumulativeMins=(last.pass||1)*(last.durationMins||30);
-                  return {...last,durationMins:totalDuration,_cumulativeMins:cumulativeMins,_mergedPasses:sorted};
+                  // Actual minutes logged TODAY for this exact subject+topic (Sessions tab manual
+                  // log, timer, whatever) — pulled straight from `sessions`, not from the plan.
+                  // priorBaseline = cumulative total up to (but not including) today's block(s),
+                  // so today's real progress can be laid on top of it instead of the planned amount.
+                  const sessionMinsToday=sessions.filter(s=>s.date===today()&&s.subject===last.subject&&s.topic===last.topic).reduce((a,s)=>a+(s.duration||0),0);
+                  const priorBaseline=Math.max(0,cumulativeMins-totalDuration);
+                  const topicCapMins=last.topicHours?last.topicHours*60:Infinity;
+                  const actualCumulativeMins=Math.min(topicCapMins,priorBaseline+sessionMinsToday);
+                  const remainingMins=Math.max(0,totalDuration-sessionMinsToday);
+                  return {...last,durationMins:totalDuration,_cumulativeMins:cumulativeMins,_mergedPasses:sorted,
+                    _sessionMinsToday:sessionMinsToday,_actualCumulativeMins:actualCumulativeMins,_remainingMins:remainingMins};
                 });
               })();
               const isStudyDay=(studyDays||[]).includes(weekdayIndex(today()));
@@ -3546,13 +3556,17 @@ function App(){
                                 <div style={{flex:1,maxWidth:100,height:4,background:d.b,borderRadius:2,overflow:"hidden"}}>
                                   <div style={{height:"100%",width:`${(item.pass/item.totalPasses)*100}%`,background:d.a1,borderRadius:2}}/>
                                 </div>
-                                <span style={{fontSize:9.5,color:d.t4}}>{Math.round(((item._cumulativeMins!=null?item._cumulativeMins:item.pass*(item.durationMins||30))/60)*10)/10} hour of {item.topicHours||"?"} hour</span>
+                                <span style={{fontSize:9.5,color:d.t4}}>{Math.round(((item._actualCumulativeMins!=null?item._actualCumulativeMins:item._cumulativeMins!=null?item._cumulativeMins:item.pass*(item.durationMins||30))/60)*10)/10} hour of {item.topicHours||"?"} hour</span>
                               </div>
                             )}
                             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                               <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{item.subject}</span>
                               <span style={{fontSize:10,color:d.t4}}>{item.weight==="H"?"● high weight":item.weight==="M"?"● medium weight":"● lower weight"}</span>
-                              {item.durationMins&&<span style={{fontSize:10,color:d.a2,fontWeight:600}}>~{item.durationMins}min</span>}
+                              {item._sessionMinsToday>0
+                                ?(item._remainingMins>0
+                                    ?<span style={{fontSize:10,color:d.gold,fontWeight:600}}>{item._sessionMinsToday}min logged · ~{item._remainingMins}min left</span>
+                                    :<span style={{fontSize:10,color:d.a2,fontWeight:600}}>✓ target hit ({item._sessionMinsToday}min logged)</span>)
+                                :(item.durationMins&&<span style={{fontSize:10,color:d.a2,fontWeight:600}}>~{item.durationMins}min</span>)}
                               {item._manual&&<span style={{fontSize:10,color:d.a1}}>+ added by you</span>}
                               {item._overdue&&!item._manual&&<span style={{fontSize:10,color:d.gold}}>carried over</span>}
                             </div>
@@ -3597,7 +3611,10 @@ function App(){
                       .filter(([,entry])=>entry.nextRevisions?.length>0&&entry.nextRevisions[0]<=today())
                       .map(([key,entry])=>{
                         const [sub,topic]=key.split("|");
-                        return{sub,topic,key,overdueDays:daysBetween(entry.nextRevisions[0],today()),weight:getWeight(sub,topic,jeClass)||"M"};
+                        const weight=getWeight(sub,topic,jeClass)||"M";
+                        // Quick-revision suggestion, not a full re-study block — scaled by weight.
+                        const suggestedMins=weight==="H"?20:weight==="M"?15:10;
+                        return{sub,topic,key,overdueDays:daysBetween(entry.nextRevisions[0],today()),weight,suggestedMins};
                       })
                       .sort((a,b)=>({H:0,M:1,L:2}[a.weight]-{H:0,M:1,L:2}[b.weight])||b.overdueDays-a.overdueDays);
                     if(dueToday.length===0) return null;
@@ -3616,6 +3633,7 @@ function App(){
                                 <div style={{display:"flex",gap:6,alignItems:"center",marginTop:3,flexWrap:"wrap"}}>
                                   <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:col+"18",color:col,fontWeight:700}}>{r.sub}</span>
                                   <span style={{fontSize:10,color:r.overdueDays>0?d.gold:d.t4}}>{r.overdueDays>0?`${r.overdueDays}d overdue`:"due today"}</span>
+                                  <span style={{fontSize:10,color:d.a2,fontWeight:600}}>~{r.suggestedMins}min</span>
                                 </div>
                               </div>
                               <button onClick={()=>markRevisionDone(r.sub,r.topic)}
