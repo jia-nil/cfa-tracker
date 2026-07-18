@@ -6,7 +6,8 @@ const SB_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // ── Supabase Auth helpers ─────────────────────────────────────────────────────
 const SB_AUTH = {
   async signUp(email, password) {
-    const r = await fetch(`${SB_URL}/auth/v1/signup`, {
+    const redirectTo = typeof window!=="undefined" ? window.location.origin : undefined;
+    const r = await fetch(`${SB_URL}/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTo||"")}`, {
       method:"POST",
       headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
       body:JSON.stringify({email,password}),
@@ -22,25 +23,18 @@ const SB_AUTH = {
       body:JSON.stringify({email,password}),
     });
     const d = await r.json();
-    if(!r.ok) {
-      // Supabase returns this specific message when the account exists but the
-      // verification link hasn't been clicked yet — flag it distinctly so the UI
-      // can offer a "resend email" action instead of a generic error.
-      const msg = d.error_description||d.msg||d.error||"Login failed";
-      const err = new Error(msg);
-      if(/email.*not.*confirmed/i.test(msg)) err.code = "email_not_confirmed";
-      throw err;
-    }
+    if(!r.ok) throw new Error(d.error_description||d.msg||"Login failed");
     return d;
   },
-  async resendConfirmation(email) {
-    const r = await fetch(`${SB_URL}/auth/v1/resend`, {
+  async resend(email) {
+    const redirectTo = typeof window!=="undefined" ? window.location.origin : undefined;
+    const r = await fetch(`${SB_URL}/auth/v1/resend?redirect_to=${encodeURIComponent(redirectTo||"")}`, {
       method:"POST",
       headers:{"apikey":SB_ANON,"Content-Type":"application/json"},
       body:JSON.stringify({type:"signup", email}),
     });
     const d = await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(d.error_description||d.msg||"couldn't resend — try again in a moment.");
+    if(!r.ok) throw new Error(d.error_description||d.msg||"could not resend the email — try again in a bit.");
     return d;
   },
   async signOut(accessToken) {
@@ -964,12 +958,12 @@ function AuthScreen({onAuth}) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  // "check-email" screen state — shown after signup when Supabase requires the
-  // user to click a verification link before they can log in, and reused when
-  // an existing account tries to log in before confirming.
-  const [pendingVerifyEmail, setPendingVerifyEmail] = useState(null);
-  const [resendState, setResendState] = useState("idle"); // idle | sending | sent
+  // Set once sign-up has actually sent a confirmation email (or a login attempt hits an
+  // unconfirmed account) — while this is set we show the "check your inbox" screen instead
+  // of the form.
+  const [verifyEmail, setVerifyEmail] = useState(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendMsg, setResendMsg] = useState("");
 
   useEffect(()=>{
     if(resendCooldown<=0)return;
@@ -978,15 +972,14 @@ function AuthScreen({onAuth}) {
   },[resendCooldown]);
 
   async function handleResend(){
-    if(!pendingVerifyEmail||resendCooldown>0)return;
-    setResendState("sending"); setError("");
+    if(resendCooldown>0||!verifyEmail)return;
+    setResendMsg("");
     try{
-      await SB_AUTH.resendConfirmation(pendingVerifyEmail);
-      setResendState("sent");
+      await SB_AUTH.resend(verifyEmail);
+      setResendMsg("sent! check your inbox (and spam folder).");
       setResendCooldown(30);
     }catch(e){
-      setResendState("idle");
-      setError(e.message);
+      setResendMsg(e.message);
     }
   }
 
@@ -1015,9 +1008,16 @@ function AuthScreen({onAuth}) {
     try {
       if(mode==="signup") {
         const d = await SB_AUTH.signUp(email, password);
-        // If "Confirm email" is off in the Supabase project, signUp returns a live
-        // session straight away — log the user in immediately in that case.
-        if(d.access_token){
+        // Supabase returns a 200 with an empty identities array (rather than an error) when
+        // the email is already registered — this avoids leaking which emails exist, but means
+        // we have to check for it ourselves instead of catching a rejected promise.
+        if(d?.user && Array.isArray(d.user.identities) && d.user.identities.length===0){
+          setError("that email is already registered — log in instead.");
+          setMode("login"); setLoading(false); return;
+        }
+        if(d?.access_token){
+          // Email confirmation is turned off for this project, so signup returns a live
+          // session directly — sign the person in right away, no verification needed.
           const stored = {
             access_token:d.access_token, refresh_token:d.refresh_token,
             expires_at:Date.now()+(d.expires_in||3600)*1000, user:d.user,
@@ -1026,12 +1026,8 @@ function AuthScreen({onAuth}) {
           onAuth(stored);
           setLoading(false); return;
         }
-        // A user object with no identities means this email is already registered
-        // and confirmed — Supabase intentionally doesn't error here to avoid leaking
-        // which emails exist, so we can't fully distinguish it, but signUp() itself
-        // will already have thrown for most duplicate cases.
-        setPendingVerifyEmail(email);
-        setResendState("idle"); setResendCooldown(0);
+        // Normal path: a confirmation email was just sent, no session yet.
+        setVerifyEmail(email);
         setLoading(false); return;
       }
       const session = await SB_AUTH.signInEmail(email, password);
@@ -1042,14 +1038,8 @@ function AuthScreen({onAuth}) {
       localStorage.setItem("nev_auth", JSON.stringify(stored));
       onAuth(stored);
     } catch(e) {
-      if(e.code==="email_not_confirmed"){
-        // Existing account, right password, but the verification link was never
-        // clicked — route them to the same "check your email" screen with resend.
-        setPendingVerifyEmail(email);
-        setResendState("idle"); setResendCooldown(0);
-      } else {
-        setError(e.message);
-      }
+      if(/email not confirmed/i.test(e.message||"")) setVerifyEmail(email);
+      else setError(e.message);
     }
     setLoading(false);
   }
@@ -1060,6 +1050,49 @@ function AuthScreen({onAuth}) {
     fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box",
     WebkitAppearance:"none",
   };
+
+  if(verifyEmail){
+    return (
+      <div style={{
+        position:"fixed", top:0, left:0, right:0, bottom:0, zIndex:9999,
+        background:"#09212D", display:"flex", alignItems:"center",
+        justifyContent:"center", padding:"20px 16px", boxSizing:"border-box",
+        fontFamily:"'DM Sans',sans-serif", overflowY:"auto",
+      }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+        <div style={{width:"100%", maxWidth:380, margin:"auto", textAlign:"center"}}>
+          <div style={{fontSize:44, marginBottom:14}}>📬</div>
+          <div style={{fontSize:22, fontWeight:700, color:"#F2E6BF", fontFamily:"'DM Serif Display',serif", marginBottom:10}}>
+            check your inbox
+          </div>
+          <div style={{fontSize:13.5, color:"#9FB4BE", lineHeight:1.6, marginBottom:6}}>
+            we sent a verification link to
+          </div>
+          <div style={{fontSize:14, color:"#F2E6BF", fontWeight:600, marginBottom:20, wordBreak:"break-all"}}>
+            {verifyEmail}
+          </div>
+          <div style={{fontSize:12.5, color:"#7A93A0", lineHeight:1.6, marginBottom:24}}>
+            click the link to verify your email — this page will log you in automatically. can't find it? check spam, or resend below.
+          </div>
+          {resendMsg&&<div style={{fontSize:12, color:resendMsg.startsWith("sent")?"#4d9e78":"#e08a6a", marginBottom:14}}>{resendMsg}</div>}
+          <button onClick={handleResend} disabled={resendCooldown>0}
+            style={{width:"100%", padding:"12px", borderRadius:8, background:"#5AA3AD",
+              color:"#09212D", border:"none", fontSize:14, fontWeight:700,
+              cursor:resendCooldown>0?"not-allowed":"pointer", opacity:resendCooldown>0?.6:1,
+              fontFamily:"inherit", boxSizing:"border-box", marginBottom:14}}>
+            {resendCooldown>0?`resend in ${resendCooldown}s`:"resend verification email"}
+          </button>
+          <div style={{fontSize:12, color:"#7A93A0"}}>
+            wrong email?{" "}
+            <span style={{color:"#5AA3AD", cursor:"pointer"}}
+              onClick={()=>{setVerifyEmail(null);setResendMsg("");setResendCooldown(0);setMode("signup");}}>
+              start over
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -1077,37 +1110,6 @@ function AuthScreen({onAuth}) {
           </div>
           <div style={{fontSize:12, color:"#7A93A0", marginTop:4}}>your CFA exam co-pilot.</div>
         </div>
-
-        {pendingVerifyEmail ? (
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:40, marginBottom:14}}>📩</div>
-            <div style={{fontSize:16, fontWeight:700, color:"#F2E6BF", marginBottom:8, fontFamily:"'DM Serif Display',serif"}}>
-              verify your email
-            </div>
-            <div style={{fontSize:13, color:"#B7C6CD", lineHeight:1.6, marginBottom:22}}>
-              we sent a confirmation link to<br/>
-              <span style={{color:"#F2E6BF", fontWeight:600}}>{pendingVerifyEmail}</span><br/>
-              click it to activate your account, then come back and log in. check spam if you don't see it.
-            </div>
-            {error&&<div style={{fontSize:12, color:"#e08a6a", marginBottom:14, lineHeight:1.5}}>{error}</div>}
-            <button onClick={handleResend} disabled={resendState==="sending"||resendCooldown>0}
-              style={{width:"100%", padding:"12px", borderRadius:8, background:"transparent",
-                color:"#5AA3AD", border:"1px solid #5AA3AD", fontSize:13, fontWeight:600,
-                cursor:(resendState==="sending"||resendCooldown>0)?"not-allowed":"pointer",
-                opacity:(resendState==="sending"||resendCooldown>0)?.6:1,
-                fontFamily:"inherit", boxSizing:"border-box", marginBottom:14}}>
-              {resendState==="sending"?"sending...":resendCooldown>0?`resend in ${resendCooldown}s`:resendState==="sent"?"sent — resend again":"resend verification email"}
-            </button>
-            <div style={{fontSize:12, color:"#7A93A0"}}>
-              already verified?{" "}
-              <span style={{color:"#5AA3AD", cursor:"pointer"}}
-                onClick={()=>{setPendingVerifyEmail(null);setMode("login");setError("");setPassword("");}}>
-                log in
-              </span>
-            </div>
-          </div>
-        ) : (
-        <>
         <button onClick={()=>window.location.href=`${SB_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`}
           style={{width:"100%", padding:"12px", borderRadius:8, background:"#fff", color:"#132A36",
             border:"none", fontSize:14, fontWeight:600, cursor:"pointer", marginBottom:14,
@@ -1145,8 +1147,6 @@ function AuthScreen({onAuth}) {
             {mode==="login"?"sign up":"log in"}
           </span>
         </div>
-        </>
-        )}
       </div>
     </div>
   );
